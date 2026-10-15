@@ -1,0 +1,36 @@
+---
+title: Getting started
+---
+
+# Getting started
+
+Install the client with `pip install miniclient`.
+
+## Connect
+
+Use `Client` and `select_graph()` to open a graph.
+
+```python
+from miniclient import Client
+
+db = Client(host="localhost", port=6379)
+g = db.select_graph("social")
+g.query("CREATE (:Person {name: 'Ann'})")
+```
+
+## Read-only queries
+
+Use `Graph.ro_query` for reads. See [Connect](#connect).
+
+<Note>
+Read-only queries never write.
+</Note>
+
+```python
+result = g.ro_query("MATCH (p:Person) RETURN p.name")
+print(result)
+```
+
+## Listing graphs
+
+`list_graphs()` returns every graph name.

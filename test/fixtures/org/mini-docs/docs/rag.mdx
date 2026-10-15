@@ -1,0 +1,22 @@
+# RAG with minisdk
+
+Before you start, read [getting started](./getting-started.mdx#connect).
+
+## Ask a question
+
+```python
+import asyncio
+from minisdk import Rag
+
+async def main():
+    rag = Rag("kg")
+    print(await rag.ask("who"))
+
+asyncio.run(main())
+```
+
+## Configuration
+
+```bash
+pip install minisdk
+```

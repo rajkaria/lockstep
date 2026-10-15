@@ -1,0 +1,7 @@
+[project]
+name = "minisdk"
+version = "0.3.0"
+dependencies = [
+    "miniclient>=1.0",
+    "pydantic>=2",
+]
