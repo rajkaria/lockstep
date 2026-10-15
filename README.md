@@ -14,7 +14,7 @@ npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
 | **Built and run** (on the author's machine, against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
 | **Built, not run with a real model** | Agent mode (Claude chooses the tools): the loop is tested with a scripted model and the request shape against a local fake API; no paid model call has been made yet. The GitHub Action and the Docker image are written but not exercised (no Docker here). |
 | **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
-| **Live** | [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app) on Vercel, deployed from `main`. Until a hosted FalkorDB is attached it serves a labelled snapshot of the graph: the three preloaded PRs open their recorded checks (traces, evidence paths, example runs). The `lockstep-docs` npm package is not published yet. |
+| **Live** | [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Paste any public pull request from the three repositories for a graph-mode check; examples are not executed there (no sandbox), so their before/after results come from runs recorded on the graph. If the database is unreachable the page falls back to a labelled snapshot. The `lockstep-docs` npm package is not published yet. |
 | **Designed** | Issue/discussion → symbol links ("asked about but undocumented"); hosted multi-org service. See [VISION.md](VISION.md). |
 
 Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB), tracks 01 and 03.
@@ -37,8 +37,8 @@ Every number here comes from [docs/FACTS.md](docs/FACTS.md), generated from the 
   written on a fresh server, before and after the PR** (`Invalid graph operation on empty key`: it explains a query on
   a graph the page never creates). The PR didn't break it; it was already broken.
 - **[falkordb-py#276](https://github.com/FalkorDB/falkordb-py/pull/276)** changed 4 asyncio symbols that reach
-  **44 doc sections, 42 of them in other repositories**, through paths like
-  `AsyncGraph.query ← FalkorDBConnection.query (GraphRAG-SDK) ← GraphStore.delete_document_node ← GraphRAG.delete_document ← GraphRAG-SDK README`.
+  **43 doc sections, 41 of them in other repositories**, through paths like
+  `AsyncGraph.query ← FalkorDBConnection.query (GraphRAG-SDK) ← GraphStore.delete_document_chunks ← GraphRAG.delete_document ← GraphRAG-SDK README`.
   Three of the reachable examples were run before and after: all pass.
 
 ## Why the graph is the product
@@ -60,7 +60,11 @@ RETURN d.id, length(p) AS hops, [n IN nodes(p) | coalesce(n.qualname, n.id)] AS 
   a recursive join per hop and per repository; a vector store cannot express "reaches". On the indexed graph the
   impact query runs in about a millisecond server-side ([FACTS](docs/FACTS.md#impact-query-timing-server-side-falkordb)).
 - **Clearance** is a proof of absence — the same pattern negated: changed symbols with *no* doc within 3 hops. Without
-  the graph there is nothing to prove absence against.
+  the graph there is nothing to prove absence against. It counts bound paths (`OPTIONAL MATCH p = … count(p) = 0`)
+  rather than using `WHERE NOT (pattern)`: on FalkorDB 4.18 the anonymous variable-length form can miss callers
+  reachable along two routes of different length, and "proved" a symbol undocumented when a doc was three calls
+  away. [test/traversal.test.ts](test/traversal.test.ts) reproduces it with the shape found in GraphRAG-SDK; every
+  query binds its paths, and a test keeps it that way.
 - **Decisions** govern symbols transitively (`GOVERNS` + `CALLS*0..2`) and resolve through `SUPERSEDES` chains, so a
   maintainer's decision made on one function covers the docs of everything that calls it.
 - **Ranking** runs `algo.pageRank` over the docs' `LINKS_TO` graph, so the most-read stale page is fixed first.
@@ -210,7 +214,10 @@ ORDER BY hops, repo, doc
 
 ```cypher
 MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
-WHERE c.kind <> 'added' AND NOT (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+WHERE c.kind <> 'added'
+OPTIONAL MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+WITH s, c, count(p) AS reach
+WHERE reach = 0
 RETURN s.qualname AS symbol, s.name AS name, s.repo AS repo, c.kind AS change, s.visibility AS visibility
 ORDER BY symbol
 ```
@@ -277,7 +284,7 @@ RETURN e.id AS id, e.lang AS lang, e.code AS code, e.repo AS repo, e.path AS pat
 ```cypher
 MATCH (r:Repo)
 WHERE r.name IN $repos
-OPTIONAL MATCH (r)-[:DEPENDS_ON*1..3]->(d:Repo)
+OPTIONAL MATCH dep = (r)-[:DEPENDS_ON*1..3]->(d:Repo)
 WITH collect(DISTINCT r) + collect(DISTINCT d) AS repos
 UNWIND repos AS repo
 WITH DISTINCT repo
@@ -291,14 +298,14 @@ ORDER BY repo
 ```cypher
 MATCH (d:DocSection {id: $id})
 OPTIONAL MATCH (dec0:Decision)-[:GOVERNS]->(d)
-OPTIONAL MATCH (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
-OPTIONAL MATCH (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
+OPTIONAL MATCH p1 = (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
+OPTIONAL MATCH p2 = (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
 WITH collect(DISTINCT {dec: dec0, via: d.heading_path}) + collect(DISTINCT {dec: dec1, via: g1.qualname})
      + collect(DISTINCT {dec: dec2, via: g2.qualname}) AS hits
 UNWIND hits AS hit
 WITH hit.dec AS dec, hit.via AS via
 WHERE dec IS NOT NULL
-OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+OPTIONAL MATCH chain = (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
 WITH coalesce(newer, dec) AS current, dec AS matched, via
 WHERE current.status = 'active'
 RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
@@ -308,8 +315,8 @@ RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS so
 **`decisionsForSymbol`** — Active decisions governing a symbol or anything it calls within 2 hops; superseded decisions resolve to their successor.
 
 ```cypher
-MATCH (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
-OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+MATCH p = (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
+OPTIONAL MATCH chain = (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
 WITH coalesce(newer, dec) AS current, dec AS matched, g.qualname AS via
 WHERE current.status = 'active'
 RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,

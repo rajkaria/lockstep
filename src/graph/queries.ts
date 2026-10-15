@@ -2,6 +2,10 @@
  * Every Cypher statement Lockstep sends to FalkorDB lives in this file, named.
  * The README's query section is generated from it, and a test keeps them in sync,
  * so what the docs claim is exactly what runs.
+ *
+ * Every variable-length pattern binds a path variable (`p = (a)<-[:CALLS*0..3]-(b)`), and none sits in a WHERE
+ * pattern predicate: FalkorDB 4.18 can drop nodes reachable along two routes from an anonymous variable-length
+ * pattern, which would turn clearance into a false proof of absence (test/traversal.test.ts).
  */
 export interface NamedQuery {
   name: string;
@@ -223,7 +227,10 @@ export const impact = q('tool', 'impact', 'Every doc section and code example a 
 
 export const clearance = q('tool', 'clearance', 'Proof of absence: changed symbols with no doc section or example within 3 call hops in any repository.', `
   MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
-  WHERE c.kind <> 'added' AND NOT (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+  WHERE c.kind <> 'added'
+  OPTIONAL MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+  WITH s, c, count(p) AS reach
+  WHERE reach = 0
   RETURN s.qualname AS symbol, s.name AS name, s.repo AS repo, c.kind AS change, s.visibility AS visibility
   ORDER BY symbol
 `);
@@ -280,7 +287,7 @@ export const exampleForRun = q('tool', 'exampleForRun', 'A code example, the rep
 export const installSet = q('tool', 'installSet', 'Repositories to install for a run: the given ones plus their in-org dependencies (DEPENDS_ON), code repositories only.', `
   MATCH (r:Repo)
   WHERE r.name IN $repos
-  OPTIONAL MATCH (r)-[:DEPENDS_ON*1..3]->(d:Repo)
+  OPTIONAL MATCH dep = (r)-[:DEPENDS_ON*1..3]->(d:Repo)
   WITH collect(DISTINCT r) + collect(DISTINCT d) AS repos
   UNWIND repos AS repo
   WITH DISTINCT repo
@@ -314,14 +321,14 @@ export const linkRunToPr = q('memory', 'linkRunToPr', 'Attach a run to the pull 
 export const decisionsForSection = q('tool', 'decisionsForSection', 'Active decisions governing a doc section directly, or any symbol its prose or examples reach within 2 call hops; superseded decisions resolve to their successor.', `
   MATCH (d:DocSection {id: $id})
   OPTIONAL MATCH (dec0:Decision)-[:GOVERNS]->(d)
-  OPTIONAL MATCH (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
-  OPTIONAL MATCH (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
+  OPTIONAL MATCH p1 = (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
+  OPTIONAL MATCH p2 = (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
   WITH collect(DISTINCT {dec: dec0, via: d.heading_path}) + collect(DISTINCT {dec: dec1, via: g1.qualname})
        + collect(DISTINCT {dec: dec2, via: g2.qualname}) AS hits
   UNWIND hits AS hit
   WITH hit.dec AS dec, hit.via AS via
   WHERE dec IS NOT NULL
-  OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+  OPTIONAL MATCH chain = (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
   WITH coalesce(newer, dec) AS current, dec AS matched, via
   WHERE current.status = 'active'
   RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
@@ -329,8 +336,8 @@ export const decisionsForSection = q('tool', 'decisionsForSection', 'Active deci
 `);
 
 export const decisionsForSymbol = q('tool', 'decisionsForSymbol', 'Active decisions governing a symbol or anything it calls within 2 hops; superseded decisions resolve to their successor.', `
-  MATCH (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
-  OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+  MATCH p = (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
+  OPTIONAL MATCH chain = (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
   WITH coalesce(newer, dec) AS current, dec AS matched, g.qualname AS via
   WHERE current.status = 'active'
   RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
@@ -539,7 +546,7 @@ export const factsDependsOn = q('report', 'factsDependsOn', 'Repository dependen
 
 export const factsCrossRepoDocPaths = q('report', 'factsCrossRepoDocPaths', 'Symbol → doc pairs connected through ≤ 3 call hops where the doc lives in another repository.', `
   MATCH (s:Symbol {status: 'live'})
-  MATCH (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+  MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
   WHERE (d:DocSection OR d:CodeExample) AND s.repo <> d.repo
   RETURN count(DISTINCT s.id + '|' + d.id) AS n
 `);
@@ -549,9 +556,9 @@ export const factsSamplePaths = q('report', 'factsSamplePaths', 'For public symb
   WHERE NOT s.qualname CONTAINS '._'
   MATCH p = (s)<-[:CALLS*1..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
   WHERE (d:DocSection OR d:CodeExample) AND s.repo <> t.repo
-  WITH s, d, p
-  ORDER BY length(p) DESC, d.id
-  WITH s, collect({doc: d.id, hops: length(p), path: [n IN nodes(p) | coalesce(n.qualname, n.id)]})[0] AS best
+  WITH s, d, p, [n IN nodes(p) | coalesce(n.qualname, n.id)] AS names
+  ORDER BY length(p) DESC, d.id, reduce(k = '', x IN names | k + x + ' ')
+  WITH s, collect({doc: d.id, hops: length(p), path: names})[0] AS best
   RETURN s.qualname AS symbol, best.doc AS doc, best.hops AS hops, best.path AS path
   ORDER BY hops DESC, symbol
   LIMIT 5
@@ -562,7 +569,7 @@ export const factsPullRequests = q('report', 'factsPullRequests', 'Pull requests
   OPTIONAL MATCH (pr)<-[c:CHANGED_IN]-(s:Symbol)
   WHERE c.kind <> 'added'
   WITH pr, collect(s) AS changed
-  OPTIONAL MATCH (pr)<-[c2:CHANGED_IN]-(s2:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+  OPTIONAL MATCH p = (pr)<-[c2:CHANGED_IN]-(s2:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
   WHERE c2.kind <> 'added' AND (d:DocSection OR d:CodeExample) AND d.status = 'live'
   OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
   WITH pr, changed, collect(DISTINCT coalesce(sec.id, d.id)) AS sections,

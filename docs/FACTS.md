@@ -1,6 +1,6 @@
 # FACTS
 
-Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-15T16:44:25.005Z (FalkorDB 4.18.3).
+Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-15T19:31:45.433Z (FalkorDB 4.22.0).
 Every number in the README comes from this file. Regenerate it; never edit it by hand.
 
 ## Repositories
@@ -15,28 +15,28 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 | Nodes (live) | Count |
 |---|---:|
-| Check | 10 |
+| Check | 4 |
 | CodeExample | 1835 |
 | DocSection | 3138 |
 | File | 329 |
 | PullRequest | 4 |
 | Repo | 3 |
-| Run | 14 |
+| Run | 17 |
 | Symbol | 1298 |
 
 | Edges | Count |
 |---|---:|
-| AT | 14 |
+| AT | 17 |
 | CALLS | 1708 |
-| CHANGED_IN | 7 |
-| DEFINED_IN | 6285 |
+| CHANGED_IN | 9 |
+| DEFINED_IN | 6271 |
 | DEPENDS_ON | 3 |
-| FOR | 10 |
+| FOR | 4 |
 | IN_REPO | 329 |
-| IN_SECTION | 1829 |
+| IN_SECTION | 1824 |
 | LINKS_TO | 644 |
 | MENTIONS | 594 |
-| OF | 14 |
+| OF | 17 |
 | USES | 716 |
 
 ## Resolution quality
@@ -44,7 +44,7 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 - CALLS edges: 1708 (1655 exact through imports and types, 53 by name inside an imported repository)
 - CALLS edges that cross a repository boundary: 5
 - USES edges from code examples: 716 (633 exact, 83 by name)
-- Symbol → doc paths (≤ 3 call hops) that cross a repository boundary: 1242
+- Symbol → doc paths (≤ 3 call hops) that cross a repository boundary: 1257
 
 ## Repository dependencies
 
@@ -54,25 +54,27 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 ## Sample cross-repository paths
 
-- 4 hops: `falkordb.asyncio.falkordb.FalkorDB` ← `graphrag_sdk.core.connection.FalkorDBConnection._ensure_client` ← `graphrag_sdk.core.connection.FalkorDBConnection.query` ← `graphrag_sdk.storage.vector_store.VectorStore.embed_relationships` ← `FalkorDB/GraphRAG-SDK:docs/api-reference.mdx#finalize`
+- 4 hops: `falkordb.asyncio.falkordb.FalkorDB` ← `graphrag_sdk.core.connection.FalkorDBConnection._ensure_client` ← `graphrag_sdk.core.connection.FalkorDBConnection.query` ← `graphrag_sdk.storage.vector_store.VectorStore.backfill_entity_embeddings` ← `FalkorDB/GraphRAG-SDK:docs/api-reference.mdx#finalize`
 - 4 hops: `falkordb.asyncio.falkordb.FalkorDB.select_graph` ← `graphrag_sdk.core.connection.FalkorDBConnection._ensure_client` ← `graphrag_sdk.core.connection.FalkorDBConnection.query` ← `graphrag_sdk.storage.vector_store.VectorStore.backfill_entity_embeddings` ← `FalkorDB/GraphRAG-SDK:docs/api-reference.mdx#finalize`
-- 4 hops: `falkordb.asyncio.graph.AsyncGraph.query` ← `graphrag_sdk.core.connection.FalkorDBConnection.query` ← `graphrag_sdk.storage.graph_store.GraphStore.delete_document_node` ← `graphrag_sdk.api.main.GraphRAG.delete_document` ← `FalkorDB/GraphRAG-SDK:README.md#examples`
+- 4 hops: `falkordb.asyncio.graph.AsyncGraph.query` ← `graphrag_sdk.core.connection.FalkorDBConnection.query` ← `graphrag_sdk.storage.graph_store.GraphStore.delete_document_chunks` ← `graphrag_sdk.api.main.GraphRAG.delete_document` ← `FalkorDB/GraphRAG-SDK:README.md#examples`
 
 ## Pull requests checked
 
 | Pull request | Changed symbols | Doc sections reached (≤ 3 hops) | …in other repositories |
 |---|---:|---:|---:|
+| [fix(ingestion): preserve document structure on update](https://github.com/FalkorDB/GraphRAG-SDK/pull/336) | 2 | 73 | 3 |
 | [fix: only forward accepted kwargs from Is_Cluster to redis.Redis](https://github.com/FalkorDB/falkordb-py/pull/262) | 1 | 1 | 0 |
 | [test: assert the client parses execution plans, and fix a plan parser bug](https://github.com/FalkorDB/falkordb-py/pull/267) | 2 | 3 | 2 |
-| [fix(asyncio): prevent connection pool kwargs mutation and await schema refresh](https://github.com/FalkorDB/falkordb-py/pull/276) | 4 | 44 | 42 |
-| [feat: add optional hiredis extra for faster reply parsing](https://github.com/FalkorDB/falkordb-py/pull/304) | 0 | 0 | 0 |
+| [fix(asyncio): prevent connection pool kwargs mutation and await schema refresh](https://github.com/FalkorDB/falkordb-py/pull/276) | 4 | 43 | 41 |
 
 ## Example runs (sandbox)
 
-14 recorded runs: 10 pass, 4 fail.
+17 recorded runs: 3 skipped, 10 pass, 4 fail.
 
 | Example | Side | Status | Error / reason | Installed |
 |---|---|---|---|---|
+| [FalkorDB/GraphRAG-SDK:docs/api-reference.mdx:52](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/api-reference.mdx#L716) | before of FalkorDB/GraphRAG-SDK/pull/336 | skipped | reads a local file the docs do not provide (employees.csv) | FalkorDB/GraphRAG-SDK@d703d4a, FalkorDB/falkordb-py@31f63f4 |
+| [FalkorDB/GraphRAG-SDK:graphrag_sdk/examples/07_incremental_updates.py:0](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/graphrag_sdk/examples/07_incremental_updates.py#L1) | before of FalkorDB/GraphRAG-SDK/pull/336 | skipped | needs an LLM provider (OPENAI_API_KEY); Lockstep does not hold provider keys | FalkorDB/GraphRAG-SDK@d703d4a, FalkorDB/falkordb-py@31f63f4 |
 | [FalkorDB/docs:agentic-memory/graphiti-mcp-server.mdx:19](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/agentic-memory/graphiti-mcp-server.mdx#L384) | after of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@2a970dc |
 | [FalkorDB/docs:agentic-memory/graphiti-mcp-server.mdx:19](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/agentic-memory/graphiti-mcp-server.mdx#L384) | before of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@e307df3 |
 | [FalkorDB/docs:commands/graph.config-get.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.config-get.mdx#L16) | after of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@2a970dc |
@@ -83,6 +85,7 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | [FalkorDB/docs:commands/graph.explain.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.explain.mdx#L17) | before of FalkorDB/falkordb-py/pull/267 | fail | redis.exceptions.ResponseError: Invalid graph operation on empty key | FalkorDB/falkordb-py@031eb04 |
 | [FalkorDB/docs:commands/graph.profile.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.profile.mdx#L22) | after of FalkorDB/falkordb-py/pull/267 | pass |  | FalkorDB/falkordb-py@a9c7510 |
 | [FalkorDB/docs:commands/graph.profile.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.profile.mdx#L22) | before of FalkorDB/falkordb-py/pull/267 | pass |  | FalkorDB/falkordb-py@031eb04 |
+| [FalkorDB/docs:genai-tools/graphrag-sdk.mdx:1](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/genai-tools/graphrag-sdk.mdx#L25) | before of FalkorDB/GraphRAG-SDK/pull/336 | skipped | needs an LLM provider (LiteLLM(); Lockstep does not hold provider keys | FalkorDB/GraphRAG-SDK@d703d4a, FalkorDB/falkordb-py@31f63f4 |
 | [FalkorDB/falkordb-py:README.md:4](https://github.com/FalkorDB/falkordb-py/blob/31f63f44a5745b9bec65969a1db706906718cb82/README.md#L67) | after of FalkorDB/falkordb-py/pull/267 | pass |  | FalkorDB/falkordb-py@a9c7510 |
 | [FalkorDB/falkordb-py:README.md:4](https://github.com/FalkorDB/falkordb-py/blob/31f63f44a5745b9bec65969a1db706906718cb82/README.md#L67) | before of FalkorDB/falkordb-py/pull/267 | fail | TypeError: Redis.__init__() got an unexpected keyword argument 'himport_registry' | FalkorDB/falkordb-py@031eb04 |
 | [FalkorDB/falkordb-py:README.md:4](https://github.com/FalkorDB/falkordb-py/blob/31f63f44a5745b9bec65969a1db706906718cb82/README.md#L67) | after of FalkorDB/falkordb-py/pull/262 | pass |  | FalkorDB/falkordb-py@f7c3de7 |
@@ -92,6 +95,6 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 | Changed symbol | Rows | ms |
 |---|---:|---:|
-| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.41 |
-| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.35 |
-| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 1.03 |
+| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 1.02 |
+| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.76 |
+| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 1.96 |

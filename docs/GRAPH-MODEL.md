@@ -44,7 +44,10 @@ ORDER BY hops, repo, doc
 
 ```cypher
 MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
-WHERE c.kind <> 'added' AND NOT (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+WHERE c.kind <> 'added'
+OPTIONAL MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+WITH s, c, count(p) AS reach
+WHERE reach = 0
 RETURN s.qualname AS symbol, s.name AS name, s.repo AS repo, c.kind AS change, s.visibility AS visibility
 ORDER BY symbol
 ```
@@ -111,7 +114,7 @@ RETURN e.id AS id, e.lang AS lang, e.code AS code, e.repo AS repo, e.path AS pat
 ```cypher
 MATCH (r:Repo)
 WHERE r.name IN $repos
-OPTIONAL MATCH (r)-[:DEPENDS_ON*1..3]->(d:Repo)
+OPTIONAL MATCH dep = (r)-[:DEPENDS_ON*1..3]->(d:Repo)
 WITH collect(DISTINCT r) + collect(DISTINCT d) AS repos
 UNWIND repos AS repo
 WITH DISTINCT repo
@@ -125,14 +128,14 @@ ORDER BY repo
 ```cypher
 MATCH (d:DocSection {id: $id})
 OPTIONAL MATCH (dec0:Decision)-[:GOVERNS]->(d)
-OPTIONAL MATCH (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
-OPTIONAL MATCH (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
+OPTIONAL MATCH p1 = (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
+OPTIONAL MATCH p2 = (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
 WITH collect(DISTINCT {dec: dec0, via: d.heading_path}) + collect(DISTINCT {dec: dec1, via: g1.qualname})
      + collect(DISTINCT {dec: dec2, via: g2.qualname}) AS hits
 UNWIND hits AS hit
 WITH hit.dec AS dec, hit.via AS via
 WHERE dec IS NOT NULL
-OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+OPTIONAL MATCH chain = (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
 WITH coalesce(newer, dec) AS current, dec AS matched, via
 WHERE current.status = 'active'
 RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
@@ -142,8 +145,8 @@ RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS so
 **`decisionsForSymbol`** — Active decisions governing a symbol or anything it calls within 2 hops; superseded decisions resolve to their successor.
 
 ```cypher
-MATCH (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
-OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+MATCH p = (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
+OPTIONAL MATCH chain = (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
 WITH coalesce(newer, dec) AS current, dec AS matched, g.qualname AS via
 WHERE current.status = 'active'
 RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
@@ -624,7 +627,7 @@ ORDER BY from, to
 
 ```cypher
 MATCH (s:Symbol {status: 'live'})
-MATCH (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
 WHERE (d:DocSection OR d:CodeExample) AND s.repo <> d.repo
 RETURN count(DISTINCT s.id + '|' + d.id) AS n
 ```
@@ -636,9 +639,9 @@ MATCH (s:Symbol {status: 'live', visibility: 'public'})
 WHERE NOT s.qualname CONTAINS '._'
 MATCH p = (s)<-[:CALLS*1..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
 WHERE (d:DocSection OR d:CodeExample) AND s.repo <> t.repo
-WITH s, d, p
-ORDER BY length(p) DESC, d.id
-WITH s, collect({doc: d.id, hops: length(p), path: [n IN nodes(p) | coalesce(n.qualname, n.id)]})[0] AS best
+WITH s, d, p, [n IN nodes(p) | coalesce(n.qualname, n.id)] AS names
+ORDER BY length(p) DESC, d.id, reduce(k = '', x IN names | k + x + ' ')
+WITH s, collect({doc: d.id, hops: length(p), path: names})[0] AS best
 RETURN s.qualname AS symbol, best.doc AS doc, best.hops AS hops, best.path AS path
 ORDER BY hops DESC, symbol
 LIMIT 5
@@ -651,7 +654,7 @@ MATCH (pr:PullRequest)
 OPTIONAL MATCH (pr)<-[c:CHANGED_IN]-(s:Symbol)
 WHERE c.kind <> 'added'
 WITH pr, collect(s) AS changed
-OPTIONAL MATCH (pr)<-[c2:CHANGED_IN]-(s2:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+OPTIONAL MATCH p = (pr)<-[c2:CHANGED_IN]-(s2:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
 WHERE c2.kind <> 'added' AND (d:DocSection OR d:CodeExample) AND d.status = 'live'
 OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
 WITH pr, changed, collect(DISTINCT coalesce(sec.id, d.id)) AS sections,
