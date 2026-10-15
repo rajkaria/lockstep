@@ -52,3 +52,25 @@ export function fakePr(overrides: Partial<PullRequestInfo> = {}): PullRequestInf
     ...overrides,
   };
 }
+
+import { execFileSync } from 'node:child_process';
+import { cp, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+
+export const gitIn = (cwd: string, ...args: string[]) =>
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' }).trim();
+
+/** The fixture org as real git repositories (one commit each) in a temp dir. */
+export async function makeGitOrg(): Promise<{ root: string; checkouts: Checkout[] }> {
+  const root = await mkdtemp(join(tmpdir(), 'lockstep-org-'));
+  const checkouts: Checkout[] = [];
+  for (const name of ['mini-client', 'mini-sdk', 'mini-docs']) {
+    const dir = join(root, name);
+    await cp(join(FIXTURES, 'org', name), dir, { recursive: true });
+    gitIn(dir, 'init', '-q', '-b', 'main');
+    gitIn(dir, 'add', '-A');
+    gitIn(dir, 'commit', '-q', '-m', 'init');
+    checkouts.push({ repo: `acme/${name}`, dir, sha: gitIn(dir, 'rev-parse', 'HEAD') });
+  }
+  return { root, checkouts };
+}

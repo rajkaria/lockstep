@@ -308,6 +308,131 @@ export const linkRunToPr = q('memory', 'linkRunToPr', 'Attach a run to the pull 
   MERGE (r)-[:AT]->(pr)
 `);
 
+// ─── decisions and verdicts (memory) ───────────────────────────────────────
+
+export const decisionsForSection = q('tool', 'decisionsForSection', 'Active decisions governing a doc section directly, or any symbol its prose or examples reach within 2 call hops; superseded decisions resolve to their successor.', `
+  MATCH (d:DocSection {id: $id})
+  OPTIONAL MATCH (dec0:Decision)-[:GOVERNS]->(d)
+  OPTIONAL MATCH (d)-[:MENTIONS]->(:Symbol)-[:CALLS*0..2]->(g1:Symbol)<-[:GOVERNS]-(dec1:Decision)
+  OPTIONAL MATCH (d)<-[:IN_SECTION]-(:CodeExample)-[:USES]->(:Symbol)-[:CALLS*0..2]->(g2:Symbol)<-[:GOVERNS]-(dec2:Decision)
+  WITH collect(DISTINCT {dec: dec0, via: d.heading_path}) + collect(DISTINCT {dec: dec1, via: g1.qualname})
+       + collect(DISTINCT {dec: dec2, via: g2.qualname}) AS hits
+  UNWIND hits AS hit
+  WITH hit.dec AS dec, hit.via AS via
+  WHERE dec IS NOT NULL
+  OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+  WITH coalesce(newer, dec) AS current, dec AS matched, via
+  WHERE current.status = 'active'
+  RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
+         current.created_at AS createdAt, matched.id AS matched, via
+`);
+
+export const decisionsForSymbol = q('tool', 'decisionsForSymbol', 'Active decisions governing a symbol or anything it calls within 2 hops; superseded decisions resolve to their successor.', `
+  MATCH (s:Symbol {id: $id})-[:CALLS*0..2]->(g:Symbol)<-[:GOVERNS]-(dec:Decision)
+  OPTIONAL MATCH (newer:Decision {status: 'active'})-[:SUPERSEDES*1..10]->(dec)
+  WITH coalesce(newer, dec) AS current, dec AS matched, g.qualname AS via
+  WHERE current.status = 'active'
+  RETURN DISTINCT current.id AS id, current.text AS text, current.source_url AS source, current.author AS author,
+         current.created_at AS createdAt, matched.id AS matched, via
+`);
+
+export const priorVerdicts = q('memory', 'priorVerdicts', 'What Lockstep concluded about this section on earlier pull requests, and what maintainers did with it.', `
+  MATCH (v:Verdict)-[:ABOUT]->(:DocSection {id: $id})
+  MATCH (v)-[:FOR]->(pr:PullRequest)
+  RETURN v.id AS id, v.verdict AS verdict, v.status AS status, v.reason AS reason, pr.url AS pr, pr.title AS title, v.created_at AS createdAt
+  ORDER BY createdAt DESC
+  LIMIT 5
+`);
+
+export const createDecision = q('memory', 'createDecision', 'Record a maintainer decision.', `
+  CREATE (dec:Decision {id: $id})
+  SET dec += $props
+  RETURN dec.id AS id
+`);
+
+export const governSections = q('memory', 'governSections', 'Attach a decision to the doc sections it governs.', `
+  MATCH (dec:Decision {id: $id})
+  MATCH (d:DocSection)
+  WHERE d.id IN $governs
+  MERGE (dec)-[:GOVERNS]->(d)
+  RETURN count(d) AS n
+`);
+
+export const governSymbols = q('memory', 'governSymbols', 'Attach a decision to the symbols it governs.', `
+  MATCH (dec:Decision {id: $id})
+  MATCH (s:Symbol)
+  WHERE s.id IN $governs
+  MERGE (dec)-[:GOVERNS]->(s)
+  RETURN count(s) AS n
+`);
+
+export const supersedeDecision = q('memory', 'supersedeDecision', 'Mark an older decision superseded by a newer one.', `
+  MATCH (newer:Decision {id: $newer})
+  MATCH (older:Decision {id: $older})
+  MERGE (newer)-[:SUPERSEDES]->(older)
+  SET older.status = 'superseded'
+`);
+
+export const createVerdict = q('memory', 'createVerdict', 'Record the agent\'s verdict on one section for one pull request, with the decisions and runs it cites.', `
+  MATCH (d:DocSection {id: $section})
+  MATCH (pr:PullRequest {url: $pr})
+  CREATE (v:Verdict {id: $id})
+  SET v += $props
+  MERGE (v)-[:ABOUT]->(d)
+  MERGE (v)-[:FOR]->(pr)
+  WITH v
+  OPTIONAL MATCH (dec:Decision) WHERE dec.id IN $cites
+  FOREACH (_ IN CASE WHEN dec IS NULL THEN [] ELSE [1] END | MERGE (v)-[:CITES]->(dec))
+  WITH DISTINCT v
+  OPTIONAL MATCH (r:Run) WHERE r.id IN $runs
+  FOREACH (_ IN CASE WHEN r IS NULL THEN [] ELSE [1] END | MERGE (v)-[:EVIDENCE]->(r))
+  RETURN DISTINCT v.id AS id
+`);
+
+export const sectionReachedByPr = q('tool', 'sectionReachedByPr', 'Guard for edits: is there a path from this pull request\'s changes to the section (or one of its examples)?', `
+  MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
+  WHERE c.kind <> 'added'
+  MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+  WHERE d.id = $section OR (d)-[:IN_SECTION]->(:DocSection {id: $section})
+  WITH p
+  ORDER BY length(p)
+  LIMIT 1
+  RETURN [n IN nodes(p) | coalesce(n.qualname, n.id)] AS path
+`);
+
+export const verdictsForPr = q('memory', 'verdictsForPr', 'The latest verdict per section for a pull request (what the docs patch is built from).', `
+  MATCH (v:Verdict)-[:FOR]->(:PullRequest {url: $pr})
+  MATCH (v)-[:ABOUT]->(d:DocSection)
+  OPTIONAL MATCH (v)-[:CITES]->(dec:Decision)
+  OPTIONAL MATCH (v)-[:EVIDENCE]->(r:Run)
+  WITH v, d, collect(DISTINCT dec.id) AS cites, collect(DISTINCT {id: r.id, status: r.status, side: r.side, error: r.error}) AS runs
+  ORDER BY v.created_at DESC
+  WITH d, collect({v: v, cites: cites, runs: runs})[0] AS latest
+  RETURN d.id AS section, d.repo AS repo, d.path AS path, d.heading_path AS heading, d.lineno AS lineno,
+         d.end_lineno AS endLineno, d.url AS url, latest.v.id AS id, latest.v.verdict AS verdict,
+         latest.v.status AS status, latest.v.reason AS reason, latest.v.new_text AS newText,
+         latest.v.old_text AS oldText, latest.v.evidence AS evidence, latest.cites AS cites, latest.runs AS runs
+  ORDER BY repo, path, lineno
+`);
+
+export const reviewVerdict = q('memory', 'reviewVerdict', 'A maintainer accepts or rejects a verdict; precision is measured from these.', `
+  MATCH (v:Verdict {id: $id})
+  SET v.status = $status, v.reviewed_by = $by, v.reviewed_at = $at
+  RETURN v.id AS id
+`);
+
+export const sinceLastCheck = q('memory', 'sinceLastCheck', 'What changed in the graph since a moment: pull requests checked, verdicts, decisions, runs.', `
+  OPTIONAL MATCH (pr:PullRequest) WHERE pr.ingested_at > $since
+  WITH collect(DISTINCT {url: pr.url, title: pr.title}) AS prs
+  OPTIONAL MATCH (v:Verdict) WHERE v.created_at > $since
+  WITH prs, count(v) AS verdicts, sum(CASE WHEN v.verdict = 'stale' THEN 1 ELSE 0 END) AS stale
+  OPTIONAL MATCH (dec:Decision) WHERE dec.created_at > $since
+  WITH prs, verdicts, stale, collect(DISTINCT {id: dec.id, text: dec.text}) AS decisions
+  OPTIONAL MATCH (r:Run) WHERE r.created_at > $since
+  RETURN prs, verdicts, stale, decisions, count(r) AS runs,
+         sum(CASE WHEN r.status = 'fail' THEN 1 ELSE 0 END) AS failedRuns
+`);
+
 // ─── report ─────────────────────────────────────────────────────────────────
 
 export const repoSymbols = q('report', 'repoSymbols', 'List the live symbols of a repository.', `
@@ -430,6 +555,18 @@ export const ALL_QUERIES: NamedQuery[] = [
   cachedRun,
   upsertRun,
   linkRunToPr,
+  decisionsForSection,
+  decisionsForSymbol,
+  priorVerdicts,
+  createDecision,
+  governSections,
+  governSymbols,
+  supersedeDecision,
+  createVerdict,
+  sectionReachedByPr,
+  verdictsForPr,
+  reviewVerdict,
+  sinceLastCheck,
   upsertRepo,
   upsertFiles,
   upsertSymbols,

@@ -11,6 +11,10 @@ import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
 import { packageRoot, packageVersion } from './pkg.js';
 import { clearanceText, dim, impactText, runText } from './format/text.js';
 import { runExampleTool } from './tools/run-example.js';
+import { reviewVerdict, writeDecisionTool } from './tools/memory-tools.js';
+import { buildDocsPatch } from './patch.js';
+import { openDocsPr } from './pr/open-pr.js';
+import { parsePrUrl } from './pr/github.js';
 import { clearanceTool, impactTool, rankSectionsTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 
@@ -133,6 +137,65 @@ program
       console.log(runText(r.data));
       console.log('');
       console.log(r.summary);
+    });
+  });
+
+program
+  .command('decide')
+  .description('Record a maintainer decision; future checks cite it instead of re-flagging')
+  .argument('<text>', 'the decision, in one sentence')
+  .requiredOption('--governs <id...>', 'DocSection and/or Symbol ids it governs')
+  .option('--source <url>', 'where it was decided (issue, PR comment, ADR)')
+  .option('--author <name>', 'who decided')
+  .option('--supersedes <decision-id>', 'the decision this replaces')
+  .action(async (text: string, opts: { governs: string[]; source?: string; author?: string; supersedes?: string }) => {
+    await withGraph(async (store, org) => {
+      const r = await writeDecisionTool.run(
+        { graph: store.org(org), config: settings() },
+        { text, governs: opts.governs, source_url: opts.source, author: opts.author, supersedes: opts.supersedes },
+      );
+      console.log(r.summary);
+    });
+  });
+
+program
+  .command('verdict')
+  .description('Accept or reject a verdict (maintainer feedback; measures precision)')
+  .argument('<action>', 'accept | reject')
+  .argument('<verdict-id>')
+  .option('--by <name>', 'reviewer', process.env.USER ?? 'maintainer')
+  .action(async (action: string, id: string, opts: { by: string }) => {
+    if (action !== 'accept' && action !== 'reject') throw new Error('action must be accept or reject');
+    await withGraph(async (store, org) => {
+      const ok = await reviewVerdict({ graph: store.org(org), config: settings() }, id, action === 'accept' ? 'accepted' : 'rejected', opts.by);
+      if (!ok) throw new Error(`no verdict ${id}`);
+      console.log(`${id} ${action}ed`);
+    });
+  });
+
+program
+  .command('patch')
+  .description('Print the docs patch for a checked pull request (unified diff + PR description with evidence paths)')
+  .argument('<pr-url>')
+  .option('--out <file>', 'write the diff to a file (the description goes to <file>.md)')
+  .option('--open-pr', 'open the fix as a pull request in your fork (needs GITHUB_TOKEN)')
+  .option('--upstream', 'with --open-pr: target the original repository instead of your fork')
+  .action(async (prUrl: string, opts: { out?: string; openPr?: boolean; upstream?: boolean }) => {
+    await withGraph(async (store, org) => {
+      const config = settings();
+      const patch = await buildDocsPatch({ graph: store.org(org), config }, parsePrUrl(prUrl).url);
+      if (opts.out) {
+        await writeFile(opts.out, patch.diff);
+        await writeFile(`${opts.out}.md`, `# ${patch.title}\n\n${patch.body}\n`);
+        log(`wrote ${opts.out} and ${opts.out}.md (${patch.files.length} files)`);
+      } else {
+        console.log(patch.diff || dim('(no proposed edits)'));
+        console.log(`# ${patch.title}\n\n${patch.body}`);
+      }
+      if (opts.openPr) {
+        const opened = await openDocsPr(patch, { token: config.githubToken ?? '', target: opts.upstream ? 'upstream' : 'fork' });
+        for (const o of opened) console.log(`opened ${o.url} (${o.target})`);
+      }
     });
   });
 

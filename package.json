@@ -40,6 +40,7 @@
   ],
   "dependencies": {
     "commander": "^15.0.0",
+    "diff": "^9.0.0",
     "falkordb": "^6.8.0",
     "smol-toml": "^1.9.1",
     "web-tree-sitter": "^0.27.1",
