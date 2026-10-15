@@ -27,15 +27,17 @@ not executed (no sandbox runtime) — runs recorded by a local or container host
 
 1. Create a FalkorDB the function can reach (FalkorDB Cloud's free tier works) and index into it from your machine:
    ```bash
-   export FALKORDB_URL='falkors://<user>:<password>@<host>:<port>'
+   export FALKORDB_URL='falkor://falkordb:<password>@<host>:<port>'   # falkors:// if the endpoint has TLS
    npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
-   bash scripts/seed.sh          # graph-mode checks of the preloaded PRs, with example runs, stored on the graph
+   bash scripts/seed.sh          # re-index, then graph-mode checks of the preloaded PRs with example runs, stored on the graph
    ```
 2. `vercel env add FALKORDB_URL production` (and optionally `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`), then redeploy.
 
 Without `FALKORDB_URL` the function answers 503 and the UI shows the snapshot bundled at build time
 (`npm run snapshot` regenerates `web/public/snapshot.json` from a local graph), labelled with the time it was taken.
-Function duration is capped at 300 s (`vercel.json`).
+Function duration is capped at 300 s, and the function runs in `bom1` (Mumbai), next to the FalkorDB Cloud instance in
+AWS `ap-south-1`: a check makes dozens of graph round trips, so set `regions` in `vercel.json` to the Vercel region
+closest to your FalkorDB.
 
 ## Docker Compose (any VM)
 
@@ -61,7 +63,9 @@ npx -y lockstep-docs serve --host 0.0.0.0 --port 8080
 
 ## FalkorDB Cloud
 
-Create a free instance, then `FALKORDB_URL=falkors://<user>:<password>@<host>:<port>`. Keep
+Create a free instance; its Connectivity tab gives the public endpoint and Instance Details the password for user
+`falkordb`. The free tier's endpoint is plain TCP: `FALKORDB_URL=falkor://falkordb:<password>@<host>:<port>`
+(URL-encode the password; use `falkors://` for an endpoint with TLS). Keep
 `LOCKSTEP_SCRATCH_URL` pointing at a different, disposable server (or leave it unset to use the local one).
 
 ## Claude Code (MCP)

@@ -4,6 +4,7 @@
   "installCommand": "npm ci --ignore-scripts",
   "buildCommand": "npm run build",
   "outputDirectory": "web/dist",
+  "regions": ["bom1"],
   "functions": {
     "api/[...route].js": {
       "maxDuration": 300,
