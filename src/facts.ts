@@ -14,7 +14,7 @@ export interface Facts {
   crossRepoDocPaths: number;
   samplePaths: { symbol: string; doc: string; hops: number; path: string[] }[];
   impactQueryMs: { symbol: string; ms: number; rows: number }[];
-  pullRequests: { url: string; title: string; changed: number; sections: number }[];
+  pullRequests: { url: string; title: string; changed: number; sections: number; otherRepos: number }[];
   runs: { example: string; url: string; side: string; status: string; error: string; reason: string; installed: string[]; pr: string | null }[];
 }
 
@@ -71,7 +71,7 @@ export function factsMarkdown(f: Facts): string {
   for (const r of f.repos) {
     lines.push(`| [${r.name}](https://github.com/${r.name}) | \`${String(r.sha).slice(0, 7)}\` | ${r.symbols} | ${r.sections} | ${r.examples} (${r.pythonExamples}) |`);
   }
-  lines.push('', '## Graph', '', '| Nodes | Count |', '|---|---:|');
+  lines.push('', '## Graph', '', '| Nodes (live) | Count |', '|---|---:|');
   for (const [k, v] of Object.entries(f.nodes)) lines.push(`| ${k} | ${v} |`);
   lines.push('', '| Edges | Count |', '|---|---:|');
   for (const [k, v] of Object.entries(f.edges)) lines.push(`| ${k} | ${v} |`);
@@ -90,8 +90,8 @@ export function factsMarkdown(f: Facts): string {
   for (const d of f.dependsOn) lines.push(`- ${d.from} → ${d.to} (${d.spec})`);
   lines.push('', '## Sample cross-repository paths', '');
   for (const p of f.samplePaths) lines.push(`- ${p.hops} hops: ${p.path.map((x) => `\`${x}\``).join(' ← ')}`);
-  lines.push('', '## Pull requests checked', '', '| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) |', '|---|---:|---:|');
-  for (const p of f.pullRequests) lines.push(`| [${p.title.replace(/\|/g, '\\|')}](${p.url}) | ${p.changed} | ${p.sections} |`);
+  lines.push('', '## Pull requests checked', '', '| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) | …in other repositories |', '|---|---:|---:|---:|');
+  for (const p of f.pullRequests) lines.push(`| [${p.title.replace(/\|/g, '\\|')}](${p.url}) | ${p.changed} | ${p.sections} | ${p.otherRepos} |`);
   lines.push('', '## Example runs (sandbox)', '');
   const byStatus = new Map<string, number>();
   for (const r of f.runs) byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);

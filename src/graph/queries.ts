@@ -493,8 +493,9 @@ export const callsFrom = q('report', 'callsFrom', 'Outgoing calls of one symbol.
   ORDER BY b.id
 `);
 
-export const graphCounts = q('report', 'graphCounts', 'Node and edge counts for FACTS.md.', `
+export const graphCounts = q('report', 'graphCounts', 'Live node counts for FACTS.md (symbols and docs a re-index marked gone, or a PR removed, are not counted).', `
   MATCH (n)
+  WHERE NOT (n:Symbol OR n:DocSection OR n:CodeExample) OR n.status = 'live'
   RETURN labels(n)[0] AS label, count(n) AS n
   ORDER BY label
 `);
@@ -564,8 +565,10 @@ export const factsPullRequests = q('report', 'factsPullRequests', 'Pull requests
   OPTIONAL MATCH (pr)<-[c2:CHANGED_IN]-(s2:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
   WHERE c2.kind <> 'added' AND (d:DocSection OR d:CodeExample) AND d.status = 'live'
   OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
-  WITH pr, changed, collect(DISTINCT coalesce(sec.id, d.id)) AS sections
-  RETURN pr.url AS url, pr.title AS title, size(changed) AS changed, size(sections) AS sections
+  WITH pr, changed, collect(DISTINCT coalesce(sec.id, d.id)) AS sections,
+       collect(DISTINCT CASE WHEN d.repo <> pr.repo THEN coalesce(sec.id, d.id) END) AS elsewhere
+  RETURN pr.url AS url, pr.title AS title, size(changed) AS changed, size(sections) AS sections,
+         size(elsewhere) AS otherRepos
   ORDER BY url
 `);
 

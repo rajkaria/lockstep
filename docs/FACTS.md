@@ -1,6 +1,6 @@
 # FACTS
 
-Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-15T16:40:47.244Z (FalkorDB 4.18.3).
+Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-15T16:44:25.005Z (FalkorDB 4.18.3).
 Every number in the README comes from this file. Regenerate it; never edit it by hand.
 
 ## Repositories
@@ -13,11 +13,11 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 ## Graph
 
-| Nodes | Count |
+| Nodes (live) | Count |
 |---|---:|
-| Check | 9 |
+| Check | 10 |
 | CodeExample | 1835 |
-| DocSection | 3152 |
+| DocSection | 3138 |
 | File | 329 |
 | PullRequest | 4 |
 | Repo | 3 |
@@ -31,7 +31,7 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | CHANGED_IN | 7 |
 | DEFINED_IN | 6285 |
 | DEPENDS_ON | 3 |
-| FOR | 9 |
+| FOR | 10 |
 | IN_REPO | 329 |
 | IN_SECTION | 1829 |
 | LINKS_TO | 644 |
@@ -60,12 +60,12 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 ## Pull requests checked
 
-| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) |
-|---|---:|---:|
-| [fix: only forward accepted kwargs from Is_Cluster to redis.Redis](https://github.com/FalkorDB/falkordb-py/pull/262) | 1 | 1 |
-| [test: assert the client parses execution plans, and fix a plan parser bug](https://github.com/FalkorDB/falkordb-py/pull/267) | 2 | 3 |
-| [fix(asyncio): prevent connection pool kwargs mutation and await schema refresh](https://github.com/FalkorDB/falkordb-py/pull/276) | 4 | 44 |
-| [feat: add optional hiredis extra for faster reply parsing](https://github.com/FalkorDB/falkordb-py/pull/304) | 0 | 0 |
+| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) | …in other repositories |
+|---|---:|---:|---:|
+| [fix: only forward accepted kwargs from Is_Cluster to redis.Redis](https://github.com/FalkorDB/falkordb-py/pull/262) | 1 | 1 | 0 |
+| [test: assert the client parses execution plans, and fix a plan parser bug](https://github.com/FalkorDB/falkordb-py/pull/267) | 2 | 3 | 2 |
+| [fix(asyncio): prevent connection pool kwargs mutation and await schema refresh](https://github.com/FalkorDB/falkordb-py/pull/276) | 4 | 44 | 42 |
+| [feat: add optional hiredis extra for faster reply parsing](https://github.com/FalkorDB/falkordb-py/pull/304) | 0 | 0 | 0 |
 
 ## Example runs (sandbox)
 
@@ -92,6 +92,6 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 | Changed symbol | Rows | ms |
 |---|---:|---:|
-| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.50 |
-| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.33 |
-| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 1.08 |
+| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.41 |
+| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.35 |
+| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 1.03 |

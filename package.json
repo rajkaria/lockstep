@@ -39,7 +39,8 @@
     "db:start": "bash scripts/falkordb-local.sh start",
     "db:stop": "bash scripts/falkordb-local.sh stop",
     "build:web": "vite build web",
-    "serve": "tsx src/cli.ts serve"
+    "serve": "tsx src/cli.ts serve",
+    "docs": "tsx scripts/gen-docs.ts"
   },
   "keywords": [
     "docs",
