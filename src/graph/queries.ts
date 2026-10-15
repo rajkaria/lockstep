@@ -5,7 +5,8 @@
  *
  * Every variable-length pattern binds a path variable (`p = (a)<-[:CALLS*0..3]-(b)`), and none sits in a WHERE
  * pattern predicate: FalkorDB 4.18 can drop nodes reachable along two routes from an anonymous variable-length
- * pattern, which would turn clearance into a false proof of absence (test/traversal.test.ts).
+ * pattern, which would turn clearance into a false proof of absence (test/traversal.test.ts). Ranges also start at
+ * 0 or 1: FalkorDB 4.22 returns no rows for an exact length of 2 or more (`*2`, `*3..3`) toward a labelled node.
  */
 export interface NamedQuery {
   name: string;

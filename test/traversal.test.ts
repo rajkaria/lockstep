@@ -66,6 +66,10 @@ describe('variable-length traversals (FalkorDB)', () => {
       q.cypher.split('\n').filter((l) => /\*\d*\.\./.test(l) && !/\b\w+ = \(/.test(l)).map((l) => `${q.name}: ${l.trim()}`),
     );
     expect(unbound).toEqual([]);
+    // FalkorDB 4.22 returns nothing for `(a)<-[:R*2]-(t:Label)` (exact length ≥ 2); ranges here start at 0 or 1.
+    const ranges = Q.ALL_QUERIES.flatMap((q) => [...q.cypher.matchAll(/\*(\d*)\.\.(\d+)/g)].map((m) => `${q.name}: *${m[1]}..${m[2]}`));
+    expect(ranges.length).toBeGreaterThan(10);
+    expect(ranges.filter((r) => !/\*[01]?\.\./.test(r))).toEqual([]);
   });
 
   it('finds a decision governing a symbol two calls below (retrieve → search → err)', async () => {
