@@ -1,0 +1,35 @@
+# Lockstep with two FalkorDB servers: the org graph, and a scratch server the
+# docs examples run against (flushed before every run — never point it at the graph).
+#   docker compose up -d
+#   docker compose exec lockstep node dist/cli.js index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+#   open http://localhost:8080
+services:
+  falkordb:
+    image: ${FALKORDB_IMAGE:-falkordb/falkordb:latest}
+    restart: unless-stopped
+    volumes:
+      - falkordb-data:/data
+
+  scratch:
+    image: ${FALKORDB_IMAGE:-falkordb/falkordb:latest}
+    restart: unless-stopped
+
+  lockstep:
+    build: .
+    restart: unless-stopped
+    depends_on: [falkordb, scratch]
+    ports:
+      - "8080:8080"
+    environment:
+      FALKORDB_URL: falkor://falkordb:6379
+      LOCKSTEP_SCRATCH_URL: falkor://scratch:6379
+      LOCKSTEP_ORG: ${LOCKSTEP_ORG:-falkordb}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      LOCKSTEP_PRELOADED: ${LOCKSTEP_PRELOADED:-}
+    volumes:
+      - lockstep-data:/data
+
+volumes:
+  falkordb-data:
+  lockstep-data:

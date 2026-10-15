@@ -17,7 +17,7 @@ export const GRAPH_MODE_MODEL = 'graph-only (no model)';
 export async function runGraphCheck(
   ctx: ToolContext,
   prUrl: string,
-  opts: { maxRuns?: number; onEvent?: (e: TraceEvent) => void } = {},
+  opts: { maxRuns?: number; maxHops?: number; onEvent?: (e: TraceEvent) => void } = {},
 ): Promise<CheckResult> {
   const pr = parsePrUrl(prUrl).url;
   const events: TraceEvent[] = [];
@@ -54,7 +54,7 @@ export async function runGraphCheck(
   };
 
   try {
-    const impact = await call(impactTool, { pr_url: pr });
+    const impact = await call(impactTool, { pr_url: pr, ...(opts.maxHops !== undefined && opts.maxHops !== 3 ? { max_hops: opts.maxHops } : {}) });
     if (!impact) throw new Error('impact failed');
     const data: ImpactData = impact.data;
     const clearance = await call(clearanceTool, { pr_url: pr });
@@ -68,7 +68,11 @@ export async function runGraphCheck(
     }
     summary =
       `${impact.summary} ${clearance?.summary ?? ''}`.trim() +
-      (examples.length ? ` Ran ${examples.length} example(s) before and after the PR: ${verdicts.join('; ')}.` : ' No exactly-linked Python example to run.') +
+      (examples.length
+        ? ` Ran ${examples.length} example(s) before and after the PR: ${verdicts.join('; ')}.`
+        : opts.maxRuns === 0
+          ? ' Example runs not requested.'
+          : ' No exactly-linked Python example to run.') +
       ' Graph mode: fixed tool order and no verdicts — agent mode (Claude) judges each section and proposes the edits.';
   } catch (err) {
     status = 'error';

@@ -3,7 +3,18 @@
   "version": "0.1.0",
   "description": "An agent that keeps your docs true to your code: it walks a FalkorDB graph of code, docs and decisions across repositories, runs the examples, and proposes the docs fix with the path behind each paragraph.",
   "license": "MIT",
+  "author": "Raj Karia",
+  "homepage": "https://github.com/rajkaria/lockstep#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rajkaria/lockstep.git"
+  },
   "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "lockstep-docs": "dist/cli.js"
   },

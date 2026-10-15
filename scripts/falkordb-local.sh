@@ -2,7 +2,7 @@
 # Run a local FalkorDB without Docker.
 #
 # Uses the redis-server + FalkorDB module binaries shipped in the `falkordblite`
-# Python wheel (macOS arm64/x64, Linux). Installed once into $LOCKSTEP_HOME/falkordb.
+# Python wheel (needs Python >= 3.12; uv fetches one). Installed once into $LOCKSTEP_HOME/falkordb.
 #
 #   scripts/falkordb-local.sh start [port]   # default port 6379
 #   scripts/falkordb-local.sh stop  [port]
@@ -32,7 +32,7 @@ find_bin() {
 install() {
   mkdir -p "$BASE"
   if command -v uv >/dev/null 2>&1; then
-    [ -d "$VENV" ] || uv venv -q "$VENV"
+    [ -d "$VENV" ] || uv venv -q --python 3.12 "$VENV"
     uv pip install -q --python "$VENV/bin/python" "falkordblite==$FALKORDBLITE_VERSION"
   else
     command -v python3 >/dev/null 2>&1 || die "need uv or python3 to install falkordblite"

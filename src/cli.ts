@@ -15,6 +15,10 @@ import { packageRoot, packageVersion } from './pkg.js';
 import { clearanceText, dim, impactText, runText, traceLine } from './format/text.js';
 import { AnthropicModel, type Effort } from './agent/anthropic.js';
 import { runAgentCheck } from './agent/loop.js';
+import { runGraphCheck } from './agent/graph-check.js';
+import type { TraceEvent } from './agent/trace.js';
+import type { ClearedSymbol, ImpactData, RankedSection } from './tools/graph-tools.js';
+import type { RunExampleData } from './tools/run-example.js';
 import { runExampleTool } from './tools/run-example.js';
 import { reviewVerdict, writeDecisionTool } from './tools/memory-tools.js';
 import { buildDocsPatch, loadVerdicts } from './patch.js';
@@ -105,10 +109,11 @@ program
   .option('--effort <level>', 'low | medium | high | xhigh | max (env LOCKSTEP_EFFORT)')
   .option('--max-steps <n>', 'model turns before the agent stops', '40')
   .option('--max-hops <n>', 'maximum call hops between a changed symbol and a doc (--no-agent)', '3')
+  .option('--runs <n>', 'with --no-agent: run up to n impacted examples before and after the PR', '3')
   .option('--json', 'print JSON')
   .option('--format <format>', 'text | markdown (a PR comment)', 'text')
   .option('--out <file>', 'write the markdown comment to a file')
-  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; json?: boolean; format: string; out?: string }) => {
+  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string }) => {
     await withGraph(async (store, org) => {
       const config = settings();
       const ctx: ToolContext = { graph: store.org(org), config, log };
@@ -138,19 +143,24 @@ program
         await emitMarkdown(ctx, org, prUrl, opts.out);
         return;
       }
-      const impact = await impactTool.run(ctx, { pr_url: prUrl, max_hops: Number(opts.maxHops) });
-      const clearance = await clearanceTool.run(ctx, { pr_url: prUrl });
-      const ids = [...new Set(impact.data.sections.map((s) => s.section).filter((id) => id.includes('#')))];
-      const ranked = ids.length ? await rankSectionsTool.run(ctx, { section_ids: ids }) : undefined;
+      // Graph mode: the same tools in a fixed order, no model; stored as a Check like agent runs.
+      const r = await runGraphCheck(ctx, prUrl, { maxRuns: Number(opts.runs), maxHops: Number(opts.maxHops) });
       if (opts.json) {
-        console.log(JSON.stringify({ impact, clearance, ranked }, null, 2));
+        console.log(JSON.stringify(r, null, 2));
         return;
       }
-      console.log(impactText(impact.data, ranked?.data.ranked));
+      const data = (name: string) =>
+        r.events.find((e): e is Extract<TraceEvent, { type: 'tool_result' }> => e.type === 'tool_result' && e.name === name && !e.isError)?.data;
+      const impact = data('impact') as ImpactData | undefined;
+      const cleared = (data('clearance') as { cleared: ClearedSymbol[] } | undefined)?.cleared ?? [];
+      const ranked = (data('rank_sections') as { ranked: RankedSection[] } | undefined)?.ranked;
+      if (impact) console.log(impactText(impact, ranked));
       console.log('');
-      console.log(clearanceText(clearance.data.cleared));
-      console.log('');
-      console.log(dim(`${impact.summary}\n${clearance.summary}${ranked ? `\n${ranked.summary}` : ''}`));
+      console.log(clearanceText(cleared));
+      for (const e of r.events) {
+        if (e.type === 'tool_result' && e.name === 'run_example' && !e.isError) console.log(`\n${runText(e.data as RunExampleData)}`);
+      }
+      console.log(dim(`\n${r.summary}\nStored as ${r.checkId}.`));
     });
   });
 
