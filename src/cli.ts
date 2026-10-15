@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { loadConfig, orgSlug } from './config.js';
 import { collectFacts, factsMarkdown } from './facts.js';
-import { GraphStore } from './graph/client.js';
+import { GraphStore, redact } from './graph/client.js';
+import { serveMcp } from './mcp/server.js';
 import { indexOrg } from './indexer/index.js';
 import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
 import { packageRoot, packageVersion } from './pkg.js';
@@ -14,7 +15,8 @@ import { AnthropicModel, type Effort } from './agent/anthropic.js';
 import { runAgentCheck } from './agent/loop.js';
 import { runExampleTool } from './tools/run-example.js';
 import { reviewVerdict, writeDecisionTool } from './tools/memory-tools.js';
-import { buildDocsPatch } from './patch.js';
+import { buildDocsPatch, loadVerdicts } from './patch.js';
+import { checkMarkdown } from './format/markdown.js';
 import { openDocsPr } from './pr/open-pr.js';
 import { parsePrUrl } from './pr/github.js';
 import { clearanceTool, impactTool, rankSectionsTool } from './tools/graph-tools.js';
@@ -102,7 +104,9 @@ program
   .option('--max-steps <n>', 'model turns before the agent stops', '40')
   .option('--max-hops <n>', 'maximum call hops between a changed symbol and a doc (--no-agent)', '3')
   .option('--json', 'print JSON')
-  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; json?: boolean }) => {
+  .option('--format <format>', 'text | markdown (a PR comment)', 'text')
+  .option('--out <file>', 'write the markdown comment to a file')
+  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; json?: boolean; format: string; out?: string }) => {
     await withGraph(async (store, org) => {
       const config = settings();
       const ctx: ToolContext = { graph: store.org(org), config, log };
@@ -124,7 +128,12 @@ program
         });
         if (opts.json) console.log(JSON.stringify(r, null, 2));
         else console.log(dim(`\nPatch: lockstep-docs patch ${r.pr}   Trace: stored on ${r.checkId}`));
+        if (opts.format === 'markdown') await emitMarkdown(ctx, org, r.pr, opts.out, r.summary);
         if (r.status === 'error' || r.status === 'refused') process.exitCode = 1;
+        return;
+      }
+      if (opts.format === 'markdown') {
+        await emitMarkdown(ctx, org, prUrl, opts.out);
         return;
       }
       const impact = await impactTool.run(ctx, { pr_url: prUrl, max_hops: Number(opts.maxHops) });
@@ -224,6 +233,16 @@ program
   });
 
 program
+  .command('mcp')
+  .description('Serve the Lockstep tools over MCP (stdio). Claude Code: claude mcp add lockstep -- npx -y lockstep-docs mcp')
+  .action(async () => {
+    await withGraph(async (store, org) => {
+      log(`lockstep mcp: serving graph "${org}" from ${redact(settings().falkordbUrl)}`);
+      await serveMcp(store.org(org), settings());
+    });
+  });
+
+program
   .command('facts')
   .description('Write FACTS.md: every number Lockstep quotes, computed from the graph')
   .option('--out <file>', 'output file', 'docs/FACTS.md')
@@ -248,6 +267,21 @@ program
   .action((action: string, opts: { port: string }) => {
     execFileSync('bash', [join(packageRoot(), 'scripts', 'falkordb-local.sh'), action, opts.port], { stdio: 'inherit' });
   });
+
+async function emitMarkdown(ctx: ToolContext, org: string, prUrl: string, out: string | undefined, agentSummary?: string): Promise<void> {
+  const impact = await impactTool.run(ctx, { pr_url: prUrl });
+  const clearance = await clearanceTool.run(ctx, { pr_url: prUrl });
+  const ids = [...new Set(impact.data.sections.map((s) => s.section).filter((id) => id.includes('#')))];
+  const ranked = ids.length ? (await rankSectionsTool.run(ctx, { section_ids: ids })).data.ranked : undefined;
+  const verdicts = await loadVerdicts(ctx, impact.data.pr.url);
+  const md = checkMarkdown({ impact: impact.data, summary: impact.summary, cleared: clearance.data.cleared, ranked, verdicts, agentSummary, org });
+  if (out) {
+    await writeFile(out, `${md}\n`);
+    log(`wrote ${out}`);
+  } else {
+    console.log(md);
+  }
+}
 
 function log(msg: string): void {
   process.stderr.write(`${msg}\n`);
