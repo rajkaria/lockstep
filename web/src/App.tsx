@@ -48,6 +48,13 @@ export function App() {
     <div className="app">
       <Header health={health} facts={facts} />
       {loadError && <div className="banner err">The API is unreachable: {loadError}</div>}
+      {health?.snapshot && (
+        <div className="banner snapshot">
+          <strong>Snapshot.</strong> This deployment isn't connected to a FalkorDB server, so it shows the graph's answers recorded on{' '}
+          {health.snapshot.takenAt.replace('T', ' ').slice(0, 16)} UTC: the preloaded pull requests open their recorded checks, replayed exactly as they ran. For live
+          checks, run <code>npx lockstep-docs serve</code> against an indexed graph (see the README).
+        </div>
+      )}
       <main>
         {route.page === 'home' && <Home health={health} packageRepo={packageRepo} />}
         {route.page === 'check' && <StoredCheck id={route.id} packageRepo={packageRepo} />}
@@ -156,7 +163,7 @@ function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRe
             aria-label="Pull request URL"
             spellCheck={false}
           />
-          <button disabled={running || !prUrl.trim()}>{running ? 'Checking…' : 'Check'}</button>
+          <button disabled={running || !prUrl.trim() || !!health?.snapshot}>{running ? 'Checking…' : 'Check'}</button>
         </form>
         <div className="modes" role="radiogroup" aria-label="Mode">
           <label className={mode === 'agent' ? 'on' : ''}>
@@ -168,7 +175,7 @@ function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRe
             Graph only: the same tools in a fixed order, no model
           </label>
         </div>
-        {agentOff && (
+        {agentOff && !health.snapshot && (
           <p className="note">
             Agent mode is off on this server: {health.agent.available ? '' : health.agent.reason}. Graph mode runs the real graph queries and example runs; agent
             traces recorded earlier are listed below with their dates.
@@ -177,7 +184,12 @@ function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRe
         {formError && <div className="banner err">{formError}</div>}
         <div className="preloaded">
           {prs.map((p) => (
-            <button key={p.url} className="pr-card" disabled={running} onClick={() => void start(p.url)}>
+            <button
+              key={p.url}
+              className="pr-card"
+              disabled={running || (!!health?.snapshot && !p.latestCheck)}
+              onClick={() => (health?.snapshot && p.latestCheck ? (window.location.hash = `#/check/${encodeURIComponent(p.latestCheck.id)}`) : void start(p.url))}
+            >
               <span className="pr-ref">
                 {p.ref.fullName}#{p.ref.number}
               </span>

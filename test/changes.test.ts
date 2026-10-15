@@ -79,3 +79,61 @@ describe('diff parsing', () => {
     expect(() => parsePrUrl('https://github.com/FalkorDB/docs/issues/1')).toThrow(/not a GitHub pull request/);
   });
 });
+
+describe('githubSource (serverless ingestion)', () => {
+  it('produces the same symbol diff as a local clone, from GitHub API-shaped responses', async () => {
+    const { mkdtemp, cp, readFile, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { diffWith, diffRange, parseNameStatus } = await import('../src/pr/changes.js');
+    const { githubSource } = await import('../src/pr/github-diff.js');
+    const dir = await mkdtemp(join(tmpdir(), 'lockstep-gh-'));
+    try {
+      await cp(join(FIXTURES, 'org', 'mini-client'), dir, { recursive: true });
+      git(dir, 'init', '-q', '-b', 'main');
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-q', '-m', 'base');
+      const before = git(dir, 'rev-parse', 'HEAD');
+      const file = join(dir, 'miniclient', 'graph.py');
+      // Change one method; its neighbours fall inside the 3 lines of context GitHub sends.
+      await writeFile(file, (await readFile(file, 'utf8')).replace('return self.query(q)', 'return self.query(q.strip())'));
+      git(dir, 'mv', 'miniclient/client.py', 'miniclient/connection.py');
+      git(dir, 'commit', '-q', '-am', 'change');
+      const after = git(dir, 'rev-parse', 'HEAD');
+      const STATUS: Record<string, string> = { A: 'added', D: 'removed', M: 'modified', R: 'renamed' };
+      const fetchImpl = (async (url: string) => {
+        const u = new URL(url);
+        if (u.hostname === 'raw.githubusercontent.com') {
+          const [, , , sha, ...path] = u.pathname.split('/');
+          try {
+            return new Response(git(dir, 'show', `${sha}:${decodeURIComponent(path.join('/'))}`) + '\n');
+          } catch {
+            return new Response('', { status: 404 });
+          }
+        }
+        if (u.pathname.includes('/compare/')) {
+          const files = parseNameStatus(git(dir, 'diff', '--name-status', '-M', '-z', before, after) + '\0').map((f) => ({
+            filename: f.path,
+            status: STATUS[f.status[0]!],
+            ...(f.oldPath ? { previous_filename: f.oldPath } : {}),
+            patch: git(dir, 'diff', '-U3', before, after, '--', f.oldPath ?? f.path, f.path).split('\n').filter((l) => !/^(diff|index|---|\+\+\+|similarity|rename)/.test(l)).join('\n'),
+          }));
+          return new Response(JSON.stringify({ files }));
+        }
+        if (u.pathname.includes('/git/trees/')) {
+          const sha = u.pathname.split('/').pop()!;
+          return new Response(JSON.stringify({ truncated: false, tree: git(dir, 'ls-tree', '-r', '--name-only', sha).split('\n').map((path) => ({ path, type: 'blob' })) }));
+        }
+        return new Response('{}', { status: 404 });
+      }) as typeof fetch;
+      const viaApi = await diffWith(githubSource('acme/mini-client', { fetchImpl }), 'acme/mini-client', before, after);
+      const viaGit = await diffRange(dir, 'acme/mini-client', before, after);
+      expect(viaApi.symbols).toEqual(viaGit.symbols);
+      expect(viaApi.symbols.filter((s) => s.qualname.startsWith('miniclient.graph')).map((s) => `${s.change} ${s.qualname}`)).toEqual([
+        'modified miniclient.graph.Graph.ro_query',
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

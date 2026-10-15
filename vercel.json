@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --ignore-scripts",
+  "buildCommand": "npm run build",
+  "outputDirectory": "web/dist",
+  "functions": {
+    "api/[...route].js": {
+      "maxDuration": 300,
+      "includeFiles": "{dist/**,grammars/**,python/**,package.json}"
+    }
+  }
+}

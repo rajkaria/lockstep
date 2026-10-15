@@ -62,6 +62,14 @@ export function runProcess(
   });
 }
 
+let sandboxCheck: Promise<boolean> | undefined;
+
+/** Whether this host can build sandboxes (git + uv or python3). False on serverless hosts. */
+export function sandboxAvailable(): Promise<boolean> {
+  sandboxCheck ??= (async () => (await which('git')) && ((await which('uv')) || (await which('python3'))))();
+  return sandboxCheck;
+}
+
 async function which(cmd: string): Promise<boolean> {
   try {
     const r = await runProcess(cmd, ['--version'], { timeoutMs: 10_000, env: process.env });

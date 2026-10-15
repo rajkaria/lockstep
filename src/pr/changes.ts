@@ -71,29 +71,50 @@ export async function diffPullRequest(dir: string, repo: string, pr: PullRequest
   return diffRange(dir, repo, range.before, range.after);
 }
 
-/** Symbol-level diff between two commits of one repository. */
+/** Where a diff reads commits from: a local clone (git) or the GitHub API (serverless). */
+export interface DiffSource {
+  changedFiles(before: string, after: string): Promise<ChangedFile[]>;
+  /** Every path in the tree at a commit. */
+  files(sha: string): Promise<string[]>;
+  read(sha: string, path: string): Promise<string | undefined>;
+  hunks(before: string, after: string, oldPath: string, path: string): Promise<Hunks | undefined>;
+}
+
+export function gitSource(dir: string): DiffSource {
+  return {
+    changedFiles: async (before, after) => parseNameStatus(await git(dir, ['diff', '--name-status', '-M', '-z', before, after])),
+    files: async (sha) => (await git(dir, ['ls-tree', '-r', '--name-only', sha])).split('\n').filter(Boolean),
+    read: (sha, path) => show(dir, sha, path),
+    hunks: async (before, after, oldPath, path) => parseHunks(await git(dir, ['diff', '-U0', before, after, '--', oldPath, path])),
+  };
+}
+
+/** Symbol-level diff between two commits of one repository (local clone). */
 export async function diffRange(dir: string, repo: string, before: string, after: string): Promise<PrDiff> {
-  const raw = await git(dir, ['diff', '--name-status', '-M', '-z', before, after]);
-  const files = parseNameStatus(raw);
+  return diffWith(gitSource(dir), repo, before, after);
+}
+
+/** Symbol-level diff between two commits, reading through any source. */
+export async function diffWith(source: DiffSource, repo: string, before: string, after: string): Promise<PrDiff> {
+  const files = await source.changedFiles(before, after);
   const docsTouched = files.filter((f) => classifyFile(f.path) === 'markdown').map((f) => f.path);
   const pyChanged = files.filter((f) => classifyFile(f.path) === 'python' || (f.oldPath && classifyFile(f.oldPath) === 'python'));
   if (pyChanged.length === 0) return { before, after, files, symbols: [], docsTouched };
 
-  const pyAt = async (sha: string) =>
-    (await git(dir, ['ls-tree', '-r', '--name-only', sha])).split('\n').filter((p) => classifyFile(p) === 'python');
+  const pyAt = async (sha: string) => (await source.files(sha)).filter((p) => classifyFile(p) === 'python');
   const namesBefore = moduleNames(await pyAt(before));
   const namesAfter = moduleNames(await pyAt(after));
 
   const symbols: ChangedSymbol[] = [];
   for (const f of pyChanged) {
     const oldPath = f.oldPath ?? f.path;
-    const oldSrc = f.status.startsWith('A') ? undefined : await show(dir, before, oldPath);
-    const newSrc = f.status.startsWith('D') ? undefined : await show(dir, after, f.path);
+    const oldSrc = f.status.startsWith('A') ? undefined : await source.read(before, oldPath);
+    const newSrc = f.status.startsWith('D') ? undefined : await source.read(after, f.path);
     const oldMeta = namesBefore.get(oldPath);
     const newMeta = namesAfter.get(f.path);
     const oldMod = oldSrc !== undefined && oldMeta ? await extractPython(oldSrc, { module: oldMeta.module, path: oldPath, isPackage: oldMeta.isPackage }) : undefined;
     const newMod = newSrc !== undefined && newMeta ? await extractPython(newSrc, { module: newMeta.module, path: f.path, isPackage: newMeta.isPackage }) : undefined;
-    const hunks = oldMod && newMod ? parseHunks(await git(dir, ['diff', '-U0', before, after, '--', oldPath, f.path])) : undefined;
+    const hunks = oldMod && newMod ? await source.hunks(before, after, oldPath, f.path) : undefined;
     symbols.push(...compareModules(repo, oldMod, newMod, hunks, { old: oldSrc, new: newSrc }));
   }
   return { before, after, files, symbols, docsTouched };
@@ -127,6 +148,29 @@ export interface Hunks {
   /** Changed line ranges on the old side (1-based, inclusive). */
   old: [number, number][];
   new: [number, number][];
+}
+
+/**
+ * Exact changed lines from a diff that carries context lines (GitHub's `patch`
+ * field uses 3): context is skipped, so a neighbouring definition is not flagged.
+ */
+export function changedLinesFromPatch(patch: string): Hunks {
+  const h: Hunks = { old: [], new: [] };
+  let oldLine = 0;
+  let newLine = 0;
+  for (const line of patch.split('\n')) {
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (m) {
+      oldLine = Number(m[1]);
+      newLine = Number(m[2]);
+      continue;
+    }
+    if (line.startsWith('-')) h.old.push([oldLine, oldLine]), oldLine++;
+    else if (line.startsWith('+')) h.new.push([newLine, newLine]), newLine++;
+    else if (line.startsWith('\\')) continue; // "\ No newline at end of file"
+    else oldLine++, newLine++;
+  }
+  return h;
 }
 
 export function parseHunks(diff: string): Hunks {

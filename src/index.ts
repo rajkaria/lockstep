@@ -21,5 +21,5 @@ export type { TraceEvent } from './agent/trace.js';
 export { buildDocsPatch } from './patch.js';
 export { openDocsPr } from './pr/open-pr.js';
 export { createMcpServer } from './mcp/server.js';
-export { createApp } from './server/app.js';
+export { createApp, defaultModelFactory, DEFAULT_PRELOADED } from './server/app.js';
 export { collectFacts, factsMarkdown } from './facts.js';

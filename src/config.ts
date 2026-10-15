@@ -25,7 +25,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     falkordbUrl: env.FALKORDB_URL ?? 'falkor://localhost:6379',
     org: orgSlug(env.LOCKSTEP_ORG ?? 'falkordb'),
-    home: env.LOCKSTEP_HOME ?? join(homedir(), '.lockstep'),
+    // Serverless file systems are read-only except /tmp.
+    home: env.LOCKSTEP_HOME ?? (env.VERCEL ? '/tmp/lockstep' : join(homedir(), '.lockstep')),
     githubToken: env.GITHUB_TOKEN ?? env.GH_TOKEN ?? undefined,
     anthropicApiKey: env.ANTHROPIC_API_KEY ?? undefined,
     model: env.LOCKSTEP_MODEL ?? DEFAULT_MODEL,

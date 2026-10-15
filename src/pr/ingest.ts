@@ -5,7 +5,9 @@ import * as Q from '../graph/queries.js';
 import { symbolId, GENERIC } from '../indexer/resolve.js';
 import { checkoutRepo } from '../indexer/repo.js';
 import { fileId, writeBatched } from '../indexer/write.js';
-import { diffPullRequest, type ChangedSymbol, type PrDiff } from './changes.js';
+import { diffPullRequest, diffWith, type ChangedSymbol, type PrDiff } from './changes.js';
+import { githubSource, prRangeGitHub } from './github-diff.js';
+import { gitAvailable } from '../indexer/repo.js';
 import { fetchPullRequest, parsePrUrl, type PullRequestInfo } from './github.js';
 
 export interface IngestedPr {
@@ -34,9 +36,17 @@ export async function ingestPullRequest(graph: OrgGraph, config: Config, prUrl: 
       `${ref.fullName} is not indexed in the "${graph.name}" graph. Run: lockstep-docs index ${ref.fullName} (plus the repositories that document it).`,
     );
   }
-  const pr = await fetchPullRequest(ref, { token: config.githubToken, cacheDir: join(config.home, 'cache') });
-  const checkout = await checkoutRepo(config.home, ref.fullName);
-  const diff = await diffPullRequest(checkout.dir, ref.fullName, pr);
+  const gh = { token: config.githubToken, cacheDir: join(config.home, 'cache') };
+  const pr = await fetchPullRequest(ref, gh);
+  let diff: PrDiff;
+  if (await gitAvailable()) {
+    const checkout = await checkoutRepo(config.home, ref.fullName);
+    diff = await diffPullRequest(checkout.dir, ref.fullName, pr);
+  } else {
+    // Serverless hosts have no git: read the commits through the GitHub API instead.
+    const range = await prRangeGitHub(pr, gh);
+    diff = await diffWith(githubSource(ref.fullName, gh), ref.fullName, range.before, range.after);
+  }
   return recordPullRequest(graph, pr, diff);
 }
 

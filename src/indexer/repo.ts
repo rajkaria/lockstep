@@ -20,6 +20,18 @@ export async function git(cwd: string, args: string[], opts: { maxBuffer?: numbe
   }
 }
 
+let gitCheck: Promise<boolean> | undefined;
+
+/** Whether `git` can run here (false on serverless hosts, or when LOCKSTEP_INGEST=github). */
+export function gitAvailable(): Promise<boolean> {
+  if (process.env.LOCKSTEP_INGEST === 'github') return Promise.resolve(false);
+  gitCheck ??= exec('git', ['--version']).then(
+    () => true,
+    () => false,
+  );
+  return gitCheck;
+}
+
 /** `owner/name` from a GitHub URL or an `owner/name` string. */
 export function parseRepoName(input: string): string {
   const m = /^(?:https?:\/\/github\.com\/|git@github\.com:)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(input.trim());

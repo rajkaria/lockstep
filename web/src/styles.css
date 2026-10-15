@@ -274,6 +274,10 @@ button:disabled {
   background: var(--surface-2);
   margin: 12px 0;
 }
+.banner.snapshot {
+  border: 1px solid var(--api);
+  background: var(--api-bg);
+}
 .banner.err,
 .err {
   color: var(--breaking);

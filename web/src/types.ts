@@ -112,6 +112,8 @@ export interface Health {
   falkordb: string;
   agent: { available: true; model: string; effort: string } | { available: false; reason: string };
   busy: boolean;
+  /** Set when the UI is showing the bundled snapshot because the live API is unreachable. */
+  snapshot?: { takenAt: string };
 }
 
 export interface Facts {

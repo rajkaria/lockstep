@@ -5,7 +5,7 @@ import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
 import { checkoutRepo } from '../indexer/repo.js';
 import { errorLine, extractTraceback, isFragmentFailure, prepareExample, type ExampleSource } from './prepare.js';
-import { ensureVenv, runInSandbox, type InstallTarget } from './sandbox.js';
+import { ensureVenv, runInSandbox, sandboxAvailable, type InstallTarget } from './sandbox.js';
 import { ensureScratchDb, flushScratchDb } from './scratch.js';
 
 export type RunStatus = 'pass' | 'fail' | 'timeout' | 'skipped' | 'error';
@@ -94,6 +94,16 @@ export async function runExample(graph: OrgGraph, config: Config, example: Examp
   let record: RunRecord;
   if (prepared.skip) {
     record = { id: `run-${key}`, ...base, status: 'skipped', reason: prepared.skip, stdout: '', durationMs: 0 };
+  } else if (!(await sandboxAvailable())) {
+    // Not recorded: another host with a sandbox can still run it.
+    return {
+      id: `run-${key}-unavailable`,
+      ...base,
+      status: 'skipped',
+      reason: 'this deployment cannot execute examples (no git/uv sandbox runtime); runs recorded by other Lockstep hosts are answered from the graph',
+      stdout: '',
+      durationMs: 0,
+    };
   } else if (targets.length === 0) {
     record = { id: `run-${key}`, ...base, status: 'skipped', reason: 'uses no symbol from an indexed repository', stdout: '', durationMs: 0 };
   } else {

@@ -25,7 +25,9 @@ export class GraphStore {
   static async connect(url: string): Promise<GraphStore> {
     let db: FalkorDB;
     try {
-      db = await FalkorDB.connect({ url, socket: { connectTimeout: 5000, reconnectStrategy: false } as never });
+      // Give up quickly on a server that isn't there, but survive idle drops (serverless, cloud proxies).
+      const reconnectStrategy = (retries: number) => (retries >= 4 ? new Error('FalkorDB unreachable') : Math.min(200 * 2 ** retries, 2000));
+      db = await FalkorDB.connect({ url, socket: { connectTimeout: 5000, reconnectStrategy } as never });
     } catch (err) {
       throw new Error(
         `cannot reach FalkorDB at ${redact(url)}: ${(err as Error).message}\n` +
