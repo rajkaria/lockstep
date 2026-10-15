@@ -14,7 +14,7 @@ npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
 | **Built and run** (on the author's machine, against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
 | **Built, not run with a real model** | Agent mode (Claude chooses the tools): the loop is tested with a scripted model and the request shape against a local fake API; no paid model call has been made yet. The GitHub Action and the Docker image are written but not exercised (no Docker here). |
 | **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
-| **Not live yet** | Public deployment and the `lockstep-docs` npm package — see [docs/DEPLOY.md](docs/DEPLOY.md). |
+| **Live** | [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app) on Vercel, deployed from `main`. Until a hosted FalkorDB is attached it serves a labelled snapshot of the graph: the three preloaded PRs open their recorded checks (traces, evidence paths, example runs). The `lockstep-docs` npm package is not published yet. |
 | **Designed** | Issue/discussion → symbol links ("asked about but undocumented"); hosted multi-org service. See [VISION.md](VISION.md). |
 
 Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB), tracks 01 and 03.

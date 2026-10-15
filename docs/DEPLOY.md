@@ -19,6 +19,24 @@ repository commit and runs each docs example in it).
 | `LOCKSTEP_RUN_TIMEOUT_MS` | `30000` | Per-example timeout |
 | `PORT` / `HOST` | `8080` / `127.0.0.1` | Bind address for `serve` (`0.0.0.0` in the Docker image) |
 
+## Vercel
+
+The repository deploys to Vercel as is (`vercel.json`): the web UI is static (`web/dist`) and the API runs as a Vercel
+Function (`api/[...route].js`). On Vercel, pull requests are read through the GitHub API (no `git`), and examples are
+not executed (no sandbox runtime) — runs recorded by a local or container host are answered from the graph.
+
+1. Create a FalkorDB the function can reach (FalkorDB Cloud's free tier works) and index into it from your machine:
+   ```bash
+   export FALKORDB_URL='falkors://<user>:<password>@<host>:<port>'
+   npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+   bash scripts/seed.sh          # graph-mode checks of the preloaded PRs, with example runs, stored on the graph
+   ```
+2. `vercel env add FALKORDB_URL production` (and optionally `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`), then redeploy.
+
+Without `FALKORDB_URL` the function answers 503 and the UI shows the snapshot bundled at build time
+(`npm run snapshot` regenerates `web/public/snapshot.json` from a local graph), labelled with the time it was taken.
+Function duration is capped at 300 s (`vercel.json`).
+
 ## Docker Compose (any VM)
 
 ```bash
