@@ -1,0 +1,53 @@
+{
+  "name": "lockstep-docs",
+  "version": "0.1.0",
+  "description": "An agent that keeps your docs true to your code: it walks a FalkorDB graph of code, docs and decisions across repositories, runs the examples, and proposes the docs fix with the path behind each paragraph.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "lockstep-docs": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "web/dist",
+    "scripts/falkordb-local.sh",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run test",
+    "dev": "tsx src/cli.ts",
+    "db:start": "bash scripts/falkordb-local.sh start",
+    "db:stop": "bash scripts/falkordb-local.sh stop"
+  },
+  "keywords": [
+    "docs",
+    "documentation",
+    "drift",
+    "falkordb",
+    "graph",
+    "agent",
+    "mcp",
+    "code-graph"
+  ],
+  "dependencies": {
+    "commander": "^15.0.0",
+    "falkordb": "^6.8.0",
+    "tree-sitter-python": "^0.25.0",
+    "web-tree-sitter": "^0.27.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

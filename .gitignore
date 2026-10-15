@@ -1,0 +1,12 @@
+node_modules/
+dist/
+web/dist/
+.ocean/
+scratch/
+coverage/
+*.tgz
+.env
+.env.*
+!.env.example
+.DS_Store
+.lockstep/
