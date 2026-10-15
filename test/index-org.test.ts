@@ -65,8 +65,9 @@ describe('indexOrg (FalkorDB)', () => {
     const m = await rows<{ sec: string; sym: string; span: string }>(
       `MATCH (d:DocSection)-[m:MENTIONS]->(s:Symbol) RETURN d.anchor AS sec, s.qualname AS sym, m.span AS span ORDER BY sec, sym`,
     );
+    // `select_graph()` is ambiguous (sync and async clients); the page's examples use the sync
+    // Client exactly, so only that one is linked.
     expect(m.map((x) => `${x.sec}: ${x.span} -> ${x.sym}`)).toEqual([
-      'connect: select_graph() -> miniclient.asyncio.client.AsyncClient.select_graph',
       'connect: Client -> miniclient.client.Client',
       'connect: select_graph() -> miniclient.client.Client.select_graph',
       'listing-graphs: list_graphs() -> miniclient.client.Client.list_graphs',

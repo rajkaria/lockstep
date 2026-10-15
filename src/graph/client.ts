@@ -64,23 +64,39 @@ export class GraphStore {
   }
 }
 
+export interface QueryEvent {
+  name: string;
+  cypher: string;
+  params: Params;
+  ms: number;
+  rows: number;
+}
+
 export class OrgGraph {
   constructor(
     private readonly graph: Graph,
     readonly name: string,
+    private readonly listener?: (e: QueryEvent) => void,
   ) {}
+
+  /** A view of the same graph that reports every query it runs (for traces). */
+  traced(listener: (e: QueryEvent) => void): OrgGraph {
+    return new OrgGraph(this.graph, this.name, listener);
+  }
 
   async run<T = Record<string, unknown>>(query: NamedQuery | string, params: Params = {}): Promise<QueryResult<T>> {
     const cypher = typeof query === 'string' ? query : query.cypher;
+    const name = typeof query === 'string' ? 'adhoc' : query.name;
     let reply;
     try {
       reply = await this.graph.query<T>(cypher, { params: params as never });
     } catch (err) {
-      const name = typeof query === 'string' ? 'query' : query.name;
       throw new Error(`FalkorDB ${name} failed on graph "${this.name}": ${(err as Error).message}`);
     }
     const stats = (reply.metadata ?? []).map(String);
-    return { rows: (reply.data ?? []) as T[], cypher, params, ms: executionMs(stats), stats };
+    const result = { rows: (reply.data ?? []) as T[], cypher, params, ms: executionMs(stats), stats };
+    this.listener?.({ name, cypher, params, ms: result.ms, rows: result.rows.length });
+    return result;
   }
 
   /** Delete the whole graph (tests and `index --fresh` only). */

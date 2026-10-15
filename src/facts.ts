@@ -14,6 +14,7 @@ export interface Facts {
   crossRepoDocPaths: number;
   samplePaths: { symbol: string; doc: string; hops: number; path: string[] }[];
   impactQueryMs: { symbol: string; ms: number; rows: number }[];
+  pullRequests: { url: string; title: string; changed: number; sections: number }[];
 }
 
 /** Every number Lockstep's README quotes, computed from the live graph. */
@@ -36,7 +37,10 @@ export async function collectFacts(graph: OrgGraph, falkordbVersion = 'unknown')
     impactQueryMs.push({ symbol: s.symbol, ms: r.ms, rows: r.rows.length });
   }
 
+  const pullRequests = (await graph.run<Facts['pullRequests'][number]>(Q.factsPullRequests)).rows;
+
   return {
+    pullRequests,
     org: graph.name,
     generatedAt: new Date().toISOString(),
     falkordb: falkordbVersion,
@@ -83,6 +87,8 @@ export function factsMarkdown(f: Facts): string {
   for (const d of f.dependsOn) lines.push(`- ${d.from} → ${d.to} (${d.spec})`);
   lines.push('', '## Sample cross-repository paths', '');
   for (const p of f.samplePaths) lines.push(`- ${p.hops} hops: ${p.path.map((x) => `\`${x}\``).join(' ← ')}`);
+  lines.push('', '## Pull requests checked', '', '| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) |', '|---|---:|---:|');
+  for (const p of f.pullRequests) lines.push(`| [${p.title.replace(/\|/g, '\\|')}](${p.url}) | ${p.changed} | ${p.sections} |`);
   lines.push('', '## Impact query timing (server-side, FalkorDB)', '', '| Changed symbol | Rows | ms |', '|---|---:|---:|');
   for (const t of f.impactQueryMs) lines.push(`| \`${t.symbol}\` | ${t.rows} | ${t.ms.toFixed(2)} |`);
   lines.push('');

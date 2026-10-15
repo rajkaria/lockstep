@@ -24,3 +24,31 @@ export async function testGraph(prefix = 'test'): Promise<{ store: GraphStore; g
     },
   };
 }
+
+import { loadConfig, type Config } from '../src/config.js';
+import type { PullRequestInfo } from '../src/pr/github.js';
+
+export function testConfig(overrides: Partial<Config> = {}): Config {
+  return { ...loadConfig({}), home: join(FIXTURES, '..', '.lockstep-test-home'), ...overrides };
+}
+
+export function fakePr(overrides: Partial<PullRequestInfo> = {}): PullRequestInfo {
+  return {
+    owner: 'acme',
+    repo: 'mini-client',
+    fullName: 'acme/mini-client',
+    number: 7,
+    url: 'https://github.com/acme/mini-client/pull/7',
+    title: 'Async query timeout; drop graph_names',
+    body: '',
+    author: 'dev',
+    state: 'closed',
+    mergedAt: '2026-10-01T00:00:00Z',
+    mergeSha: 'after',
+    baseSha: 'before',
+    baseRef: 'main',
+    headSha: 'head',
+    headRef: 'feature',
+    ...overrides,
+  };
+}

@@ -194,8 +194,9 @@ function cleanHeading(raw: string): { text: string; id?: string } {
     })
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]+>/g, '')
-    .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')
     .replace(/`([^`]*)`/g, '$1')
+    // Emphasis only at word boundaries, so snake_case names keep their underscores.
+    .replace(/(^|\s)([*_]{1,3})([^*_\s][^*_]*?)\2(?=\s|$|[.,:;!?)])/g, '$1$3')
     .trim();
   return { text, id };
 }

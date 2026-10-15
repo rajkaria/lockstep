@@ -89,44 +89,10 @@ export async function writeDocs(
   const ownPackages = new Set(p.modules.map((m) => m.module.split('.')[0]!));
   for (const doc of docs) {
     const contextRepos = pageContext(doc, ownPackages, table);
-    for (const s of doc.sections) {
-      const id = sectionId(repo, doc.path, s.anchor);
-      const idents = new Set<string>();
-      for (const span of s.inlineCode) {
-        for (const { ident, called } of identifiersIn(span.text)) {
-          idents.add(ident);
-          idents.add(ident.split('.').pop()!);
-          for (const m of table.matchMention(ident, { called, codeRepos, contextRepos })) {
-            mentions.push({ from: id, to: m.sym.id, resolved: m.resolved, span: span.text });
-          }
-        }
-      }
-      sectionRows.push({
-        id,
-        file: fileId(repo, doc.path),
-        props: {
-          repo,
-          path: doc.path,
-          anchor: s.anchor,
-          title: s.title,
-          page_title: doc.title,
-          level: s.level,
-          heading_path: s.headingPath.join(' > '),
-          lineno: s.lineno,
-          end_lineno: s.endLineno,
-          body: s.body.slice(0, MAX_BODY),
-          idents: [...idents].sort(),
-          url: blob(doc.path, s.lineno),
-        },
-      });
-      for (const link of s.links) {
-        const target = resolveLink(doc.path, link.target, sectionIdsByPath);
-        if (target && target !== id) links.push({ from: id, to: target });
-      }
-    }
 
     // Python examples on a page are resolved cumulatively: a later fragment that uses
     // `g` from an earlier block resolves `g` through that earlier binding.
+    const callGroups: Row[][] = [];
     let acc = '';
     for (const ex of doc.examples) {
       const id = exampleId(repo, doc.path, ex.index);
@@ -140,10 +106,12 @@ export async function writeDocs(
         const dispose = table.addEphemeral(repo, mod);
         try {
           for (const call of mod.calls.filter((c) => c.lineno >= startLine)) {
-            for (const r of table.resolveCall(repo, mod, call)) {
-              if (!codeRepos.has(r.to.split(':')[0]!)) continue;
-              uses.push({ from: id, to: r.to, resolved: r.resolved, line: ex.lineno + (call.lineno - startLine), text: call.text });
-            }
+            callGroups.push(
+              table
+                .resolveCall(repo, mod, call)
+                .filter((r) => codeRepos.has(r.to.split(':')[0]!))
+                .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: ex.lineno + (call.lineno - startLine), text: call.text })),
+            );
           }
         } finally {
           dispose();
@@ -172,6 +140,47 @@ export async function writeDocs(
         },
       });
     }
+    // What the page's examples use exactly disambiguates its by-name guesses:
+    // `udf_load` on a page whose examples construct the sync `FalkorDB` is the sync one.
+    const used = usedScopes(callGroups);
+    for (const g of callGroups) uses.push(...narrow(g, used));
+
+    for (const s of doc.sections) {
+      const id = sectionId(repo, doc.path, s.anchor);
+      const idents = new Set<string>();
+      for (const span of s.inlineCode) {
+        for (const { ident, called } of identifiersIn(span.text)) {
+          idents.add(ident);
+          idents.add(ident.split('.').pop()!);
+          const group = table
+            .matchMention(ident, { called, codeRepos, contextRepos })
+            .map((m) => ({ from: id, to: m.sym.id, resolved: m.resolved, span: span.text }));
+          mentions.push(...narrow(group, used));
+        }
+      }
+      sectionRows.push({
+        id,
+        file: fileId(repo, doc.path),
+        props: {
+          repo,
+          path: doc.path,
+          anchor: s.anchor,
+          title: s.title,
+          page_title: doc.title,
+          level: s.level,
+          heading_path: s.headingPath.join(' > '),
+          lineno: s.lineno,
+          end_lineno: s.endLineno,
+          body: s.body.slice(0, MAX_BODY),
+          idents: [...idents].sort(),
+          url: blob(doc.path, s.lineno),
+        },
+      });
+      for (const link of s.links) {
+        const target = resolveLink(doc.path, link.target, sectionIdsByPath);
+        if (target && target !== id) links.push({ from: id, to: target });
+      }
+    }
   }
 
   // Example scripts shipped inside code repositories (examples/*.py) are docs too.
@@ -180,16 +189,21 @@ export async function writeDocs(
     const id = exampleId(repo, f.path, 0);
     const mod = await extractPython(code, { module: pseudoModule(repo, f.path), path: f.path });
     const dispose = table.addEphemeral(repo, mod);
+    const groups: Row[][] = [];
     try {
       for (const call of mod.calls) {
-        for (const r of table.resolveCall(repo, mod, call)) {
-          if (!codeRepos.has(r.to.split(':')[0]!)) continue;
-          uses.push({ from: id, to: r.to, resolved: r.resolved, line: call.lineno, text: call.text });
-        }
+        groups.push(
+          table
+            .resolveCall(repo, mod, call)
+            .filter((r) => codeRepos.has(r.to.split(':')[0]!))
+            .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: call.lineno, text: call.text })),
+        );
       }
     } finally {
       dispose();
     }
+    const used = usedScopes(groups);
+    for (const g of groups) uses.push(...narrow(g, used));
     exampleRows.push({
       id,
       file: fileId(repo, f.path),
@@ -237,6 +251,39 @@ export async function writeDocs(
     links: dedupedLinks.length,
     gone: gone.rows[0]?.gone ?? 0,
   };
+}
+
+function qualnameOf(id: string): string {
+  return id.slice(id.indexOf(':') + 1);
+}
+
+function parentOf(qualname: string): string {
+  return qualname.slice(0, Math.max(0, qualname.lastIndexOf('.')));
+}
+
+/** Symbols (and their classes/modules) that a page's examples reach through exact resolution. */
+export function usedScopes(groups: Row[][]): Set<string> {
+  const used = new Set<string>();
+  for (const g of groups) {
+    for (const r of g) {
+      if (r.resolved !== 'exact') continue;
+      const q = qualnameOf(r.to);
+      used.add(q);
+      used.add(parentOf(q));
+    }
+  }
+  return used;
+}
+
+/** Among ambiguous by-name candidates, keep those in scopes the page uses exactly (if any are). */
+export function narrow(group: Row[], used: Set<string>): Row[] {
+  if (group.length <= 1 || group.every((r) => r.resolved === 'exact')) return group;
+  const kept = group.filter((r) => {
+    if (r.resolved === 'exact') return true;
+    const q = qualnameOf(r.to);
+    return used.has(q) || used.has(parentOf(q));
+  });
+  return kept.length ? kept : group;
 }
 
 /**

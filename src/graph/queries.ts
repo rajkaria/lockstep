@@ -152,6 +152,115 @@ export const markGoneDocs = q('index', 'markGoneDocs', 'Doc sections and example
   RETURN count(d) AS gone
 `);
 
+// ─── pull requests ──────────────────────────────────────────────────────────
+
+export const upsertPullRequest = q('index', 'upsertPullRequest', 'Record a pull request and forget its previous change set (re-checking is idempotent).', `
+  MERGE (pr:PullRequest {url: $url})
+  SET pr += $props
+  WITH pr
+  OPTIONAL MATCH (pr)<-[c:CHANGED_IN]-()
+  DELETE c
+`);
+
+export const upsertMissingSymbols = q('index', 'upsertMissingSymbols', 'Symbols a PR removed or renamed that the graph (indexed after the PR) no longer has: recreate them as removed.', `
+  UNWIND $rows AS row
+  MERGE (s:Symbol {id: row.id})
+  ON CREATE SET s += row.props, s.status = 'removed'
+  WITH s, row
+  MERGE (f:File {id: row.file})
+  ON CREATE SET f.repo = row.props.repo, f.path = row.props.path, f.kind = 'python'
+  MERGE (s)-[:DEFINED_IN]->(f)
+`);
+
+export const lateLinkSections = q('index', 'lateLinkSections', 'Link docs that still name a removed symbol (by the identifiers stored on each section), within repositories that document its repository.', `
+  UNWIND $rows AS row
+  MATCH (s:Symbol {id: row.id})
+  MATCH (d:DocSection {status: 'live'})
+  WHERE (row.name IN d.idents OR row.dotted IN d.idents)
+    AND (d.repo = s.repo OR (:Repo {name: d.repo})-[:DEPENDS_ON]->(:Repo {name: s.repo}))
+  MERGE (d)-[m:MENTIONS]->(s)
+  ON CREATE SET m.resolved = 'late', m.span = row.name
+  RETURN count(m) AS linked
+`);
+
+export const lateLinkExamples = q('index', 'lateLinkExamples', 'Link code examples that still use a removed symbol\'s name.', `
+  UNWIND $rows AS row
+  MATCH (s:Symbol {id: row.id})
+  MATCH (e:CodeExample {status: 'live'})
+  WHERE row.name IN e.idents
+    AND (e.repo = s.repo OR (:Repo {name: e.repo})-[:DEPENDS_ON]->(:Repo {name: s.repo}))
+  MERGE (e)-[u:USES]->(s)
+  ON CREATE SET u.resolved = 'late', u.text = row.name
+  RETURN count(u) AS linked
+`);
+
+export const upsertChangedIn = q('index', 'upsertChangedIn', 'Attach each changed symbol to the pull request with the kind of change.', `
+  UNWIND $rows AS row
+  MATCH (s:Symbol {id: row.id})
+  MATCH (pr:PullRequest {url: $url})
+  MERGE (s)-[c:CHANGED_IN]->(pr)
+  SET c.kind = row.kind, c.before = row.before, c.after = row.after, c.renamed_to = row.renamed_to
+`);
+
+// ─── agent tools ────────────────────────────────────────────────────────────
+
+export const impact = q('tool', 'impact', 'Every doc section and code example a pull request reaches: changed symbol ← up to 3 callers (any repository) ← doc. The path is the evidence.', `
+  MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
+  WHERE c.kind <> 'added'
+  MATCH p = (s)<-[:CALLS*0..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
+  WHERE (d:DocSection OR d:CodeExample) AND d.status = 'live'
+  OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
+  RETURN s.qualname AS changed, c.kind AS change, c.before AS before, c.after AS after,
+         t.qualname AS reached, labels(d)[0] AS kind, d.id AS doc, d.repo AS repo, d.path AS path,
+         coalesce(sec.id, d.id) AS section, coalesce(sec.heading_path, d.heading_path, d.path) AS heading,
+         d.url AS url, length(p) AS hops,
+         [n IN nodes(p) | coalesce(n.qualname, n.id)] AS evidence,
+         [x IN relationships(p) | coalesce(x.resolved, 'exact')] AS resolution
+  ORDER BY hops, repo, doc
+`);
+
+export const clearance = q('tool', 'clearance', 'Proof of absence: changed symbols with no doc section or example within 3 call hops in any repository.', `
+  MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
+  WHERE c.kind <> 'added' AND NOT (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+  RETURN s.qualname AS symbol, s.name AS name, s.repo AS repo, c.kind AS change, s.visibility AS visibility
+  ORDER BY symbol
+`);
+
+export const prChanges = q('tool', 'prChanges', 'What a pull request changed, symbol by symbol.', `
+  MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
+  RETURN s.qualname AS symbol, s.kind AS kind, c.kind AS change, c.before AS before, c.after AS after,
+         c.renamed_to AS renamedTo, s.repo AS repo, s.path AS path, s.status AS status
+  ORDER BY change, symbol
+`);
+
+export const rankSections = q('tool', 'rankSections', 'Order doc sections by how central their page is: PageRank over LINKS_TO, summed per page.', `
+  CALL algo.pageRank('DocSection', 'LINKS_TO') YIELD node, score
+  WITH node.repo + ':' + node.path AS page, node.id AS id, node.heading_path AS heading, score
+  WITH page, sum(score) AS pageScore, collect({id: id, heading: heading, score: score}) AS sections
+  UNWIND sections AS sec
+  WITH page, pageScore, sec
+  WHERE sec.id IN $ids
+  RETURN sec.id AS id, sec.heading AS heading, page, pageScore, sec.score AS score
+  ORDER BY pageScore DESC, score DESC
+`);
+
+export const rankSectionsByLinks = q('tool', 'rankSectionsByLinks', 'Fallback ranking when graph algorithms are unavailable: inbound links per page.', `
+  MATCH (d:DocSection)
+  WHERE d.id IN $ids
+  OPTIONAL MATCH (other:DocSection {repo: d.repo, path: d.path})<-[l:LINKS_TO]-()
+  RETURN d.id AS id, d.heading_path AS heading, d.repo + ':' + d.path AS page, count(l) AS pageScore, 0 AS score
+  ORDER BY pageScore DESC
+`);
+
+export const readSection = q('tool', 'readSection', 'The current text of a doc section, its code examples and its source link.', `
+  MATCH (d:DocSection {id: $id})
+  OPTIONAL MATCH (e:CodeExample)-[:IN_SECTION]->(d)
+  WITH d, e ORDER BY e.index
+  RETURN d.id AS id, d.repo AS repo, d.path AS path, d.heading_path AS heading, d.body AS body, d.url AS url,
+         d.lineno AS lineno, d.end_lineno AS endLineno,
+         collect(CASE WHEN e IS NULL THEN NULL ELSE {id: e.id, lang: e.lang, code: e.code, lineno: e.lineno} END) AS examples
+`);
+
 // ─── report ─────────────────────────────────────────────────────────────────
 
 export const repoSymbols = q('report', 'repoSymbols', 'List the live symbols of a repository.', `
@@ -229,6 +338,19 @@ export const factsSamplePaths = q('report', 'factsSamplePaths', 'For public symb
   LIMIT 5
 `);
 
+export const factsPullRequests = q('report', 'factsPullRequests', 'Pull requests checked so far, with how many symbols they changed and how many doc sections those reach.', `
+  MATCH (pr:PullRequest)
+  OPTIONAL MATCH (pr)<-[c:CHANGED_IN]-(s:Symbol)
+  WHERE c.kind <> 'added'
+  WITH pr, collect(s) AS changed
+  OPTIONAL MATCH (pr)<-[c2:CHANGED_IN]-(s2:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+  WHERE c2.kind <> 'added' AND (d:DocSection OR d:CodeExample) AND d.status = 'live'
+  OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
+  WITH pr, changed, collect(DISTINCT coalesce(sec.id, d.id)) AS sections
+  RETURN pr.url AS url, pr.title AS title, size(changed) AS changed, size(sections) AS sections
+  ORDER BY url
+`);
+
 export const impactFromSymbol = q('report', 'impactFromSymbol', 'Docs reachable from one symbol (FACTS timing; the PR-scoped version is the impact tool).', `
   MATCH (s:Symbol {qualname: $qualname})
   MATCH p = (s)<-[:CALLS*0..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
@@ -237,6 +359,17 @@ export const impactFromSymbol = q('report', 'impactFromSymbol', 'Docs reachable 
 `);
 
 export const ALL_QUERIES: NamedQuery[] = [
+  upsertPullRequest,
+  upsertMissingSymbols,
+  lateLinkSections,
+  lateLinkExamples,
+  upsertChangedIn,
+  impact,
+  clearance,
+  prChanges,
+  rankSections,
+  rankSectionsByLinks,
+  readSection,
   upsertRepo,
   upsertFiles,
   upsertSymbols,
@@ -261,5 +394,6 @@ export const ALL_QUERIES: NamedQuery[] = [
   factsDependsOn,
   factsCrossRepoDocPaths,
   factsSamplePaths,
+  factsPullRequests,
   impactFromSymbol,
 ];

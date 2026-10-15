@@ -90,6 +90,9 @@ describe('helpers', () => {
     expect(normalizeLang('py')).toBe('python');
     expect(normalizeLang('Shell')).toBe('bash');
     expect(slugify('Hello, World! (v2)')).toBe('hello-world-v2');
+    const d = scanMarkdown('x.md', '## `backfill_entity_embeddings()` -- **Entity** _vector_ backfill\n');
+    expect(d.sections[0]!.title).toBe('backfill_entity_embeddings() -- Entity vector backfill');
+    expect(d.sections[0]!.anchor).toBe('backfill_entity_embeddings----entity-vector-backfill');
   });
 
   it('pulls the code identifier out of inline code, skipping commands, paths, flags, procedures and phrases', () => {

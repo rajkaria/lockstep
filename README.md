@@ -14,5 +14,6 @@ npm run verify        # typecheck + tests (starts a local FalkorDB on port 6380,
 
 npx tsx src/cli.ts db start                      # local FalkorDB on :6379 (falkordblite binaries, no Docker)
 npx tsx src/cli.ts index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx tsx src/cli.ts check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
 npx tsx src/cli.ts facts                         # writes docs/FACTS.md from the graph
 ```

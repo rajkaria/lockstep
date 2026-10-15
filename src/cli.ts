@@ -9,6 +9,9 @@ import { GraphStore } from './graph/client.js';
 import { indexOrg } from './indexer/index.js';
 import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
 import { packageRoot, packageVersion } from './pkg.js';
+import { clearanceText, dim, impactText } from './format/text.js';
+import { clearanceTool, impactTool, rankSectionsTool } from './tools/graph-tools.js';
+import type { ToolContext } from './tools/types.js';
 
 const program = new Command();
 
@@ -79,6 +82,35 @@ program
         );
       }
       for (const dep of report.dependsOn) console.log(`  ${dep.from} → ${dep.to} (${dep.spec})`);
+    });
+  });
+
+program
+  .command('check')
+  .description('Check a pull request against the org graph: impacted docs with evidence paths, clearance, ranking')
+  .argument('<pr-url>', 'https://github.com/<owner>/<repo>/pull/<n>')
+  .option('--no-agent', 'run the graph tools in a fixed order instead of the agent')
+  .option('--max-hops <n>', 'maximum call hops between a changed symbol and a doc', '3')
+  .option('--json', 'print JSON')
+  .action(async (prUrl: string, opts: { agent: boolean; maxHops: string; json?: boolean }) => {
+    await withGraph(async (store, org) => {
+      const ctx: ToolContext = { graph: store.org(org), config: settings(), log };
+      if (opts.agent) {
+        throw new Error('the agent loop lands in a later release of this command; run with --no-agent for now');
+      }
+      const impact = await impactTool.run(ctx, { pr_url: prUrl, max_hops: Number(opts.maxHops) });
+      const clearance = await clearanceTool.run(ctx, { pr_url: prUrl });
+      const ids = [...new Set(impact.data.sections.map((s) => s.section).filter((id) => id.includes('#')))];
+      const ranked = ids.length ? await rankSectionsTool.run(ctx, { section_ids: ids }) : undefined;
+      if (opts.json) {
+        console.log(JSON.stringify({ impact, clearance, ranked }, null, 2));
+        return;
+      }
+      console.log(impactText(impact.data, ranked?.data.ranked));
+      console.log('');
+      console.log(clearanceText(clearance.data.cleared));
+      console.log('');
+      console.log(dim(`${impact.summary}\n${clearance.summary}${ranked ? `\n${ranked.summary}` : ''}`));
     });
   });
 
