@@ -1,4 +1,5 @@
 import type { ClearedSymbol, ImpactData, RankedSection } from '../tools/graph-tools.js';
+import type { RunExampleData } from '../tools/run-example.js';
 
 const tty = process.stdout.isTTY;
 const c = (code: number) => (s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -36,6 +37,19 @@ export function clearanceText(cleared: ClearedSymbol[]): string {
   const out = [bold(`Cleared: reach no doc within 3 hops (${cleared.length})`)];
   for (const s of cleared) {
     out.push(`  ${green('✓')} ${s.symbol} ${dim(`(${s.change}; ${s.textMatches} raw text matches in docs; check: ${s.grep})`)}`);
+  }
+  return out.join('\n');
+}
+
+const STATUS = { pass: green('PASS'), fail: red('FAIL'), timeout: red('TIMEOUT'), skipped: dim('SKIPPED'), error: yellow('ERROR') } as const;
+
+export function runText(d: RunExampleData): string {
+  const out = [bold(d.example), dim(d.url)];
+  for (const r of d.runs) {
+    out.push('', `${STATUS[r.status]} ${r.side !== 'current' ? `${r.side} ` : ''}${dim(r.installed.join(', '))}${r.cached ? dim(' (recorded)') : ''}`);
+    if (r.stitched.length) out.push(dim(`  stitched with ${r.stitched.join(', ')}`));
+    if (r.reason) out.push(`  ${r.reason}`);
+    if (r.traceback && r.status !== 'skipped') out.push(r.traceback.split('\n').map((l) => `  ${l}`).join('\n'));
   }
   return out.join('\n');
 }

@@ -15,6 +15,7 @@ export interface Facts {
   samplePaths: { symbol: string; doc: string; hops: number; path: string[] }[];
   impactQueryMs: { symbol: string; ms: number; rows: number }[];
   pullRequests: { url: string; title: string; changed: number; sections: number }[];
+  runs: { example: string; url: string; side: string; status: string; error: string; reason: string; installed: string[]; pr: string | null }[];
 }
 
 /** Every number Lockstep's README quotes, computed from the live graph. */
@@ -38,9 +39,11 @@ export async function collectFacts(graph: OrgGraph, falkordbVersion = 'unknown')
   }
 
   const pullRequests = (await graph.run<Facts['pullRequests'][number]>(Q.factsPullRequests)).rows;
+  const runs = (await graph.run<Facts['runs'][number]>(Q.factsRuns)).rows;
 
   return {
     pullRequests,
+    runs,
     org: graph.name,
     generatedAt: new Date().toISOString(),
     falkordb: falkordbVersion,
@@ -89,6 +92,17 @@ export function factsMarkdown(f: Facts): string {
   for (const p of f.samplePaths) lines.push(`- ${p.hops} hops: ${p.path.map((x) => `\`${x}\``).join(' ← ')}`);
   lines.push('', '## Pull requests checked', '', '| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) |', '|---|---:|---:|');
   for (const p of f.pullRequests) lines.push(`| [${p.title.replace(/\|/g, '\\|')}](${p.url}) | ${p.changed} | ${p.sections} |`);
+  lines.push('', '## Example runs (sandbox)', '');
+  const byStatus = new Map<string, number>();
+  for (const r of f.runs) byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);
+  lines.push(`${f.runs.length} recorded runs: ${[...byStatus].map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}.`, '');
+  if (f.runs.length) {
+    lines.push('| Example | Side | Status | Error / reason | Installed |', '|---|---|---|---|---|');
+    for (const r of f.runs) {
+      const why = (r.error || r.reason || '').replace(/\|/g, '\\|').slice(0, 120);
+      lines.push(`| [${r.example}](${r.url}) | ${r.side}${r.pr ? ` of ${r.pr.replace('https://github.com/', '')}` : ''} | ${r.status} | ${why} | ${r.installed.map((i) => i.replace(/@(\w{7})\w+/, '@$1')).join(', ')} |`);
+    }
+  }
   lines.push('', '## Impact query timing (server-side, FalkorDB)', '', '| Changed symbol | Rows | ms |', '|---|---:|---:|');
   for (const t of f.impactQueryMs) lines.push(`| \`${t.symbol}\` | ${t.rows} | ${t.ms.toFixed(2)} |`);
   lines.push('');

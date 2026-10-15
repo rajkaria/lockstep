@@ -11,6 +11,9 @@ export interface Config {
   githubToken?: string;
   anthropicApiKey?: string;
   model: string;
+  /** Scratch FalkorDB that docs examples run against (never the org graph's server). */
+  scratch: { host: string; port: number; managed: boolean };
+  runTimeoutMs: number;
 }
 
 export const DEFAULT_MODEL = 'claude-sonnet-5-5';
@@ -23,6 +26,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     githubToken: env.GITHUB_TOKEN ?? env.GH_TOKEN ?? undefined,
     anthropicApiKey: env.ANTHROPIC_API_KEY ?? undefined,
     model: env.LOCKSTEP_MODEL ?? DEFAULT_MODEL,
+    scratch: env.LOCKSTEP_SCRATCH_URL
+      ? { ...hostPort(env.LOCKSTEP_SCRATCH_URL), managed: false }
+      : { host: '127.0.0.1', port: Number(env.LOCKSTEP_SCRATCH_PORT ?? 6390), managed: true },
+    runTimeoutMs: Number(env.LOCKSTEP_RUN_TIMEOUT_MS ?? 30_000),
   };
 }
 
@@ -35,4 +42,10 @@ export function orgSlug(raw: string): string {
     .replace(/^-+|-+$/g, '');
   if (!slug) throw new Error(`invalid org name: "${raw}"`);
   return slug;
+}
+
+function hostPort(url: string): { host: string; port: number } {
+  const m = /^(?:\w+:\/\/)?([^:/]+)(?::(\d+))?/.exec(url);
+  if (!m) throw new Error(`invalid LOCKSTEP_SCRATCH_URL: ${url}`);
+  return { host: m[1]!, port: Number(m[2] ?? 6379) };
 }

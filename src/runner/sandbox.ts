@@ -1,0 +1,185 @@
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, posix } from 'node:path';
+import { git } from '../indexer/repo.js';
+import { packageRoot } from '../pkg.js';
+
+export interface InstallTarget {
+  repo: string;
+  sha: string;
+  /** Local clone the source is archived from. */
+  dir: string;
+}
+
+export interface ProcResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  durationMs: number;
+}
+
+const MAX_OUTPUT = 64 * 1024;
+
+/** Run a process with a hard timeout; the whole process group is killed on timeout. */
+export function runProcess(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number; input?: string },
+): Promise<ProcResult> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    child.stdout.on('data', (d: Buffer) => {
+      if (stdout.length < MAX_OUTPUT) stdout += d.toString();
+    });
+    child.stderr.on('data', (d: Buffer) => {
+      if (stderr.length < MAX_OUTPUT) stderr += d.toString();
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
+    }, opts.timeoutMs);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr, timedOut, durationMs: Date.now() - started });
+    });
+    child.stdin.end(opts.input ?? '');
+  });
+}
+
+async function which(cmd: string): Promise<boolean> {
+  try {
+    const r = await runProcess(cmd, ['--version'], { timeoutMs: 10_000, env: process.env });
+    return r.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Extract `sha` of a clone into `dest` (git archive | tar), fetching missing blobs lazily. */
+async function archive(dir: string, sha: string, dest: string): Promise<void> {
+  await mkdir(dest, { recursive: true });
+  await new Promise<void>((resolve, reject) => {
+    const gitProc = spawn('git', ['archive', '--format=tar', sha], { cwd: dir });
+    const tar = spawn('tar', ['-x', '-C', dest]);
+    let err = '';
+    gitProc.stderr.on('data', (d: Buffer) => (err += d.toString()));
+    tar.stderr.on('data', (d: Buffer) => (err += d.toString()));
+    gitProc.stdout.pipe(tar.stdin);
+    tar.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`git archive ${sha} failed: ${err.trim()}`))));
+    gitProc.on('error', reject);
+    tar.on('error', reject);
+  });
+}
+
+/** The directory holding the Python project (pyproject.toml / setup.py) of a source tree at a commit. */
+export async function projectSubdir(dir: string, sha: string): Promise<string> {
+  const files = (await git(dir, ['ls-tree', '-r', '--name-only', sha])).split('\n');
+  const candidates = files
+    .filter((f) => /(^|\/)(pyproject\.toml|setup\.py)$/.test(f))
+    .filter((f) => !/(^|\/)(tests?|docs|examples?|benchmarks?)\//.test(f))
+    .sort((a, b) => a.split('/').length - b.split('/').length);
+  return candidates[0] ? posix.dirname(candidates[0]) : '.';
+}
+
+const PYTHON_VERSION = '3.12';
+const venvLocks = new Map<string, Promise<string>>();
+
+/**
+ * A virtualenv with every target installed from source at its commit, cached by
+ * (repo@sha set, Python version). Returns the venv's python executable.
+ */
+export function ensureVenv(home: string, targets: InstallTarget[], log?: (m: string) => void): Promise<string> {
+  const spec = targets.map((t) => `${t.repo}@${t.sha}`).sort();
+  const key = createHash('sha1').update(JSON.stringify([PYTHON_VERSION, ...spec])).digest('hex').slice(0, 16);
+  const pending = venvLocks.get(key);
+  if (pending) return pending;
+  const p = buildVenv(home, key, targets, spec, log).finally(() => venvLocks.delete(key));
+  venvLocks.set(key, p);
+  return p;
+}
+
+async function buildVenv(home: string, key: string, targets: InstallTarget[], spec: string[], log?: (m: string) => void): Promise<string> {
+  const venv = join(home, 'venvs', key);
+  const python = join(venv, 'bin', 'python');
+  const marker = join(venv, '.lockstep-ok');
+  if (existsSync(marker) && existsSync(python)) return python;
+  log?.(`building sandbox environment for ${spec.join(', ')}`);
+  const src = join(home, 'src', key);
+  await rm(src, { recursive: true, force: true });
+  const paths: string[] = [];
+  for (const t of targets) {
+    const dest = join(src, t.repo.replace('/', '__'));
+    await archive(t.dir, t.sha, dest);
+    paths.push(join(dest, await projectSubdir(t.dir, t.sha)));
+  }
+  await rm(venv, { recursive: true, force: true });
+  const env = { ...process.env, VIRTUAL_ENV: undefined } as NodeJS.ProcessEnv;
+  if (await which('uv')) {
+    const mk = await runProcess('uv', ['venv', '-q', '--python', PYTHON_VERSION, venv], { timeoutMs: 300_000, env });
+    if (mk.code !== 0) throw new Error(`uv venv failed: ${mk.stderr.trim()}`);
+    const inst = await runProcess('uv', ['pip', 'install', '-q', '--python', python, ...paths], { timeoutMs: 600_000, env });
+    if (inst.code !== 0) throw new Error(`installing ${spec.join(', ')} failed:\n${inst.stderr.trim().slice(-2000)}`);
+  } else {
+    const mk = await runProcess('python3', ['-m', 'venv', venv], { timeoutMs: 300_000, env });
+    if (mk.code !== 0) throw new Error(`python3 -m venv failed: ${mk.stderr.trim()}`);
+    const inst = await runProcess(python, ['-m', 'pip', 'install', '-q', ...paths], { timeoutMs: 600_000, env });
+    if (inst.code !== 0) throw new Error(`installing ${spec.join(', ')} failed:\n${inst.stderr.trim().slice(-2000)}`);
+  }
+  await writeFile(marker, JSON.stringify({ spec, python: PYTHON_VERSION, createdAt: new Date().toISOString() }));
+  await rm(src, { recursive: true, force: true });
+  return python;
+}
+
+export interface SandboxRun extends ProcResult {
+  python: string;
+}
+
+/**
+ * Execute a Python program in an isolated working directory: no inherited
+ * secrets, HOME in a temp dir, outbound network refused except the scratch
+ * FalkorDB (which answers for localhost:6379).
+ */
+export async function runInSandbox(
+  python: string,
+  code: string,
+  opts: { scratchPort: number; scratchHost?: string; timeoutMs: number },
+): Promise<SandboxRun> {
+  const work = await mkdtemp(join(tmpdir(), 'lockstep-run-'));
+  try {
+    const shim = join(work, '_shim');
+    await mkdir(shim);
+    await writeFile(join(shim, 'sitecustomize.py'), await readFile(join(packageRoot(), 'python', 'sitecustomize.py'), 'utf8'));
+    await writeFile(join(work, 'example.py'), code);
+    const env: NodeJS.ProcessEnv = {
+      PATH: '/usr/bin:/bin',
+      HOME: work,
+      TMPDIR: work,
+      LANG: 'C.UTF-8',
+      PYTHONPATH: shim,
+      PYTHONDONTWRITEBYTECODE: '1',
+      PYTHONUNBUFFERED: '1',
+      LOCKSTEP_SCRATCH_HOST: opts.scratchHost ?? '127.0.0.1',
+      LOCKSTEP_SCRATCH_PORT: String(opts.scratchPort),
+    };
+    const r = await runProcess(python, ['-s', 'example.py'], { cwd: work, env, timeoutMs: opts.timeoutMs });
+    return { ...r, python };
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}

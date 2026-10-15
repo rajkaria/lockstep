@@ -1,4 +1,11 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "miniclient"
 version = "1.0.0"
 dependencies = []
+
+[tool.setuptools]
+packages = ["miniclient", "miniclient.asyncio"]

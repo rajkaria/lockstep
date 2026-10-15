@@ -1,6 +1,6 @@
 # FACTS
 
-Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-15T16:06:55.046Z (FalkorDB 4.18.3).
+Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-15T16:13:52.350Z (FalkorDB 4.18.3).
 Every number in the README comes from this file. Regenerate it; never edit it by hand.
 
 ## Repositories
@@ -20,10 +20,12 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | File | 329 |
 | PullRequest | 4 |
 | Repo | 3 |
+| Run | 6 |
 | Symbol | 1298 |
 
 | Edges | Count |
 |---|---:|
+| AT | 6 |
 | CALLS | 1708 |
 | CHANGED_IN | 7 |
 | DEFINED_IN | 6271 |
@@ -32,6 +34,7 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | IN_SECTION | 1824 |
 | LINKS_TO | 636 |
 | MENTIONS | 594 |
+| OF | 6 |
 | USES | 716 |
 
 ## Resolution quality
@@ -62,10 +65,23 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | [fix(asyncio): prevent connection pool kwargs mutation and await schema refresh](https://github.com/FalkorDB/falkordb-py/pull/276) | 4 | 43 |
 | [feat: add optional hiredis extra for faster reply parsing](https://github.com/FalkorDB/falkordb-py/pull/304) | 0 | 0 |
 
+## Example runs (sandbox)
+
+6 recorded runs: 3 fail, 3 pass.
+
+| Example | Side | Status | Error / reason | Installed |
+|---|---|---|---|---|
+| [FalkorDB/docs:commands/graph.explain.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.explain.mdx#L17) | after of FalkorDB/falkordb-py/pull/267 | fail | redis.exceptions.ResponseError: Invalid graph operation on empty key | FalkorDB/falkordb-py@a9c7510 |
+| [FalkorDB/docs:commands/graph.explain.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.explain.mdx#L17) | before of FalkorDB/falkordb-py/pull/267 | fail | redis.exceptions.ResponseError: Invalid graph operation on empty key | FalkorDB/falkordb-py@031eb04 |
+| [FalkorDB/docs:commands/graph.profile.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.profile.mdx#L22) | after of FalkorDB/falkordb-py/pull/267 | pass |  | FalkorDB/falkordb-py@a9c7510 |
+| [FalkorDB/docs:commands/graph.profile.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/commands/graph.profile.mdx#L22) | before of FalkorDB/falkordb-py/pull/267 | pass |  | FalkorDB/falkordb-py@031eb04 |
+| [FalkorDB/falkordb-py:README.md:4](https://github.com/FalkorDB/falkordb-py/blob/31f63f44a5745b9bec65969a1db706906718cb82/README.md#L67) | after of FalkorDB/falkordb-py/pull/262 | pass |  | FalkorDB/falkordb-py@f7c3de7 |
+| [FalkorDB/falkordb-py:README.md:4](https://github.com/FalkorDB/falkordb-py/blob/31f63f44a5745b9bec65969a1db706906718cb82/README.md#L67) | before of FalkorDB/falkordb-py/pull/262 | fail | TypeError: Redis.__init__() got an unexpected keyword argument 'himport_registry' | FalkorDB/falkordb-py@49aa012 |
+
 ## Impact query timing (server-side, FalkorDB)
 
 | Changed symbol | Rows | ms |
 |---|---:|---:|
-| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.90 |
-| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.38 |
-| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 1.90 |
+| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.35 |
+| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.32 |
+| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 1.00 |

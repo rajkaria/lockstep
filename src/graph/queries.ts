@@ -37,6 +37,7 @@ export const SCHEMA_INDEXES: [label: string, prop: string][] = [
   ['Decision', 'id'],
   ['Verdict', 'id'],
   ['Run', 'id'],
+  ['Run', 'key'],
   ['Check', 'id'],
 ];
 
@@ -261,6 +262,52 @@ export const readSection = q('tool', 'readSection', 'The current text of a doc s
          collect(CASE WHEN e IS NULL THEN NULL ELSE {id: e.id, lang: e.lang, code: e.code, lineno: e.lineno} END) AS examples
 `);
 
+// ─── example runs ───────────────────────────────────────────────────────────
+
+export const exampleForRun = q('tool', 'exampleForRun', 'A code example, the repositories its calls resolve into, and the earlier examples on its page (for stitching fragments).', `
+  MATCH (e:CodeExample {id: $id})
+  OPTIONAL MATCH (e)-[:USES]->(s:Symbol)
+  WITH e, collect(DISTINCT s.repo) AS usedRepos
+  OPTIONAL MATCH (prev:CodeExample {repo: e.repo, path: e.path, status: 'live'})
+  WHERE prev.index < e.index
+  WITH e, usedRepos, prev
+  ORDER BY prev.index
+  RETURN e.id AS id, e.lang AS lang, e.code AS code, e.repo AS repo, e.path AS path, e.url AS url, usedRepos,
+         collect(CASE WHEN prev IS NULL THEN NULL ELSE {id: prev.id, lang: prev.lang, code: prev.code} END) AS earlier
+`);
+
+export const installSet = q('tool', 'installSet', 'Repositories to install for a run: the given ones plus their in-org dependencies (DEPENDS_ON), code repositories only.', `
+  MATCH (r:Repo)
+  WHERE r.name IN $repos
+  OPTIONAL MATCH (r)-[:DEPENDS_ON*1..3]->(d:Repo)
+  WITH collect(DISTINCT r) + collect(DISTINCT d) AS repos
+  UNWIND repos AS repo
+  WITH DISTINCT repo
+  WHERE repo IS NOT NULL AND size(repo.packages) > 0
+  RETURN repo.name AS repo, repo.sha AS sha
+  ORDER BY repo
+`);
+
+export const cachedRun = q('memory', 'cachedRun', 'An identical earlier run (same program, same commits): the graph remembers what already ran.', `
+  MATCH (r:Run {key: $key})
+  RETURN properties(r) AS props
+  ORDER BY r.created_at DESC
+  LIMIT 1
+`);
+
+export const upsertRun = q('memory', 'upsertRun', 'Record an example execution: status, error line, traceback, commits installed.', `
+  MATCH (e:CodeExample {id: $example})
+  MERGE (r:Run {id: $id})
+  SET r += $props
+  MERGE (r)-[:OF]->(e)
+`);
+
+export const linkRunToPr = q('memory', 'linkRunToPr', 'Attach a run to the pull request it was evidence for.', `
+  MATCH (r:Run {id: $id})
+  MATCH (pr:PullRequest {url: $pr})
+  MERGE (r)-[:AT]->(pr)
+`);
+
 // ─── report ─────────────────────────────────────────────────────────────────
 
 export const repoSymbols = q('report', 'repoSymbols', 'List the live symbols of a repository.', `
@@ -351,6 +398,14 @@ export const factsPullRequests = q('report', 'factsPullRequests', 'Pull requests
   ORDER BY url
 `);
 
+export const factsRuns = q('report', 'factsRuns', 'Every recorded example execution, latest first per example and side.', `
+  MATCH (r:Run)-[:OF]->(e:CodeExample)
+  OPTIONAL MATCH (r)-[:AT]->(pr:PullRequest)
+  RETURN e.id AS example, e.url AS url, r.side AS side, r.status AS status, r.error AS error, r.reason AS reason,
+         r.installed AS installed, pr.url AS pr, r.created_at AS at
+  ORDER BY example, at DESC
+`);
+
 export const impactFromSymbol = q('report', 'impactFromSymbol', 'Docs reachable from one symbol (FACTS timing; the PR-scoped version is the impact tool).', `
   MATCH (s:Symbol {qualname: $qualname})
   MATCH p = (s)<-[:CALLS*0..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
@@ -370,6 +425,11 @@ export const ALL_QUERIES: NamedQuery[] = [
   rankSections,
   rankSectionsByLinks,
   readSection,
+  exampleForRun,
+  installSet,
+  cachedRun,
+  upsertRun,
+  linkRunToPr,
   upsertRepo,
   upsertFiles,
   upsertSymbols,
@@ -395,5 +455,6 @@ export const ALL_QUERIES: NamedQuery[] = [
   factsCrossRepoDocPaths,
   factsSamplePaths,
   factsPullRequests,
+  factsRuns,
   impactFromSymbol,
 ];

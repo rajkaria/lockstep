@@ -9,7 +9,8 @@ import { GraphStore } from './graph/client.js';
 import { indexOrg } from './indexer/index.js';
 import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
 import { packageRoot, packageVersion } from './pkg.js';
-import { clearanceText, dim, impactText } from './format/text.js';
+import { clearanceText, dim, impactText, runText } from './format/text.js';
+import { runExampleTool } from './tools/run-example.js';
 import { clearanceTool, impactTool, rankSectionsTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 
@@ -111,6 +112,27 @@ program
       console.log(clearanceText(clearance.data.cleared));
       console.log('');
       console.log(dim(`${impact.summary}\n${clearance.summary}${ranked ? `\n${ranked.summary}` : ''}`));
+    });
+  });
+
+program
+  .command('run')
+  .description('Run a docs code example in the sandbox (before and after a PR with --pr)')
+  .argument('<example-id>', 'CodeExample id, e.g. FalkorDB/docs:commands/graph.explain.mdx:3')
+  .option('--pr <url>', 'run at the commit before the pull request and at the pull request')
+  .option('--json', 'print JSON')
+  .action(async (exampleId: string, opts: { pr?: string; json?: boolean }) => {
+    await withGraph(async (store, org) => {
+      const ctx: ToolContext = { graph: store.org(org), config: settings(), log };
+      if (opts.pr) await impactTool.run(ctx, { pr_url: opts.pr });
+      const r = await runExampleTool.run(ctx, { example_id: exampleId, pr_url: opts.pr });
+      if (opts.json) {
+        console.log(JSON.stringify(r, null, 2));
+        return;
+      }
+      console.log(runText(r.data));
+      console.log('');
+      console.log(r.summary);
     });
   });
 

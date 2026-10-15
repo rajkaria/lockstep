@@ -10,6 +10,8 @@
   "files": [
     "dist",
     "web/dist",
+    "grammars",
+    "python",
     "scripts/falkordb-local.sh",
     "README.md",
     "LICENSE"
