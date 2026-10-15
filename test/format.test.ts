@@ -14,6 +14,7 @@ const impact: ImpactData = {
   ],
   totalSections: 1,
   truncated: false,
+  counts: { breaking: 1, api: 0, behavior: 0 },
 };
 
 describe('checkMarkdown', () => {

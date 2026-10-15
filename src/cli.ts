@@ -7,6 +7,8 @@ import { loadConfig, orgSlug } from './config.js';
 import { collectFacts, factsMarkdown } from './facts.js';
 import { GraphStore, redact } from './graph/client.js';
 import { serveMcp } from './mcp/server.js';
+import { serve } from '@hono/node-server';
+import { createApp, defaultModelFactory } from './server/app.js';
 import { indexOrg } from './indexer/index.js';
 import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
 import { packageRoot, packageVersion } from './pkg.js';
@@ -239,6 +241,23 @@ program
     await withGraph(async (store, org) => {
       log(`lockstep mcp: serving graph "${org}" from ${redact(settings().falkordbUrl)}`);
       await serveMcp(store.org(org), settings());
+    });
+  });
+
+program
+  .command('serve')
+  .description('Serve the web demo and its API (paste a PR, watch the trace)')
+  .option('--port <port>', 'port (env PORT)', process.env.PORT ?? '8080')
+  .option('--host <host>', 'interface to bind', process.env.HOST ?? '127.0.0.1')
+  .option('--preload <urls...>', 'pull requests listed on the home page (env LOCKSTEP_PRELOADED, comma-separated)')
+  .action(async (opts: { port: string; host: string; preload?: string[] }) => {
+    const config = settings();
+    const store = await GraphStore.connect(config.falkordbUrl);
+    const preloaded = opts.preload ?? process.env.LOCKSTEP_PRELOADED?.split(',').map((s) => s.trim()).filter(Boolean);
+    const model = defaultModelFactory(config);
+    const app = createApp({ store, config, model, preloaded });
+    serve({ fetch: app.fetch, port: Number(opts.port), hostname: opts.host }, (info) => {
+      log(`lockstep serve: http://${opts.host}:${info.port} (graph "${config.org}", agent ${model ? `on, ${config.model}` : 'off: no Claude credentials, graph mode only'})`);
     });
   });
 

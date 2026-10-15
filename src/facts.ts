@@ -7,7 +7,7 @@ export interface Facts {
   falkordb: string;
   nodes: Record<string, number>;
   edges: Record<string, number>;
-  repos: { name: string; sha: string; symbols: number; sections: number; examples: number; pythonExamples: number }[];
+  repos: { name: string; sha: string; packages: string[]; symbols: number; sections: number; examples: number; pythonExamples: number }[];
   calls: { exact: number; byName: number; crossRepo: number };
   uses: { exact: number; byName: number };
   dependsOn: { from: string; to: string; spec: string }[];

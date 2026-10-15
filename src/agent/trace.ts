@@ -41,9 +41,12 @@ export function storedTrace(events: TraceEvent[]): TraceEvent[] {
     .map((e) => (e.type === 'tool_result' ? { ...e, data: trimData(e.data) } : e));
 }
 
-/** Keep tool data readable in a stored trace without storing whole sections twice. */
-export function trimData(data: unknown, max = 6000): unknown {
+/**
+ * Stored traces keep tool data so a replay shows the same findings; only very
+ * large payloads are cut, marked with `__trimmed` (distinct from a tool's own fields).
+ */
+export function trimData(data: unknown, max = 60_000): unknown {
   const json = JSON.stringify(data ?? null);
   if (json.length <= max) return data;
-  return { truncated: true, preview: `${json.slice(0, max)}…` };
+  return { __trimmed: true, preview: `${json.slice(0, max)}…` };
 }

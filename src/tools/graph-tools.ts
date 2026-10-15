@@ -63,6 +63,8 @@ export interface ImpactData {
   sections: ImpactedSection[];
   totalSections: number;
   truncated: boolean;
+  /** Severity counts over all impacted sections (not only the ones shown). */
+  counts: Record<Severity, number>;
 }
 
 const MAX_SECTIONS = 40;
@@ -158,15 +160,16 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number }, ImpactDa
     );
     const sections = groupImpact(rows.rows);
     for (const s of sections) s.crossRepo = s.repo !== pr.repo;
+    const counts = { breaking: 0, api: 0, behavior: 0 } as Record<Severity, number>;
+    for (const s of sections) counts[s.severity]++;
     const data: ImpactData = {
       pr: { url, title: pr.title, repo: pr.repo, state: pr.state, before: pr.before, after: pr.after, docsTouched: pr.docs ?? [] },
       changed: changes.rows.map((c) => ({ symbol: c.symbol, change: c.change, before: c.before || undefined, after: c.after || undefined, renamedTo: c.renamedTo || undefined })),
       sections: sections.slice(0, MAX_SECTIONS),
       totalSections: sections.length,
       truncated: sections.length > MAX_SECTIONS,
+      counts,
     };
-    const counts = { breaking: 0, api: 0, behavior: 0 } as Record<Severity, number>;
-    for (const s of sections) counts[s.severity]++;
     const crossRepo = sections.filter((s) => s.crossRepo).length;
     const summary =
       changes.rows.length === 0

@@ -512,7 +512,7 @@ export const factsRepos = q('report', 'factsRepos', 'Per-repository counts for F
   OPTIONAL MATCH (d:DocSection {repo: r.name, status: 'live'})
   WITH r, symbols, count(d) AS sections
   OPTIONAL MATCH (e:CodeExample {repo: r.name, status: 'live'})
-  RETURN r.name AS name, r.sha AS sha, symbols, sections, count(e) AS examples,
+  RETURN r.name AS name, r.sha AS sha, r.packages AS packages, symbols, sections, count(e) AS examples,
          sum(CASE WHEN e.lang = 'python' THEN 1 ELSE 0 END) AS pythonExamples
   ORDER BY name
 `);
