@@ -110,7 +110,7 @@ export interface Health {
   version: string;
   org: string;
   falkordb: string;
-  agent: { available: true; model: string; effort: string } | { available: false; reason: string };
+  agent: { available: true; model: string; effort: string; provider?: string } | { available: false; reason: string };
   busy: boolean;
   /** Set when the UI is showing the bundled snapshot because the live API is unreachable. */
   snapshot?: { takenAt: string };

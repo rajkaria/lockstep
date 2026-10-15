@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isCompatibleProvider } from './agent/anthropic.js';
 
 export interface Config {
   /** falkor[s]://[[user][:password]@]host[:port] */
@@ -10,6 +11,10 @@ export interface Config {
   home: string;
   githubToken?: string;
   anthropicApiKey?: string;
+  /** ANTHROPIC_BASE_URL: the Claude API by default, or an Anthropic-compatible provider (e.g. DeepSeek). */
+  modelBaseUrl?: string;
+  /** The model endpoint is another provider's Anthropic-compatible API (portable request fields only). */
+  modelCompatible: boolean;
   model: string;
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Server-side refusal fallback on the Claude API. */
@@ -29,6 +34,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     home: env.LOCKSTEP_HOME ?? (env.VERCEL ? '/tmp/lockstep' : join(homedir(), '.lockstep')),
     githubToken: env.GITHUB_TOKEN ?? env.GH_TOKEN ?? undefined,
     anthropicApiKey: env.ANTHROPIC_API_KEY ?? undefined,
+    modelBaseUrl: env.ANTHROPIC_BASE_URL || undefined,
+    modelCompatible: isCompatibleProvider(env.ANTHROPIC_BASE_URL || undefined),
     model: env.LOCKSTEP_MODEL ?? DEFAULT_MODEL,
     effort: effortOf(env.LOCKSTEP_EFFORT),
     fallbacks: env.LOCKSTEP_FALLBACKS !== 'off',

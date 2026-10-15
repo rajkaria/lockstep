@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AnthropicModel, claudeCredentialsAvailable, MissingCredentialsError } from '../src/agent/anthropic.js';
+import { AnthropicModel, claudeCredentialsAvailable, isCompatibleProvider, MissingCredentialsError } from '../src/agent/anthropic.js';
+import { loadConfig } from '../src/config.js';
 import { SYSTEM_PROMPT } from '../src/agent/prompt.js';
 import { modelTools } from '../src/tools/index.js';
 
@@ -20,14 +21,14 @@ const SSE = [
 describe('AnthropicModel (local fake API, no paid calls)', () => {
   let server: Server;
   let url: string;
-  const seen: { headers: IncomingMessage['headers']; body: Record<string, any> }[] = [];
+  const seen: { url: string; headers: IncomingMessage['headers']; body: Record<string, any> }[] = [];
 
   beforeAll(async () => {
     server = createServer((req, res) => {
       let body = '';
       req.on('data', (d) => (body += d));
       req.on('end', () => {
-        seen.push({ headers: req.headers, body: JSON.parse(body) });
+        seen.push({ url: req.url ?? '', headers: req.headers, body: JSON.parse(body) });
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         for (const [event, data] of SSE) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         res.end();
@@ -58,6 +59,35 @@ describe('AnthropicModel (local fake API, no paid calls)', () => {
     expect(body.tools.every((t: { eager_input_streaming: boolean }) => t.eager_input_streaming === true)).toBe(true);
     expect(body.tool_choice).toBeUndefined();
     expect(String(headers['anthropic-beta'])).toContain('server-side-fallback-2026-07-01');
+  });
+
+  it('on an Anthropic-compatible provider, sends only the portable fields: plain endpoint, thinking, effort, tools', async () => {
+    const model = new AnthropicModel({ model: 'deepseek-v4-pro', apiKey: 'test-key', baseURL: url, compatible: true });
+    const msg = await model.turn({ system: SYSTEM_PROMPT, tools: modelTools(), messages: [{ role: 'user', content: 'Check https://github.com/a/b/pull/1.' }] });
+    expect(msg.content.find((b) => b.type === 'tool_use')).toMatchObject({ name: 'impact' });
+    const { url: path, body, headers } = seen.at(-1)!;
+    expect(path).toBe('/v1/messages');
+    expect(headers['anthropic-beta']).toBeUndefined();
+    expect(body).toMatchObject({ model: 'deepseek-v4-pro', stream: true, system: SYSTEM_PROMPT, thinking: { type: 'enabled' }, output_config: { effort: 'medium' } });
+    expect(body.fallbacks).toBeUndefined();
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(modelTools().map((t) => t.name));
+    expect(body.tools.some((t: object) => 'eager_input_streaming' in t)).toBe(false);
+  });
+
+  it('refuses a Claude model name on another provider, which would remap it and mislabel every trace', () => {
+    expect(() => new AnthropicModel({ model: 'claude-sonnet-5-5', apiKey: 'k', baseURL: url, compatible: true })).toThrow(/LOCKSTEP_MODEL/);
+  });
+
+  it('detects the provider from ANTHROPIC_BASE_URL', () => {
+    expect(isCompatibleProvider(undefined)).toBe(false);
+    expect(isCompatibleProvider('https://api.anthropic.com')).toBe(false);
+    expect(isCompatibleProvider('https://api.deepseek.com/anthropic')).toBe(true);
+    expect(loadConfig({ ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic', LOCKSTEP_MODEL: 'deepseek-v4-pro' })).toMatchObject({
+      modelBaseUrl: 'https://api.deepseek.com/anthropic',
+      modelCompatible: true,
+      model: 'deepseek-v4-pro',
+    });
+    expect(loadConfig({}).modelCompatible).toBe(false);
   });
 
   it('fails loudly without credentials instead of falling back to anything', () => {

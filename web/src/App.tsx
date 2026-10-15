@@ -168,7 +168,7 @@ function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRe
         <div className="modes" role="radiogroup" aria-label="Mode">
           <label className={mode === 'agent' ? 'on' : ''}>
             <input type="radio" name="mode" checked={mode === 'agent'} disabled={agentOff} onChange={() => setMode('agent')} />
-            Agent: Claude chooses the tools and writes the verdicts
+            Agent: {health?.agent.available ? <code>{health.agent.model}</code> : 'the model'} chooses the tools and writes the verdicts
           </label>
           <label className={mode === 'graph' ? 'on' : ''}>
             <input type="radio" name="mode" checked={mode === 'graph'} onChange={() => setMode('graph')} />

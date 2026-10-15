@@ -10,8 +10,9 @@ repository commit and runs each docs example in it).
 | `LOCKSTEP_ORG` | `falkordb` | Graph name: one graph per organisation |
 | `LOCKSTEP_SCRATCH_URL` | — | A **separate** FalkorDB the docs examples run against. It is flushed before every run; Lockstep refuses to flush the server named in `FALKORDB_URL` |
 | `LOCKSTEP_SCRATCH_PORT` | `6390` | Without `LOCKSTEP_SCRATCH_URL`, Lockstep starts its own scratch server on this local port (falkordblite binaries, no Docker) |
-| `ANTHROPIC_API_KEY` | — | Turns on agent mode (Claude chooses the tools and writes verdicts). Without it the server runs graph mode and says so |
-| `LOCKSTEP_MODEL` / `LOCKSTEP_EFFORT` | `claude-sonnet-5-5` / `medium` | Agent model and effort |
+| `ANTHROPIC_API_KEY` | — | Turns on agent mode (the model chooses the tools and writes verdicts). Without it the server runs graph mode and says so |
+| `ANTHROPIC_BASE_URL` | Claude API | Point the agent at an Anthropic-compatible provider instead, e.g. `https://api.deepseek.com/anthropic` with a DeepSeek key in `ANTHROPIC_API_KEY`. Lockstep then sends only the portable request fields (thinking, effort, tools; no betas or refusal fallback) and requires `LOCKSTEP_MODEL` to name the provider's model |
+| `LOCKSTEP_MODEL` / `LOCKSTEP_EFFORT` | `claude-sonnet-5-5` / `medium` | Agent model and effort (`deepseek-v4-pro` on DeepSeek) |
 | `LOCKSTEP_FALLBACKS` | on | `off` disables server-side refusal fallback (needed off Anthropic's first-party API) |
 | `GITHUB_TOKEN` | — | Raises the GitHub API limit (60/hour without); needed for `patch --open-pr` |
 | `LOCKSTEP_PRELOADED` | three FalkorDB PRs | Comma-separated PR URLs shown on the home page |
@@ -31,7 +32,8 @@ not executed (no sandbox runtime) — runs recorded by a local or container host
    npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
    bash scripts/seed.sh          # re-index, then graph-mode checks of the preloaded PRs with example runs, stored on the graph
    ```
-2. `vercel env add FALKORDB_URL production` (and optionally `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`), then redeploy.
+2. `vercel env add FALKORDB_URL production` (and optionally `ANTHROPIC_API_KEY` — plus `ANTHROPIC_BASE_URL` and
+   `LOCKSTEP_MODEL` for an Anthropic-compatible provider — and `GITHUB_TOKEN`), then redeploy.
 
 Without `FALKORDB_URL` the function answers 503 and the UI shows the snapshot bundled at build time
 (`npm run snapshot` regenerates `web/public/snapshot.json` from a local graph), labelled with the time it was taken.

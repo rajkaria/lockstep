@@ -71,7 +71,15 @@ class RateLimiter {
 
 export function defaultModelFactory(config: Config): (() => ModelClient) | undefined {
   if (!config.anthropicApiKey && !claudeCredentialsAvailable()) return undefined;
-  return () => new AnthropicModel({ model: config.model, effort: config.effort, fallbacks: config.fallbacks, apiKey: config.anthropicApiKey });
+  return () =>
+    new AnthropicModel({
+      model: config.model,
+      effort: config.effort,
+      fallbacks: config.fallbacks,
+      apiKey: config.anthropicApiKey,
+      baseURL: config.modelBaseUrl,
+      compatible: config.modelCompatible,
+    });
 }
 
 export function createApp(opts: AppOptions): Hono {
@@ -94,7 +102,9 @@ export function createApp(opts: AppOptions): Hono {
       version: packageVersion(),
       org: graph.name,
       falkordb: await store.serverVersion(),
-      agent: opts.model ? { available: true, model: config.model, effort: config.effort } : { available: false, reason: 'the server has no Claude API credentials (ANTHROPIC_API_KEY)' },
+      agent: opts.model
+        ? { available: true, model: config.model, effort: config.effort, provider: config.modelCompatible ? new URL(config.modelBaseUrl!).hostname : 'api.anthropic.com' }
+        : { available: false, reason: 'the server has no model API credentials (ANTHROPIC_API_KEY)' },
       busy: mutex.busy,
     }),
   );

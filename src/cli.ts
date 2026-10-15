@@ -123,6 +123,8 @@ program
           effort: (opts.effort as Effort | undefined) ?? config.effort,
           fallbacks: config.fallbacks,
           apiKey: config.anthropicApiKey,
+          baseURL: config.modelBaseUrl,
+          compatible: config.modelCompatible,
         });
         const r = await runAgentCheck(ctx, model, prUrl, {
           maxSteps: Number(opts.maxSteps),
