@@ -13,3 +13,5 @@ coverage/
 .claude/
 .vercel
 .env*
+CLAUDE.md
+docs/context/
