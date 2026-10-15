@@ -100,3 +100,34 @@ describe('SymbolTable', () => {
     expect(calls).toEqual(['x.ro_query -> acme/mini-client:miniclient.graph.Graph.ro_query [by-name]']);
   });
 });
+
+describe('SymbolTable precision', () => {
+  it('prefers an in-org binding over an Any annotation, and never by-names calls on external objects', async () => {
+    const { extractPython } = await import('../src/indexer/python.js');
+    const { SymbolTable } = await import('../src/indexer/resolve.js');
+    const { parsed, table: base } = await fixtureTable();
+    const table = new SymbolTable();
+    for (const p of parsed) for (const m of p.modules) table.add(p.checkout.repo, m);
+    void base;
+    const src = [
+      'from typing import Any',
+      'from redis.asyncio import BlockingConnectionPool',
+      'from miniclient import Client',
+      'class Conn:',
+      '    def __init__(self):',
+      '        self._graph: Any | None = None',
+      '        self._pool: Any | None = None',
+      '    def connect(self):',
+      '        self._pool = self._pool or BlockingConnectionPool()',
+      '        self._graph = Client().select_graph("g")',
+      '    def go(self):',
+      '        self._pool.ro_query()',
+      '        return self._graph.ro_query("x")',
+    ].join('\n');
+    const mod = await extractPython(src, { module: 'app.conn', path: 'app/conn.py' });
+    table.add('acme/app', mod);
+    const calls = table.resolveModule('acme/app', mod).map((c) => `${c.from.split(':')[1]} -> ${c.to.split(':')[1]} [${c.resolved}]`);
+    expect(calls).toContain('app.conn.Conn.go -> miniclient.graph.Graph.ro_query [exact]');
+    expect(calls.filter((c) => c.includes('[by-name]'))).toEqual([]);
+  });
+});

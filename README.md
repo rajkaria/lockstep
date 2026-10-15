@@ -11,4 +11,8 @@ break by running them, and proposes the docs fix with the path behind each parag
 ```bash
 npm install
 npm run verify        # typecheck + tests (starts a local FalkorDB on port 6380, no Docker needed)
+
+npx tsx src/cli.ts db start                      # local FalkorDB on :6379 (falkordblite binaries, no Docker)
+npx tsx src/cli.ts index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx tsx src/cli.ts facts                         # writes docs/FACTS.md from the graph
 ```

@@ -1,12 +1,18 @@
-import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
 import { ensureSchema } from '../graph/schema.js';
+import { dependencyEdges, type DependsOn } from './deps.js';
+import { readDocs, writeDocs, type DocsIndexReport } from './docs.js';
+import { trackedOrWalked } from './files.js';
+import type { MdDoc } from './markdown.js';
 import { extractPython, type PyModule } from './python.js';
-import { classifyFile, moduleNames, trackedFiles, type Checkout, type FileKind } from './repo.js';
+import { classifyFile, moduleNames, type Checkout, type FileKind } from './repo.js';
 import { symbolId, SymbolTable } from './resolve.js';
+import { fileId, writeBatched } from './write.js';
+
+export { fileId, writeBatched };
 
 export interface IndexProgress {
   phase: 'checkout' | 'parse' | 'write' | 'resolve' | 'docs' | 'done';
@@ -28,6 +34,8 @@ export interface IndexReport {
   org: string;
   run: string;
   repos: RepoIndexReport[];
+  docs: DocsIndexReport[];
+  dependsOn: DependsOn[];
   ms: number;
 }
 
@@ -38,32 +46,13 @@ export interface ParsedRepo {
   parseErrors: string[];
 }
 
-const BATCH = 400;
-
-export async function writeBatched(graph: OrgGraph, query: Q.NamedQuery, rows: unknown[], extra: Record<string, unknown> = {}): Promise<void> {
-  for (let i = 0; i < rows.length; i += BATCH) {
-    await graph.run(query, { ...extra, rows: rows.slice(i, i + BATCH) });
-  }
-}
-
 /** All indexable files of a checkout (git-tracked when it is a git repo, else a directory walk). */
 export async function listFiles(dir: string): Promise<{ path: string; kind: FileKind }[]> {
-  const paths = existsSync(join(dir, '.git')) ? await trackedFiles(dir) : await walk(dir, dir);
+  const paths = await trackedOrWalked(dir);
   return paths.flatMap((path) => {
     const kind = classifyFile(path);
     return kind ? [{ path, kind }] : [];
   });
-}
-
-async function walk(root: string, dir: string): Promise<string[]> {
-  const out: string[] = [];
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...(await walk(root, full)));
-    else out.push(relative(root, full).split('\\').join('/'));
-  }
-  return out.sort();
 }
 
 export async function parseRepo(checkout: Checkout): Promise<ParsedRepo> {
@@ -164,10 +153,6 @@ export async function writeCode(
   return reports;
 }
 
-export function fileId(repo: string, path: string): string {
-  return `${repo}:${path}`;
-}
-
 function visibility(name: string): 'public' | 'private' | 'special' {
   if (/^__.*__$/.test(name)) return 'special';
   return name.startsWith('_') ? 'private' : 'public';
@@ -179,4 +164,38 @@ function packagesOf(modules: PyModule[]): string[] {
 
 export function newRunId(): string {
   return `idx-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * Index an organisation: every repository's code, then every repository's docs
+ * (Markdown/MDX pages and example scripts) linked against the whole org's symbols,
+ * then repository dependencies. Re-running is idempotent.
+ */
+export async function indexOrg(
+  graph: OrgGraph,
+  checkouts: Checkout[],
+  onProgress: (p: IndexProgress) => void = () => {},
+): Promise<IndexReport> {
+  const started = Date.now();
+  const run = newRunId();
+  const parsed: ParsedRepo[] = [];
+  for (const c of checkouts) {
+    onProgress({ phase: 'parse', repo: c.repo, message: `parsing ${c.repo}@${c.sha.slice(0, 7)}` });
+    parsed.push(await parseRepo(c));
+  }
+  const table = buildSymbolTable(parsed);
+  const repos = await writeCode(graph, parsed, table, run, onProgress);
+  const codeRepos = new Set(parsed.filter((p) => p.modules.length > 0).map((p) => p.checkout.repo));
+  const docs: DocsIndexReport[] = [];
+  const docsByRepo = new Map<string, MdDoc[]>();
+  for (const p of parsed) {
+    if (!p.files.some((f) => f.kind === 'markdown' || f.kind === 'python-example')) continue;
+    onProgress({ phase: 'docs', repo: p.checkout.repo, message: 'linking docs to code' });
+    docs.push(await writeDocs(graph, p, table, run, codeRepos));
+    docsByRepo.set(p.checkout.repo, await readDocs(p));
+  }
+  const dependsOn = await dependencyEdges(parsed, docsByRepo, table.packageRepos);
+  await writeBatched(graph, Q.upsertDependsOn, dependsOn);
+  onProgress({ phase: 'done', message: `indexed ${parsed.length} repositories` });
+  return { org: graph.name, run, repos, docs, dependsOn, ms: Date.now() - started };
 }

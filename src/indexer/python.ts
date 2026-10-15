@@ -372,6 +372,12 @@ export function toExpr(node: Node): Expr {
       const fn = node.childForFieldName('function');
       return fn ? { k: 'call', fn: toExpr(fn) } : { k: 'unknown' };
     }
+    case 'boolean_operator': {
+      // `self._pool or Pool()` — the right operand is the value that gets constructed.
+      const right = node.childForFieldName('right');
+      return right ? toExpr(right) : { k: 'unknown' };
+    }
+    case 'conditional_expression':
     case 'await':
     case 'parenthesized_expression': {
       const inner = node.namedChildren[0];

@@ -22,13 +22,15 @@ export interface ResolvedCall {
 type Val =
   | { t: 'sym'; sym: SymbolInfo }
   | { t: 'instance'; cls: SymbolInfo }
-  | { t: 'module'; name: string };
+  | { t: 'module'; name: string }
+  /** Something from a package outside the organisation (redis, asyncio, ...). */
+  | { t: 'external'; name: string };
 
 /**
  * Method names too generic to resolve by name alone: a by-name edge to every
  * `get` in a dependency would drown the real paths.
  */
-const GENERIC = new Set([
+export const GENERIC = new Set([
   'get', 'set', 'add', 'pop', 'run', 'close', 'open', 'read', 'write', 'format', 'join', 'split', 'strip',
   'replace', 'lower', 'upper', 'encode', 'decode', 'copy', 'remove', 'sort', 'index', 'count', 'extend',
   'insert', 'clear', 'append', 'items', 'keys', 'values', 'update', 'send', 'start', 'stop', 'load', 'dump',
@@ -66,6 +68,67 @@ export class SymbolTable {
       push(this.byName, def.name, info);
     }
     for (const b of mod.bindings) push(this.bindingsByScope, b.scope, b);
+  }
+
+  /**
+   * Temporarily register a module that is not library code (a docs page's examples),
+   * so its own bindings resolve; its definitions never become by-name candidates.
+   * Returns a disposer.
+   */
+  addEphemeral(repo: string, mod: PyModule): () => void {
+    this.modules.set(mod.module, { mod, repo });
+    const infos: SymbolInfo[] = mod.defs.map((def) => ({ id: symbolId(repo, def.qualname), repo, module: mod.module, def }));
+    for (const info of infos) push(this.byQualname, info.def.qualname, info);
+    for (const b of mod.bindings) push(this.bindingsByScope, b.scope, b);
+    return () => {
+      this.modules.delete(mod.module);
+      for (const info of infos) {
+        const arr = this.byQualname.get(info.def.qualname)?.filter((x) => x !== info);
+        if (arr?.length) this.byQualname.set(info.def.qualname, arr);
+        else this.byQualname.delete(info.def.qualname);
+      }
+      for (const b of mod.bindings) {
+        const arr = this.bindingsByScope.get(b.scope)?.filter((x) => x !== b);
+        if (arr?.length) this.bindingsByScope.set(b.scope, arr);
+        else this.bindingsByScope.delete(b.scope);
+      }
+    };
+  }
+
+  /**
+   * Symbols a prose mention like `Graph.ro_query`, `falkordb.FalkorDB` or `select_graph()`
+   * refers to. Fully qualified names resolve exactly; `Class.member` matches by suffix
+   * anywhere in the org; a bare name links only when it looks like code (a call, a
+   * snake_case or PascalCase name) and only into `contextRepos` — the repositories
+   * the page itself is about.
+   */
+  matchMention(
+    ident: string,
+    opts: { called?: boolean; codeRepos?: Set<string>; contextRepos?: Set<string> } = {},
+  ): { sym: SymbolInfo; resolved: Resolution }[] {
+    const inOrg = (s: SymbolInfo) => (!opts.codeRepos || opts.codeRepos.has(s.repo)) && s.def.kind !== 'module';
+    const parts = ident.split('.');
+    if (parts.length >= 2) {
+      const exact = this.resolveDotted(ident);
+      if (exact?.t === 'sym' && inOrg(exact.sym)) return [{ sym: exact.sym, resolved: 'exact' }];
+      const last = parts[parts.length - 1]!;
+      const suffix = (this.byName.get(last) ?? []).filter((s) => inOrg(s) && s.def.qualname.endsWith(`.${ident}`));
+      if (suffix.length > 0 && suffix.length <= MAX_BY_NAME) return suffix.map((sym) => ({ sym, resolved: 'by-name' }));
+      // `db.select_graph()`: an instance variable in prose; fall back to the member name.
+      if (/^[a-z_]/.test(parts[0]!) && !this.packageRepos.has(parts[0]!)) return this.matchMention(last, opts);
+      return [];
+    }
+    if (ident.length < 3 || GENERIC.has(ident) || ident.startsWith('_')) return [];
+    const looksLikeCode = opts.called || ident.includes('_') || /[A-Z]/.test(ident);
+    if (!looksLikeCode) return [];
+    const named = (this.byName.get(ident) ?? []).filter(
+      (s) =>
+        inOrg(s) &&
+        (!opts.contextRepos || opts.contextRepos.has(s.repo)) &&
+        !s.def.decorators.some((d) => d === 'property' || d.endsWith('cached_property') || d.endsWith('.setter')),
+    );
+    if (named.length === 0 || named.length > MAX_BY_NAME) return [];
+    return named.map((sym) => ({ sym, resolved: 'by-name' }));
   }
 
   symbol(qualname: string, preferRepo?: string): SymbolInfo | undefined {
@@ -111,7 +174,8 @@ export class SymbolTable {
     }
     // By-name fallback: `<unknown receiver>.method()` where `method` is defined in a
     // repository this module imports from (or its own repository).
-    if (call.fn.k === 'attr' && v === undefined) {
+    if (call.fn.k === 'attr' && (v === undefined || v.t === 'external')) {
+      if (v?.t === 'external' || this.evalExpr(call.fn.obj, ctx)?.t === 'external') return [];
       const name = call.fn.attr;
       if (GENERIC.has(name) || name.startsWith('__')) return [];
       const candidates = (this.byName.get(name) ?? []).filter(
@@ -221,7 +285,12 @@ export class SymbolTable {
     const local = this.symbol(`${mod.module}.${name}`, ctx.repo);
     if (local) return local.def.kind === 'module' ? { t: 'module', name: local.def.qualname } : { t: 'sym', sym: local };
     const imp = [...mod.imports].reverse().find((x) => x.alias === name);
-    if (imp) return this.resolveDotted(imp.target, ctx.depth, ctx.repo) ?? { t: 'module', name: imp.target };
+    if (imp) {
+      const resolved = this.resolveDotted(imp.target, ctx.depth, ctx.repo);
+      if (resolved) return resolved;
+      const top = imp.target.split('.')[0]!;
+      return this.packageRepos.has(top) ? { t: 'module', name: imp.target } : { t: 'external', name: imp.target };
+    }
     for (const star of mod.imports.filter((x) => x.alias === '*')) {
       const v = this.resolveDotted(`${star.target}.${name}`, ctx.depth, ctx.repo);
       if (v) return v;
@@ -233,7 +302,10 @@ export class SymbolTable {
     const bindings = this.bindingsByScope.get(scope)?.filter((b) => b.target === name);
     if (!bindings?.length) return undefined;
     // Annotated bindings are the most reliable; then the latest assignment that evaluates.
+    // A binding that resolves into the org beats one typed `Any`/external (`self._graph: Any = None`
+    // followed by `self._graph = driver.select_graph(...)`).
     const ordered = [...bindings.filter((b) => b.annotation), ...bindings.filter((b) => !b.annotation).reverse()];
+    let external: Val | undefined;
     for (const b of ordered) {
       const key = `${b.scope}|${b.target}|${b.lineno}`;
       if (ctx.seen.has(key)) continue;
@@ -241,14 +313,16 @@ export class SymbolTable {
       const evalCtx: Ctx = { ...ctx, scope: b.at, seen, mod: this.modules.get(this.moduleOf(b.at, ctx))?.mod ?? ctx.mod };
       if (b.annotation) {
         const v = this.fromAnnotation(b.annotation, evalCtx);
-        if (v) return v;
+        if (v?.t === 'external') external ??= v;
+        else if (v) return v;
       }
       if (b.value) {
         const v = this.evalExpr(b.value, evalCtx);
-        if (v) return v;
+        if (v?.t === 'external') external ??= v;
+        else if (v) return v;
       }
     }
-    return undefined;
+    return external;
   }
 
   private moduleOf(qualname: string, ctx: Ctx): string {
@@ -261,6 +335,7 @@ export class SymbolTable {
   }
 
   private member(base: Val, attr: string, ctx: Ctx): Val | undefined {
+    if (base.t === 'external') return { t: 'external', name: `${base.name}.${attr}` };
     if (base.t === 'module') return this.resolveDotted(`${base.name}.${attr}`, ctx.depth, ctx.repo);
     if (base.t === 'sym') {
       if (base.sym.def.kind === 'class') {
@@ -293,6 +368,7 @@ export class SymbolTable {
   }
 
   private callResult(fn: Val, ctx: Ctx): Val | undefined {
+    if (fn.t === 'external') return { t: 'external', name: `${fn.name}()` };
     if (fn.t !== 'sym') return undefined;
     const def = fn.sym.def;
     if (def.kind === 'class') return { t: 'instance', cls: fn.sym };
@@ -320,14 +396,17 @@ export class SymbolTable {
       .split(/[|,\[\]]/)
       .map((s) => s.trim().replace(/^["']|["']$/g, ''))
       .filter((s) => s && s !== 'None' && /^[A-Za-z_][\w.]*$/.test(s));
+    let external: Val | undefined;
     for (const c of candidates) {
       const [head, ...rest] = c.split('.');
       let v = this.lookupName(head!, ctx);
       for (const r of rest) v = v ? this.member(v, r, ctx) : undefined;
       if (v?.t === 'sym' && v.sym.def.kind === 'class') return { t: 'instance', cls: v.sym };
       if (v?.t === 'instance') return v;
+      if (v?.t === 'external') external ??= v;
     }
-    return undefined;
+    // Annotated with a type from outside the org (Any, redis.Redis, ...): known not to be ours.
+    return external;
   }
 
   findMethod(cls: SymbolInfo, name: string, depth: number): SymbolInfo | undefined {

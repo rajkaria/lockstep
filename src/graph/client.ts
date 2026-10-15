@@ -42,6 +42,19 @@ export class GraphStore {
     return new OrgGraph(this.db.selectGraph(slug), slug);
   }
 
+  /** FalkorDB module version, e.g. `4.18.3`. */
+  async serverVersion(): Promise<string> {
+    try {
+      const conn = (await this.db.connection) as unknown as { moduleList(): Promise<{ name: string; ver: number }[]> };
+      const graph = (await conn.moduleList()).find((m) => m.name === 'graph');
+      if (!graph) return 'unknown';
+      const v = graph.ver;
+      return `${Math.floor(v / 10000)}.${Math.floor(v / 100) % 100}.${v % 100}`;
+    } catch {
+      return 'unknown';
+    }
+  }
+
   async listGraphs(): Promise<string[]> {
     return this.db.list();
   }
