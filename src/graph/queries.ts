@@ -36,6 +36,7 @@ export const SCHEMA_INDEXES: [label: string, prop: string][] = [
   ['PullRequest', 'url'],
   ['Decision', 'id'],
   ['Verdict', 'id'],
+  ['Verdict', 'check'],
   ['Run', 'id'],
   ['Run', 'key'],
   ['Check', 'id'],
@@ -433,6 +434,51 @@ export const sinceLastCheck = q('memory', 'sinceLastCheck', 'What changed in the
          sum(CASE WHEN r.status = 'fail' THEN 1 ELSE 0 END) AS failedRuns
 `);
 
+// ─── agent checks ───────────────────────────────────────────────────────────
+
+export const lastCheck = q('memory', 'lastCheck', 'When the previous agent check ran (for "since your last run").', `
+  MATCH (c:Check)
+  WHERE c.status <> 'running'
+  RETURN c.id AS id, c.started_at AS startedAt, c.pr AS pr
+  ORDER BY c.started_at DESC
+  LIMIT 1
+`);
+
+export const createCheck = q('memory', 'createCheck', 'Start an agent check of a pull request.', `
+  MATCH (pr:PullRequest {url: $pr})
+  CREATE (c:Check {id: $id})
+  SET c += $props
+  MERGE (c)-[:FOR]->(pr)
+`);
+
+export const finishCheck = q('memory', 'finishCheck', 'Close an agent check: status, summary, and the full trace (every tool call with its Cypher).', `
+  MATCH (c:Check {id: $id})
+  SET c += $props
+  WITH c
+  MATCH (v:Verdict {check: $id})
+  MERGE (c)-[:PRODUCED]->(v)
+  RETURN count(v) AS verdicts
+`);
+
+export const sectionsWithVerdict = q('memory', 'sectionsWithVerdict', 'Sections that received a verdict during this check (the stop condition).', `
+  MATCH (v:Verdict {check: $id})-[:ABOUT]->(d:DocSection)
+  RETURN DISTINCT d.id AS id
+`);
+
+export const recentChecks = q('report', 'recentChecks', 'Agent checks, newest first.', `
+  MATCH (c:Check)-[:FOR]->(pr:PullRequest)
+  RETURN c.id AS id, pr.url AS pr, pr.title AS title, c.status AS status, c.model AS model, c.started_at AS startedAt,
+         c.finished_at AS finishedAt, c.steps AS steps, c.tool_calls AS toolCalls, c.verdicts AS verdicts, c.summary AS summary,
+         c.tool_order AS toolOrder
+  ORDER BY startedAt DESC
+  LIMIT $limit
+`);
+
+export const checkTrace = q('report', 'checkTrace', 'The stored trace of one agent check.', `
+  MATCH (c:Check {id: $id})
+  RETURN c.trace AS trace
+`);
+
 // ─── report ─────────────────────────────────────────────────────────────────
 
 export const repoSymbols = q('report', 'repoSymbols', 'List the live symbols of a repository.', `
@@ -567,6 +613,12 @@ export const ALL_QUERIES: NamedQuery[] = [
   verdictsForPr,
   reviewVerdict,
   sinceLastCheck,
+  lastCheck,
+  createCheck,
+  finishCheck,
+  sectionsWithVerdict,
+  recentChecks,
+  checkTrace,
   upsertRepo,
   upsertFiles,
   upsertSymbols,

@@ -1,5 +1,6 @@
 import type { ClearedSymbol, ImpactData, RankedSection } from '../tools/graph-tools.js';
 import type { RunExampleData } from '../tools/run-example.js';
+import type { TraceEvent } from '../agent/trace.js';
 
 const tty = process.stdout.isTTY;
 const c = (code: number) => (s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -52,4 +53,37 @@ export function runText(d: RunExampleData): string {
     if (r.traceback && r.status !== 'skipped') out.push(r.traceback.split('\n').map((l) => `  ${l}`).join('\n'));
   }
   return out.join('\n');
+}
+
+/** One line (or a few) per trace event, for the terminal. Deltas are written raw. */
+export function traceLine(e: TraceEvent): string | undefined {
+  switch (e.type) {
+    case 'check_started':
+      return `${bold('Lockstep')} checking ${e.pr} ${dim(`(${e.model}, ${e.checkId})`)}${e.since ? `\n${dim(`since the last check: ${e.since}`)}` : ''}`;
+    case 'thinking':
+      return dim(`  ${e.text.trim().split('\n').join('\n  ')}`);
+    case 'tool_call':
+      return `${cyan('→')} ${bold(e.name)}(${compactInput(e.input)})`;
+    case 'tool_result': {
+      const q = e.queries.filter((x) => x.name !== 'adhoc');
+      const meta = dim(`${q.length} Cypher quer${q.length === 1 ? 'y' : 'ies'}${q.length ? `: ${[...new Set(q.map((x) => x.name))].join(', ')}` : ''} · ${e.ms} ms`);
+      return `${e.isError ? red('✗') : green('←')} ${e.summary}\n  ${meta}`;
+    }
+    case 'nudge':
+      return yellow(`! ${e.missing.length} impacted section(s) still need a verdict; reminding the model`);
+    case 'check_finished':
+      return `\n${bold(e.status === 'done' ? green('Done') : e.status === 'incomplete' ? yellow('Incomplete') : red(e.status))} ${dim(`${e.steps} turns, ${e.toolCalls} tool calls (${e.toolOrder.join(' → ')}), ${e.verdicts} verdicts, ${e.usage.input + e.usage.output} tokens`)}\n${e.summary}`;
+    default:
+      return undefined;
+  }
+}
+
+function compactInput(input: unknown): string {
+  const obj = (input ?? {}) as Record<string, unknown>;
+  return Object.entries(obj)
+    .map(([k, v]) => {
+      const s = typeof v === 'string' ? v : JSON.stringify(v);
+      return `${k}=${s.length > 60 ? `${s.slice(0, 57)}…` : s}`;
+    })
+    .join(', ');
 }

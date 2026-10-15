@@ -143,28 +143,42 @@ async function writeVerdict(
   return id;
 }
 
-export const recordVerdictTool: ToolDef<VerdictInput & { pr_url?: string; verdict: 'ok' | 'governed' | 'skipped' }, { id: string; evidence: string[] }> = {
+export const recordVerdictTool: ToolDef<
+  Omit<VerdictInput, 'section_id'> & { pr_url?: string; section_id?: string; section_ids?: string[]; verdict: 'ok' | 'governed' | 'skipped' },
+  { ids: string[]; evidence: Record<string, string[]> }
+> = {
   name: 'record_verdict',
   description:
-    'Close an impacted section without editing it: ok (the change does not falsify it — say why, e.g. the example passed before and after), ' +
+    'Close impacted sections without editing them: ok (the change does not falsify it — say why, e.g. the example passed before and after), ' +
     'governed (a decision says it stays as is — cite the decision id), or skipped (cannot be judged — say why). ' +
-    'Every impacted section needs a verdict or an edit before you finish.',
-  input: z.object({
-    pr_url: z.string().optional(),
-    section_id: z.string(),
-    verdict: z.enum(['ok', 'governed', 'skipped']),
-    reason: z.string().min(3),
-    cites: z.array(z.string()).optional().describe('Decision ids'),
-    runs: z.array(z.string()).optional().describe('Run ids that support the verdict'),
-  }),
+    'Pass several section_ids when one reason covers them all. Every impacted section needs a verdict or an edit before you finish.',
+  input: z
+    .object({
+      pr_url: z.string().optional(),
+      section_id: z.string().optional(),
+      section_ids: z.array(z.string()).optional().describe('Several sections sharing one verdict and reason'),
+      verdict: z.enum(['ok', 'governed', 'skipped']),
+      reason: z.string().min(3),
+      cites: z.array(z.string()).optional().describe('Decision ids'),
+      runs: z.array(z.string()).optional().describe('Run ids that support the verdict'),
+    })
+    .refine((x) => x.section_id || x.section_ids?.length, { message: 'give section_id or section_ids' }),
   queries: [Q.sectionReachedByPr, Q.createVerdict],
   async run(ctx, input) {
     const tracer = new Tracer(ctx.graph);
     const pr = prOf(ctx, input.pr_url);
     if (input.verdict === 'governed' && !input.cites?.length) throw new Error('a governed verdict must cite the decision id(s)');
-    const evidence = (await sectionPath(tracer, pr, input.section_id)) ?? [];
-    const id = await writeVerdict(ctx, tracer, pr, input, { verdict: input.verdict, status: 'proposed', evidence, confidence: evidence.length ? 'path' : 'none' });
-    return result('record_verdict', tracer, `Verdict ${input.verdict} recorded for ${input.section_id}.`, { id, evidence });
+    const sections = [...new Set([...(input.section_id ? [input.section_id] : []), ...(input.section_ids ?? [])])];
+    const ids: string[] = [];
+    const evidence: Record<string, string[]> = {};
+    for (const section of sections) {
+      const path = (await sectionPath(tracer, pr, section)) ?? [];
+      evidence[section] = path;
+      ids.push(
+        await writeVerdict(ctx, tracer, pr, { ...input, section_id: section }, { verdict: input.verdict, status: 'proposed', evidence: path, confidence: path.length ? 'path' : 'none' }),
+      );
+    }
+    return result('record_verdict', tracer, `Verdict ${input.verdict} recorded for ${sections.length} section${sections.length > 1 ? 's' : ''}.`, { ids, evidence });
   },
 };
 

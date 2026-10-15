@@ -83,7 +83,7 @@ describe('decisions, verdicts and memory (FalkorDB)', () => {
     expect(edit.data.evidence).toEqual(['miniclient.client.Client.graph_names', 'acme/mini-docs:docs/getting-started.mdx#listing-graphs']);
 
     const ok = await recordVerdictTool.run(ctx, { section_id: ASK, verdict: 'ok', reason: 'Rag.ask passes a query string only; the new keyword-only timeout has a default in practice.' });
-    expect(ok.data.evidence[0]).toBe('miniclient.asyncio.client.AsyncGraph.query');
+    expect(ok.data.evidence[ASK]![0]).toBe('miniclient.asyncio.client.AsyncGraph.query');
     await expect(recordVerdictTool.run(ctx, { section_id: ASK, verdict: 'governed', reason: 'x' })).rejects.toThrow(/must cite/);
   });
 

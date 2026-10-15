@@ -11,6 +11,9 @@ export interface Config {
   githubToken?: string;
   anthropicApiKey?: string;
   model: string;
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /** Server-side refusal fallback on the Claude API. */
+  fallbacks: boolean;
   /** Scratch FalkorDB that docs examples run against (never the org graph's server). */
   scratch: { host: string; port: number; managed: boolean };
   runTimeoutMs: number;
@@ -26,6 +29,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     githubToken: env.GITHUB_TOKEN ?? env.GH_TOKEN ?? undefined,
     anthropicApiKey: env.ANTHROPIC_API_KEY ?? undefined,
     model: env.LOCKSTEP_MODEL ?? DEFAULT_MODEL,
+    effort: effortOf(env.LOCKSTEP_EFFORT),
+    fallbacks: env.LOCKSTEP_FALLBACKS !== 'off',
     scratch: env.LOCKSTEP_SCRATCH_URL
       ? { ...hostPort(env.LOCKSTEP_SCRATCH_URL), managed: false }
       : { host: '127.0.0.1', port: Number(env.LOCKSTEP_SCRATCH_PORT ?? 6390), managed: true },
@@ -48,4 +53,11 @@ function hostPort(url: string): { host: string; port: number } {
   const m = /^(?:\w+:\/\/)?([^:/]+)(?::(\d+))?/.exec(url);
   if (!m) throw new Error(`invalid LOCKSTEP_SCRATCH_URL: ${url}`);
   return { host: m[1]!, port: Number(m[2] ?? 6379) };
+}
+
+function effortOf(v: string | undefined): Config['effort'] {
+  const levels = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+  if (v === undefined) return 'medium';
+  if ((levels as readonly string[]).includes(v)) return v as Config['effort'];
+  throw new Error(`LOCKSTEP_EFFORT must be one of ${levels.join(', ')}`);
 }

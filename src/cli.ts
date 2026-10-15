@@ -9,7 +9,9 @@ import { GraphStore } from './graph/client.js';
 import { indexOrg } from './indexer/index.js';
 import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
 import { packageRoot, packageVersion } from './pkg.js';
-import { clearanceText, dim, impactText, runText } from './format/text.js';
+import { clearanceText, dim, impactText, runText, traceLine } from './format/text.js';
+import { AnthropicModel, type Effort } from './agent/anthropic.js';
+import { runAgentCheck } from './agent/loop.js';
 import { runExampleTool } from './tools/run-example.js';
 import { reviewVerdict, writeDecisionTool } from './tools/memory-tools.js';
 import { buildDocsPatch } from './patch.js';
@@ -95,13 +97,35 @@ program
   .description('Check a pull request against the org graph: impacted docs with evidence paths, clearance, ranking')
   .argument('<pr-url>', 'https://github.com/<owner>/<repo>/pull/<n>')
   .option('--no-agent', 'run the graph tools in a fixed order instead of the agent')
-  .option('--max-hops <n>', 'maximum call hops between a changed symbol and a doc', '3')
+  .option('--model <id>', 'Claude model for the agent (env LOCKSTEP_MODEL)')
+  .option('--effort <level>', 'low | medium | high | xhigh | max (env LOCKSTEP_EFFORT)')
+  .option('--max-steps <n>', 'model turns before the agent stops', '40')
+  .option('--max-hops <n>', 'maximum call hops between a changed symbol and a doc (--no-agent)', '3')
   .option('--json', 'print JSON')
-  .action(async (prUrl: string, opts: { agent: boolean; maxHops: string; json?: boolean }) => {
+  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; json?: boolean }) => {
     await withGraph(async (store, org) => {
-      const ctx: ToolContext = { graph: store.org(org), config: settings(), log };
+      const config = settings();
+      const ctx: ToolContext = { graph: store.org(org), config, log };
       if (opts.agent) {
-        throw new Error('the agent loop lands in a later release of this command; run with --no-agent for now');
+        const model = new AnthropicModel({
+          model: opts.model ?? config.model,
+          effort: (opts.effort as Effort | undefined) ?? config.effort,
+          fallbacks: config.fallbacks,
+          apiKey: config.anthropicApiKey,
+        });
+        const r = await runAgentCheck(ctx, model, prUrl, {
+          maxSteps: Number(opts.maxSteps),
+          onEvent: (e) => {
+            if (opts.json) return;
+            if (e.type === 'delta') return;
+            const line = traceLine(e);
+            if (line) console.log(line);
+          },
+        });
+        if (opts.json) console.log(JSON.stringify(r, null, 2));
+        else console.log(dim(`\nPatch: lockstep-docs patch ${r.pr}   Trace: stored on ${r.checkId}`));
+        if (r.status === 'error' || r.status === 'refused') process.exitCode = 1;
+        return;
       }
       const impact = await impactTool.run(ctx, { pr_url: prUrl, max_hops: Number(opts.maxHops) });
       const clearance = await clearanceTool.run(ctx, { pr_url: prUrl });
