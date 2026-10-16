@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 import { mcpLinks, newWorkflowUrl, repoFromInput, workflowYaml } from '../web/src/install-links.js';
 import { parseRoute } from '../web/src/route.js';
 
@@ -23,6 +24,7 @@ describe('install page links', () => {
     expect(plain).not.toContain('with:');
 
     const all = workflowYaml({ withRepos: ['acme/docs', 'acme/sdk'], agent: true, failOnBreaks: true });
+    for (const y of [plain, all]) expect(() => parse(y, { strict: true })).not.toThrow();
     expect(all).toContain('      - uses: rajkaria/staleproof@v1\n        with:\n          also-index: acme/docs acme/sdk\n');
     expect(all).toContain('          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}\n');
     expect(all).toContain('          fail-on: breaks\n');

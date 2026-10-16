@@ -1,10 +1,32 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const root = join(import.meta.dirname, '..');
 
 describe('GitHub Action', () => {
+  it('is valid YAML with the shape GitHub loads (a broken manifest fails every run)', async () => {
+    for (const file of ['action.yml', 'examples/staleproof.yml']) {
+      const text = await readFile(join(root, file), 'utf8');
+      expect(() => parse(text, { strict: true, uniqueKeys: true }), file).not.toThrow();
+    }
+    const action = parse(await readFile(join(root, 'action.yml'), 'utf8')) as {
+      inputs: Record<string, { description: string; default?: string }>;
+      outputs: Record<string, { value: string }>;
+      runs: { using: string; steps: { name?: string; uses?: string; run?: string; shell?: string }[] };
+    };
+    expect(action.runs.using).toBe('composite');
+    for (const [name, input] of Object.entries(action.inputs)) expect(typeof input.description, name).toBe('string');
+    // Composite run steps must name their shell.
+    for (const step of action.runs.steps) if (step.run) expect(step.shell, step.name).toBe('bash');
+    // Every input the steps read is declared.
+    const used = [...JSON.stringify(action.runs).matchAll(/inputs\.([a-z-]+)/g)].map((m) => m[1]!);
+    for (const name of new Set(used)) expect(Object.keys(action.inputs), name).toContain(name);
+    const workflow = parse(await readFile(join(root, 'examples', 'staleproof.yml'), 'utf8')) as { jobs: { docs: { steps: { uses: string }[] } } };
+    expect(workflow.jobs.docs.steps[0]!.uses).toBe('rajkaria/staleproof@v1');
+  });
+
   it('lives at the repository root, so `uses: rajkaria/staleproof@v1` works', async () => {
     const yml = await readFile(join(root, 'action.yml'), 'utf8');
     expect(yml).toContain('using: composite');
