@@ -122,6 +122,20 @@ export function ensureVenv(home: string, targets: InstallTarget[], log?: (m: str
   return p;
 }
 
+/** Variables uv and pip need: paths, locale, proxies, certificates, their own settings. */
+const INSTALL_ENV = /^(PATH|HOME|TMPDIR|TEMP|TMP|USER|LOGNAME|SHELL|LANG|LC_\w+|TZ|XDG_CACHE_HOME|XDG_DATA_HOME|UV_\w+|PIP_\w+|HTTPS?_PROXY|NO_PROXY|ALL_PROXY|https?_proxy|no_proxy|all_proxy|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|SYSTEMROOT|COMSPEC|PATHEXT)$/;
+
+/**
+ * The environment for building the sandbox: an allow-list, not the server's environment.
+ * Installing the repositories at a pull request's commits runs their build backends
+ * (setup.py, hatch hooks), which must not see FALKORDB_URL, model keys or GITHUB_TOKEN.
+ */
+export function installEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(source)) if (v !== undefined && INSTALL_ENV.test(k)) env[k] = v;
+  return env;
+}
+
 /**
  * The error recorded when the repositories can't be installed. Its first line is what
  * the agent and the UI show, so a resolver conflict names the pin that blocks it
@@ -151,7 +165,7 @@ async function buildVenv(home: string, key: string, targets: InstallTarget[], sp
     paths.push(join(dest, await projectSubdir(t.dir, t.sha)));
   }
   await rm(venv, { recursive: true, force: true });
-  const env = { ...process.env, VIRTUAL_ENV: undefined } as NodeJS.ProcessEnv;
+  const env = installEnv(process.env);
   if (await which('uv')) {
     const mk = await runProcess('uv', ['venv', '-q', '--python', PYTHON_VERSION, venv], { timeoutMs: 300_000, env });
     if (mk.code !== 0) throw new Error(`uv venv failed: ${mk.stderr.trim()}`);

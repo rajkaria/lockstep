@@ -53,6 +53,17 @@ describe('verdictOf', () => {
   });
 });
 
+describe('installEnv', () => {
+  it('passes what uv and pip need and none of the server secrets', async () => {
+    const { installEnv } = await import('../src/runner/sandbox.js');
+    const env = installEnv({
+      PATH: '/usr/bin', HOME: '/home/x', LANG: 'C.UTF-8', UV_CACHE_DIR: '/c', PIP_INDEX_URL: 'https://pypi.org/simple', HTTPS_PROXY: 'http://p:3128', SSL_CERT_FILE: '/etc/ssl/cert.pem',
+      FALKORDB_URL: 'falkor://user:secret@host:6379', ANTHROPIC_API_KEY: 'sk-x', ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic', GITHUB_TOKEN: 'ghp_x', LOCKSTEP_MODEL: 'm', VIRTUAL_ENV: '/v', AWS_SECRET_ACCESS_KEY: 'a', NODE_OPTIONS: '--x',
+    });
+    expect(Object.keys(env).sort()).toEqual(['HOME', 'HTTPS_PROXY', 'LANG', 'PATH', 'PIP_INDEX_URL', 'SSL_CERT_FILE', 'UV_CACHE_DIR']);
+  });
+});
+
 describe('installFailure', () => {
   it('names the pin when the resolver finds no solution', async () => {
     const { installFailure } = await import('../src/runner/sandbox.js');

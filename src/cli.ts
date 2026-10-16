@@ -169,7 +169,7 @@ program
 program
   .command('run')
   .description('Run a docs code example in the sandbox (before and after a PR with --pr)')
-  .argument('<example-id>', 'CodeExample id, e.g. FalkorDB/docs:commands/graph.explain.mdx:3')
+  .argument('<example-id>', 'CodeExample id, e.g. FalkorDB/docs:commands/graph.explain.mdx:0')
   .option('--pr <url>', 'run at the commit before the pull request and at the pull request')
   .option('--fresh', 're-run even if an identical run is recorded (replaces it)')
   .option('--json', 'print JSON')
