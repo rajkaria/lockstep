@@ -48,6 +48,14 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
     const tracer = new Tracer(ctx.graph);
     const example = await loadExample(tracer.graph, input.example_id);
     if (!example) throw new Error(`no code example ${input.example_id}`);
+    if (example.directive) {
+      const reason =
+        example.directive === 'expect-error'
+          ? 'the docs mark this example as failing on purpose (expect-error), so a run proves nothing'
+          : 'the docs or the repository config mark this example skip';
+      const run: RunRecord = { id: `run-directive-${example.id}`, example: example.id, status: 'skipped', reason, stdout: '', durationMs: 0, stitched: [], installed: [], side: 'current', cached: false, createdAt: Date.now() };
+      return result('run_example', tracer, `Not run: ${reason}.`, { example: example.id, url: example.url, verdict: 'skipped', runs: [run], editedByPr: false });
+    }
     const prUrl = input.pr_url ? parsePrUrl(input.pr_url).url : undefined;
     let pr: { repo: string; before: string; after: string; docs: string[] | null } | undefined;
     if (prUrl) {

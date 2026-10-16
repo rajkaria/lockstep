@@ -11,6 +11,7 @@ import { extractPython, type PyModule } from './python.js';
 import { classifyFile, moduleNames, type Checkout, type FileKind } from './repo.js';
 import { symbolId, SymbolTable } from './resolve.js';
 import { fileId, writeBatched } from './write.js';
+import { loadRepoConfig, matchesAny, type RepoConfig } from './repo-config.js';
 
 export { fileId, writeBatched };
 
@@ -44,6 +45,8 @@ export interface ParsedRepo {
   files: { path: string; kind: FileKind }[];
   modules: PyModule[];
   parseErrors: string[];
+  /** `.staleproof.toml` / `[tool.staleproof]`: paths never indexed, examples never run or checked. */
+  config?: RepoConfig;
 }
 
 /** All indexable files of a checkout (git-tracked when it is a git repo, else a directory walk). */
@@ -56,7 +59,8 @@ export async function listFiles(dir: string): Promise<{ path: string; kind: File
 }
 
 export async function parseRepo(checkout: Checkout): Promise<ParsedRepo> {
-  const files = await listFiles(checkout.dir);
+  const config = await loadRepoConfig(checkout.dir);
+  const files = (await listFiles(checkout.dir)).filter((f) => !matchesAny(f.path, config.ignore));
   const py = files.filter((f) => f.kind === 'python').map((f) => f.path);
   const names = moduleNames(py);
   const modules: PyModule[] = [];
@@ -70,7 +74,7 @@ export async function parseRepo(checkout: Checkout): Promise<ParsedRepo> {
       parseErrors.push(`${path}: ${(err as Error).message}`);
     }
   }
-  return { checkout, files, modules, parseErrors };
+  return { checkout, files, modules, parseErrors, config };
 }
 
 export function buildSymbolTable(parsed: ParsedRepo[]): SymbolTable {

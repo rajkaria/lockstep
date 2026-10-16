@@ -34,6 +34,8 @@ export interface ExampleForRun extends ExampleSource {
   repo: string;
   path: string;
   url: string;
+  /** Marked in the docs (or the repository's config) as not to be run. */
+  directive?: string | null;
   usedRepos: string[];
   earlier: ExampleSource[];
 }

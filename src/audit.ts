@@ -199,7 +199,7 @@ export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Prom
   const repos = repoRows.map((r) => r.name);
   const shas = new Map(repoRows.map((r) => [r.name, r.sha]));
 
-  const examples = (await tracer.run<{ id: string; lang: string; url: string; repo: string; uses: number }>(Q.auditExamples, { repos })).rows;
+  const examples = (await tracer.run<{ id: string; lang: string; url: string; repo: string; directive: string; uses: number }>(Q.auditExamples, { repos })).rows;
   const exampleIds = [...new Set(examples.map((e) => e.id))];
 
   const mismatches = (await tracer.run<AuditMismatch & { symbolRepo: string }>(Q.auditMismatches, { repos })).rows.map(({ symbolRepo: _, ...m }) => ({
@@ -210,7 +210,7 @@ export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Prom
   if (opts.run && opts.run > 0) {
     const mismatched = new Set(mismatches.map((m) => m.example));
     const candidates = examples
-      .filter((e) => e.lang === 'python' && e.uses > 0)
+      .filter((e) => e.lang === 'python' && e.uses > 0 && !e.directive)
       .sort((a, b) => Number(mismatched.has(b.id)) - Number(mismatched.has(a.id)) || b.uses - a.uses)
       .slice(0, opts.run);
     for (const [i, e] of candidates.entries()) {

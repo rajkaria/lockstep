@@ -238,7 +238,7 @@ export const predictedCalls = q('tool', 'predictedCalls', 'Examples that call a 
   MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
   WHERE c.kind IN ['removed', 'renamed', 'signature', 'export-removed']
   MATCH (e:CodeExample)-[u:USES]->(s)
-  WHERE e.status = 'live' AND e.lang = 'python'
+  WHERE e.status = 'live' AND e.lang = 'python' AND coalesce(e.directive, '') = ''
   OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
   RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
          coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
@@ -300,7 +300,7 @@ export const predictedCallsOfChanges = q('tool', 'predictedCallsOfChanges', 'Exa
   MATCH (s:Symbol {id: ch.id})
   WHERE ch.kind IN ['removed', 'renamed', 'signature', 'export-removed']
   MATCH (e:CodeExample)-[u:USES]->(s)
-  WHERE e.status = 'live' AND e.lang = 'python'
+  WHERE e.status = 'live' AND e.lang = 'python' AND coalesce(e.directive, '') = ''
   OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
   RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
          coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
@@ -375,7 +375,7 @@ export const exampleForRun = q('tool', 'exampleForRun', 'A code example, the rep
   WHERE prev.index < e.index
   WITH e, usedRepos, prev
   ORDER BY prev.index
-  RETURN e.id AS id, e.lang AS lang, e.code AS code, e.repo AS repo, e.path AS path, e.url AS url, usedRepos,
+  RETURN e.id AS id, e.lang AS lang, e.code AS code, e.repo AS repo, e.path AS path, e.url AS url, e.directive AS directive, usedRepos,
          collect(CASE WHEN prev IS NULL THEN NULL ELSE {id: prev.id, lang: prev.lang, code: prev.code} END) AS earlier
 `);
 
@@ -745,12 +745,12 @@ export const auditExamples = q('report', 'auditExamples', 'The live examples in 
   MATCH (e:CodeExample)
   WHERE e.status = 'live' AND e.repo IN $repos
   OPTIONAL MATCH (e)-[u:USES]->(:Symbol)
-  RETURN e.id AS id, e.lang AS lang, e.url AS url, e.repo AS repo, count(u) AS uses
+  RETURN e.id AS id, e.lang AS lang, e.url AS url, e.repo AS repo, coalesce(e.directive, '') AS directive, count(u) AS uses
   UNION
   MATCH (e:CodeExample)-[:USES]->(s:Symbol)
   WHERE e.status = 'live' AND s.repo IN $repos AND NOT e.repo IN $repos
   OPTIONAL MATCH (e)-[u:USES]->(:Symbol)
-  RETURN e.id AS id, e.lang AS lang, e.url AS url, e.repo AS repo, count(u) AS uses
+  RETURN e.id AS id, e.lang AS lang, e.url AS url, e.repo AS repo, coalesce(e.directive, '') AS directive, count(u) AS uses
 `);
 
 export const auditRuns = q('report', 'auditRuns', 'Recorded runs of the audited examples at the indexed commits (not before/after a pull request).', `

@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
-import { identifiersIn, packagesNamedIn, scanMarkdown, type MdDoc } from './markdown.js';
+import { identifiersIn, packagesNamedIn, scanMarkdown, type ExampleDirective, type MdDoc } from './markdown.js';
+import { matchesAny } from './repo-config.js';
 import { extractPython } from './python.js';
 import type { ParsedRepo } from './index.js';
 import { fileId, writeBatched } from './write.js';
@@ -103,9 +104,11 @@ export async function writeDocs(
     // `g` from an earlier block resolves `g` through that earlier binding.
     const callGroups: Row[][] = [];
     let acc = '';
+    const skipPage = matchesAny(doc.path, p.config?.skipExamples ?? []);
     for (const ex of doc.examples) {
       const id = exampleId(repo, doc.path, ex.index);
       const section = sectionId(repo, doc.path, ex.sectionAnchor);
+      const directive: ExampleDirective | undefined = ex.directive ?? (skipPage ? 'skip' : undefined);
       let idents: string[] = [];
       if (ex.lang === 'python') {
         const code = fromRepl(ex.code);
@@ -122,7 +125,8 @@ export async function writeDocs(
                 .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: ex.lineno + (call.lineno - startLine), text: call.text })),
             );
           }
-          addMismatches(id, table.checkModule(repo, mod, startLine), (line) => ex.lineno + (line - startLine));
+          // Marked skip or expect-error: still linked (and its bindings serve later blocks), never judged.
+          if (!directive) addMismatches(id, table.checkModule(repo, mod, startLine), (line) => ex.lineno + (line - startLine));
         } finally {
           dispose();
         }
@@ -146,6 +150,7 @@ export async function writeDocs(
           end_lineno: ex.endLineno,
           idents,
           kind: 'fenced',
+          directive: directive ?? '',
           url: blob(doc.path, ex.lineno),
         },
       });
@@ -209,7 +214,7 @@ export async function writeDocs(
             .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: call.lineno, text: call.text })),
         );
       }
-      addMismatches(id, table.checkModule(repo, mod, 1), (line) => line);
+      if (!matchesAny(f.path, p.config?.skipExamples ?? [])) addMismatches(id, table.checkModule(repo, mod, 1), (line) => line);
     } finally {
       dispose();
     }
@@ -230,6 +235,7 @@ export async function writeDocs(
         end_lineno: code.split('\n').length,
         idents: mod.idents,
         kind: 'script',
+        directive: matchesAny(f.path, p.config?.skipExamples ?? []) ? 'skip' : '',
         url: blob(f.path, 1),
       },
     });

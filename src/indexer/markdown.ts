@@ -35,6 +35,50 @@ export interface MdExample {
   lineno: number;
   endLineno: number;
   sectionAnchor: string;
+  /** Marked in the docs as not to be run or checked (`<!-- staleproof: skip -->`, fence `skip`), or as failing on purpose. */
+  directive?: ExampleDirective;
+}
+
+export type ExampleDirective = 'skip' | 'expect-error';
+
+const COMMENT_DIRECTIVES: [RegExp, ExampleDirective][] = [
+  [/^<!--\s*staleproof\s*:\s*(?:skip|no-run|ignore)\s*-->$/i, 'skip'],
+  [/^<!--\s*staleproof\s*:\s*(?:expect-error|raises)\s*-->$/i, 'expect-error'],
+  [/^\{\s*\/\*\s*staleproof\s*:\s*(?:skip|no-run|ignore)\s*\*\/\s*\}$/i, 'skip'],
+  [/^\{\s*\/\*\s*staleproof\s*:\s*(?:expect-error|raises)\s*\*\/\s*\}$/i, 'expect-error'],
+  // Markers other docs-testing tools already put in docs: pytest-codeblocks, Sybil, mktestdocs-style.
+  [/^<!--\s*pytest[-_]codeblocks\s*:\s*skip\s*-->$/i, 'skip'],
+  [/^<!--\s*pytest[-_]codeblocks\s*:\s*expect-exception\b.*-->$/i, 'expect-error'],
+  [/^<!--\s*skip\s*:\s*next\b.*-->$/i, 'skip'],
+];
+
+const META_DIRECTIVES: Record<string, ExampleDirective> = {
+  skip: 'skip',
+  'no-run': 'skip',
+  norun: 'skip',
+  'staleproof:skip': 'skip',
+  'staleproof-skip': 'skip',
+  'expect-error': 'expect-error',
+  'staleproof:expect-error': 'expect-error',
+  raises: 'expect-error',
+};
+
+/**
+ * Whether the docs mark a fenced block as not runnable: a comment on the line before
+ * (blank lines allowed) or a word in the fence's info string.
+ */
+export function directiveFor(lines: string[], fenceLine: number, meta: string): ExampleDirective | undefined {
+  for (const token of meta.split(/[\s,{}]+/)) {
+    const d = META_DIRECTIVES[token.toLowerCase()];
+    if (d) return d;
+  }
+  for (let j = fenceLine - 1; j >= 0; j--) {
+    const prev = lines[j]!.trim();
+    if (!prev) continue;
+    for (const [re, d] of COMMENT_DIRECTIVES) if (re.test(prev)) return d;
+    return undefined;
+  }
+  return undefined;
 }
 
 export interface MdDoc {
@@ -87,8 +131,16 @@ export function scanMarkdown(path: string, text: string): MdDoc {
   const stack: string[] = [];
 
   let current: MdSection = newSection('', title, 0, [], start + 1);
-  let fence: { char: string; len: number; indent: number; lang: string; meta: string; startLine: number; code: string[] } | null =
-    null;
+  let fence: {
+    char: string;
+    len: number;
+    indent: number;
+    lang: string;
+    meta: string;
+    startLine: number;
+    code: string[];
+    directive?: ExampleDirective;
+  } | null = null;
 
   const closeSection = (endLine: number) => {
     current.endLineno = endLine;
@@ -112,6 +164,7 @@ export function scanMarkdown(path: string, text: string): MdDoc {
           lineno: fence.startLine + 1,
           endLineno: lineNo - 1,
           sectionAnchor: current.anchor,
+          ...(fence.directive ? { directive: fence.directive } : {}),
         });
         fence = null;
       } else {
@@ -130,6 +183,7 @@ export function scanMarkdown(path: string, text: string): MdDoc {
         meta: (open[4] ?? '').trim(),
         startLine: lineNo,
         code: [],
+        directive: directiveFor(lines, i, (open[4] ?? '').trim()),
       };
       continue;
     }
