@@ -129,7 +129,7 @@ export async function writeCode(
     onProgress({ phase: 'write', repo, message: `writing ${p.modules.length} modules` });
     await graph.run(Q.upsertRepo, {
       name: repo,
-      props: { name: repo, url: `https://github.com/${repo}`, sha, indexed_at: Date.now(), packages: packagesOf(p.modules) },
+      props: { name: repo, url: `https://github.com/${repo}`, sha, indexed_at: Date.now(), packages: packagesOf(p.modules), index_version: INDEX_VERSION },
     });
     await writeBatched(
       graph,
@@ -196,6 +196,13 @@ function visibility(name: string): 'public' | 'private' | 'special' {
 function packagesOf(modules: PyModule[]): string[] {
   return [...new Set(modules.map((m) => m.module.split('.')[0]!))].sort();
 }
+
+/**
+ * What an index holds, by version: 3 adds MISMATCH edges, `exported` flags, reStructuredText
+ * and TypeScript/JavaScript. Hosted workspaces indexed by an older version are re-indexed on
+ * next use; the audit says when a graph is older.
+ */
+export const INDEX_VERSION = 3;
 
 export function newRunId(): string {
   return `idx-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;

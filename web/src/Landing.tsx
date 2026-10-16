@@ -20,7 +20,7 @@ export function Landing({ demo, stats }: { demo?: ReactNode; stats?: ReactNode }
           <SectionHead
             eyebrow="Try it"
             title="Check any pull request"
-            lede="Paste a pull request from any public Python repository on GitHub: the first check indexes it, in seconds for most projects. Or pick one of FalkorDB's. The trace streams every tool call and the Cypher it ran on FalkorDB."
+            lede="Paste a pull request from any public Python, TypeScript or JavaScript repository on GitHub: the first check indexes it, in seconds for most projects. Or pick one of FalkorDB's. The trace streams every tool call and the Cypher it ran on FalkorDB."
           />
           <Modes />
           {stats}
@@ -268,7 +268,7 @@ function HowItWorks() {
     {
       icon: 'layers',
       title: 'Index',
-      body: <>Clone your repositories into one graph: Python functions and the calls between them across repositories, every docs section and code example, and the code each one mentions or calls.</>,
+      body: <>Clone your repositories into one graph: Python and TypeScript functions and the calls between them across repositories, every docs section and code example (Markdown, MDX or Sphinx), and the code each one mentions or calls — with every call checked against the signature it reaches.</>,
     },
     {
       icon: 'path',
@@ -385,8 +385,27 @@ const USE_CASES: { icon: string; who: string; title: string; body: ReactNode; pr
     icon: 'bot',
     who: 'AI coding agents',
     title: 'Let Claude Code fix the docs in the same session as the code',
-    body: <>Over MCP, your coding agent can ask what a change touches, run the affected examples, and produce the docs patch before you open the PR.</>,
-    via: [['MCP server', '#/docs/mcp']],
+    body: (
+      <>
+        Over MCP, your coding agent asks which docs depend on a function before changing it (<code>docs_for_symbol</code>), which examples its edits break before
+        anything is pushed (<code>check_changes</code>), and produces the docs patch.
+      </>
+    ),
+    via: [
+      ['MCP server', '#/docs/mcp'],
+      ['Install', '#/install'],
+    ],
+  },
+  {
+    icon: 'eye',
+    who: 'Anyone with docs today',
+    title: 'Find the examples that are already broken, with no pull request',
+    body: <>An audit checks every call in every example against the current code, across repositories, scores the docs and lists the public API no page covers. Weekly in the Action, with one issue kept up to date.</>,
+    proof: <>On FalkorDB's docs it finds <code>client.create_constraint</code>, a method <code>FalkorDB</code> doesn't have; on Flask's, <code>as_view()</code> without its required <code>name</code>.</>,
+    via: [
+      ['Audit a repository', '#/audit'],
+      ['GitHub Action', '#/docs/github-action'],
+    ],
   },
   {
     icon: 'layers',
@@ -696,7 +715,17 @@ function ForLlms() {
 export const FAQ: [string, ReactNode][] = [
   [
     'Which languages does it understand?',
-    <>Code repositories are parsed as Python (tree-sitter). Docs can be any Markdown or MDX, in any repository. JavaScript examples in the docs are indexed but not yet linked to code or run.</>,
+    <>
+      Code: Python, TypeScript and JavaScript (tree-sitter), across repositories. Docs: Markdown, MDX and reStructuredText (Sphinx), in any repository. Python
+      examples are run before and after a pull request; JavaScript and TypeScript examples are linked and checked statically, not run.
+    </>,
+  ],
+  [
+    'Do I need a pull request?',
+    <>
+      No. <a href="#/audit">Audit</a> any public repository to see which examples no longer fit the code today, <code>npx -y staleproof check</code> with no
+      pull request checks your working tree before you push, and <code>docs-for</code> lists the docs that depend on a function before you change it.
+    </>,
   ],
   [
     'Do I need an LLM API key?',

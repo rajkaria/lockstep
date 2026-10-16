@@ -151,6 +151,17 @@ describe('hosted workspaces (FalkorDB)', () => {
     expect(list.find((w) => w.graph === `${prefix}acme`)?.repos.map((x) => x.name)).toEqual(['acme/mini-client', 'acme/mini-docs']);
   });
 
+  it('re-indexes a workspace written by an older index format on next use', async () => {
+    const registryGraph = store.org(registry);
+    await registryGraph.run(`MATCH (r:HostedRepo {name: 'acme/mini-docs'}) REMOVE r.index_version`);
+    const events: HostedEvent[] = [];
+    await ws.ensure('acme/mini-docs', { onEvent: (e) => events.push(e) });
+    expect(events[0]).toMatchObject({ type: 'index_started', reason: 'stale' });
+    const again: HostedEvent[] = [];
+    await ws.ensure('acme/mini-docs', { onEvent: (e) => again.push(e) });
+    expect(again).toEqual([]);
+  });
+
   it('refuses workspaces over the repository limit, and counts a daily budget', async () => {
     const small = new Workspaces(store, config, curated, { prefix, registry, fetchImpl, limits: { maxRepos: 1 } });
     await expect(small.ensure('acme/other', { with: ['acme/more'] })).rejects.toThrow(/limit 1/);

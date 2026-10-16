@@ -12,9 +12,11 @@ undocumented" is the same graph walked from the other end: symbols with many que
 Staleproof opens those docs PRs too.
 
 **Month 6 — hosted for teams.** staleproof.dev already indexes any public repository on first use into a graph of
-its own, and the CLI and the GitHub Action already read private repositories with a token. Next: private repositories
-on the hosted service with one graph per organisation on managed FalkorDB, more languages (TypeScript next: the same
-resolver over a second tree-sitter grammar), and decisions imported from ADRs and PR review threads.
+its own, and the CLI and the GitHub Action already read private repositories with a token. TypeScript/JavaScript and
+Sphinx docs are indexed since 0.3 (the same resolver over a second tree-sitter grammar), and docs are audited with no
+pull request at all. Next: private repositories on the hosted service with one graph per organisation on managed
+FalkorDB, running JavaScript examples, more languages (Go, Java), and decisions imported from ADRs and PR review
+threads.
 
 **Business.** Free for open source. Per-repository subscription for private repositories; devtools companies already
 pay developer-relations teams to do this by hand after every release.

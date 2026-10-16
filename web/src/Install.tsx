@@ -236,7 +236,7 @@ function RepoLine({ repo, gh }: { repo?: string; gh?: { repo: string; info?: GhR
         {gh.info.language ? ` · ${gh.info.language}` : ''}
         {gh.info.private ? ' · private' : ''}
         {gh.info.archived ? ' · archived (pull requests are closed)' : ''}
-        {gh.info.language && gh.info.language !== 'Python' && !gh.info.private ? ' · Staleproof reads Python code; Markdown docs of any language are indexed' : ''}
+        {gh.info.language && !['Python', 'TypeScript', 'JavaScript'].includes(gh.info.language) && !gh.info.private ? ' · Staleproof reads Python, TypeScript and JavaScript code; Markdown and Sphinx docs of any project are indexed' : ''}
       </p>
     );
   }

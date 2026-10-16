@@ -56,6 +56,18 @@ describe('docs audit (FalkorDB)', () => {
     await expect(auditTool.run(ctx, { repos: ['acme/nope'] })).rejects.toThrow('not indexed in the');
   });
 
+  it('says when a repository was indexed by an older Staleproof', async () => {
+    expect((await auditDocs(ctx, { repos: ['acme/mini-sdk'] })).data.outdatedIndex).toBe(false);
+    await graph.run(`MATCH (r:Repo {name: 'acme/mini-sdk'}) REMOVE r.index_version`);
+    try {
+      const r = await auditDocs(ctx, { repos: ['acme/mini-sdk'] });
+      expect(r.data.outdatedIndex).toBe(true);
+      expect(r.summary).toContain('Indexed by an older Staleproof');
+    } finally {
+      await graph.run(`MATCH (r:Repo {name: 'acme/mini-sdk'}) SET r.index_version = 3`);
+    }
+  });
+
   it('renders text and markdown with the badge for a single repository', async () => {
     const r = await auditDocs(ctx, { repos: ['acme/mini-client'] });
     const md = auditMarkdown(r.data, r.summary);

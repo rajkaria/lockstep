@@ -726,7 +726,7 @@ export const auditRepos = q('report', 'auditRepos', 'The repositories a docs aud
   WITH r, count(s) AS symbols
   OPTIONAL MATCH (d:DocSection {repo: r.name})
   WHERE d.status = 'live'
-  RETURN r.name AS name, r.sha AS sha, r.indexed_at AS indexedAt, symbols, count(d) AS sections
+  RETURN r.name AS name, r.sha AS sha, r.indexed_at AS indexedAt, coalesce(r.index_version, 0) AS indexVersion, symbols, count(d) AS sections
   ORDER BY name
 `);
 

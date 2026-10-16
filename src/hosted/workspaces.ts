@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { orgSlug, type Config } from '../config.js';
 import type { GraphStore, OrgGraph } from '../graph/client.js';
-import { indexOrg, type IndexProgress, type IndexReport } from '../indexer/index.js';
+import { INDEX_VERSION, indexOrg, type IndexProgress, type IndexReport } from '../indexer/index.js';
 import { parseRepoName, type Checkout } from '../indexer/repo.js';
 import { downloadRepo, RepoTooLargeError, type TarballLimits } from '../indexer/tarball.js';
 
@@ -54,6 +54,8 @@ export interface WorkspaceRepo {
   sha: string;
   indexedAt: number;
   lastUsed: number;
+  /** The index format it was written with (absent before version 3). */
+  indexVersion?: number | null;
 }
 
 export interface WorkspaceInfo {
@@ -129,7 +131,7 @@ export class Workspaces {
 
   private async entry(name: string): Promise<WorkspaceRepo | undefined> {
     const rows = await this.registry.run<WorkspaceRepo>(
-      `MATCH (r:HostedRepo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name, r.graph AS graph, r.sha AS sha, r.indexed_at AS indexedAt, r.last_used AS lastUsed`,
+      `MATCH (r:HostedRepo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name, r.graph AS graph, r.sha AS sha, r.indexed_at AS indexedAt, r.last_used AS lastUsed, r.index_version AS indexVersion`,
       { name },
     );
     return rows.rows[0];
@@ -196,7 +198,8 @@ export class Workspaces {
       const where = await this.locate(r);
       if (!where || where.graph.name !== found?.graph.name) missing.push(r);
     }
-    const stale = found?.entry && Date.now() - found.entry.indexedAt > this.limits.staleAfterMs;
+    // Older than a week, or indexed by an older Staleproof (no static checks or export flags yet).
+    const stale = found?.entry && (Date.now() - found.entry.indexedAt > this.limits.staleAfterMs || (found.entry.indexVersion ?? 0) < INDEX_VERSION);
     if (found && !missing.length && !stale && !opts.refresh) {
       await this.touch(name);
       return found;
@@ -272,8 +275,8 @@ export class Workspaces {
       await this.registry.run(
         `UNWIND $rows AS row
          MERGE (r:HostedRepo {name: row.name})
-         SET r.graph = $graph, r.sha = row.sha, r.indexed_at = $now, r.last_used = $now, r.mb = $mb`,
-        { rows: checkouts.map((c) => ({ name: c.repo, sha: c.sha })), graph: graphName, now, mb: mb ?? 0 },
+         SET r.graph = $graph, r.sha = row.sha, r.indexed_at = $now, r.last_used = $now, r.mb = $mb, r.index_version = $version`,
+        { rows: checkouts.map((c) => ({ name: c.repo, sha: c.sha })), graph: graphName, now, mb: mb ?? 0, version: INDEX_VERSION },
       );
       onEvent({
         type: 'index_finished',

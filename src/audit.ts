@@ -2,6 +2,7 @@ import { z } from 'zod';
 import * as Q from './graph/queries.js';
 import type { MismatchKind } from './indexer/signature.js';
 import { lineUrl } from './pr/predict.js';
+import { INDEX_VERSION } from './indexer/index.js';
 import { runExampleTool } from './tools/run-example.js';
 import { result, Tracer, type ToolContext, type ToolDef, type ToolResult } from './tools/types.js';
 
@@ -49,7 +50,9 @@ export interface Deduction {
 
 export interface AuditData {
   org: string;
-  repos: { name: string; sha: string; symbols: number; sections: number }[];
+  repos: { name: string; sha: string; symbols: number; sections: number; indexVersion?: number }[];
+  /** A repository was indexed by an older Staleproof: no example checks or export flags until it is indexed again. */
+  outdatedIndex?: boolean;
   score: number;
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
   deductions: Deduction[];
@@ -171,6 +174,7 @@ export function auditSummary(d: AuditData): string {
   ];
   const ran = d.runCounts.pass + d.runCounts.fail;
   if (ran) parts.push(`${d.runCounts.fail} of ${ran} examples run at the indexed commits fail.`);
+  if (d.outdatedIndex) parts.push('Indexed by an older Staleproof: examples are not checked against the code until the repositories are indexed again (staleproof index).');
   return parts.join(' ');
 }
 
@@ -190,7 +194,7 @@ export const auditTool: ToolDef<{ repos?: string[]; limit?: number }, AuditData>
 
 export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Promise<ToolResult<AuditData>> {
   const tracer = new Tracer(ctx.graph);
-  const repoRows = (await tracer.run<{ name: string; sha: string; symbols: number; sections: number }>(Q.auditRepos, { repos: opts.repos ?? [] })).rows;
+  const repoRows = (await tracer.run<{ name: string; sha: string; symbols: number; sections: number; indexVersion: number }>(Q.auditRepos, { repos: opts.repos ?? [] })).rows;
   if (opts.repos?.length) {
     const have = new Set(repoRows.map((r) => r.name.toLowerCase()));
     const missing = opts.repos.filter((r) => !have.has(r.toLowerCase()));
@@ -285,6 +289,7 @@ export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Prom
   const data: AuditData = {
     org: ctx.graph.name,
     repos: repoRows,
+    outdatedIndex: repoRows.some((r) => (r.indexVersion ?? 0) < INDEX_VERSION),
     score,
     grade,
     deductions,

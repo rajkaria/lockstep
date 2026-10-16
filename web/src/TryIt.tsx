@@ -119,7 +119,7 @@ export function TryIt({ health, packageRepo, initialPr }: { health?: Health; pac
         )}
         {hosted && (
           <p className="note">
-            Works on any public Python repository on GitHub: the first check indexes it, which takes seconds for most projects. Examples run before and after the pull
+            Works on any public Python, TypeScript or JavaScript repository on GitHub: the first check indexes it, which takes seconds for most projects. Examples run before and after the pull
             request in the <a href="#/install">GitHub Action</a> and the CLI; this server shows the runs recorded for FalkorDB's pull requests. No pull request
             in mind? <a href="#/audit">Audit the whole repository</a>: every example checked against the code, and the API the docs miss.
           </p>

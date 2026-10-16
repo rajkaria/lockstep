@@ -223,7 +223,9 @@ export interface RepoStatus {
 export interface AuditData {
   summary: string;
   org: string;
-  repos: { name: string; sha: string; symbols: number; sections: number }[];
+  repos: { name: string; sha: string; symbols: number; sections: number; indexVersion?: number }[];
+  /** Indexed by an older Staleproof: no example checks until re-indexed. */
+  outdatedIndex?: boolean;
   score: number;
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
   deductions: { points: number; why: string }[];

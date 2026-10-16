@@ -5,7 +5,7 @@ import { CodeBlock, Icon } from './layout';
 import { repoFromInput } from './install-links';
 import type { AuditData, Health } from './types';
 
-const PICKS = ['FalkorDB/falkordb-py', 'FalkorDB/GraphRAG-SDK', 'encode/httpx', 'pallets/click'];
+const PICKS = ['pallets/flask', 'encode/httpx', 'psf/requests', 'FalkorDB/falkordb-ts'];
 
 const KIND_LABEL: Record<AuditData['mismatches'][number]['kind'], string> = {
   'unknown-keyword': 'unknown keyword',
@@ -158,6 +158,12 @@ function AuditReport({ repo, summary, data, indexedMs }: { repo: string; summary
         </div>
       </div>
 
+      {data.outdatedIndex && (
+        <div className="banner">
+          This graph was indexed by an earlier {PRODUCT}, before examples were checked against the code: its example checks and API coverage are incomplete
+          until the repositories are indexed again (<code>npx -y {PACKAGE} index {data.repos.map((r) => r.name).join(' ')}</code>).
+        </div>
+      )}
       <h3>
         Examples that no longer fit the code{' '}
         <span className={`chip ${data.examples.mismatched ? 'sev breaking' : 'ok'}`}>
