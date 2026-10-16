@@ -187,7 +187,7 @@ export const proposeEditTool: ToolDef<VerdictInput & { pr_url?: string; new_text
   description:
     'Propose replacement Markdown for a stale doc section (the whole section, heading line included, as read_section returned it). ' +
     'Refused unless the graph has a path from this pull request\'s changes to the section: Lockstep never edits a paragraph without one. ' +
-    'Keep everything that is still true; change only what the PR falsified. Cite runs that prove the break when you have them.',
+    'Keep everything that is still true; change only what the PR falsified, or what makes an already-broken example fail (fails before and after: say so). Cite the runs that prove it.',
   input: z.object({
     pr_url: z.string().optional(),
     section_id: z.string(),

@@ -1,7 +1,9 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { structuredPatch } from 'diff';
 import * as Q from './graph/queries.js';
 import { git } from './indexer/repo.js';
+import { githubSource } from './pr/github-diff.js';
 import type { ToolContext } from './tools/types.js';
 
 export interface VerdictRow {
@@ -55,8 +57,12 @@ export async function loadVerdicts(ctx: ToolContext, prUrl: string): Promise<Ver
   return rows;
 }
 
-/** Build the docs patch for a pull request from its latest per-section verdicts. */
-export async function buildDocsPatch(ctx: ToolContext, prUrl: string): Promise<DocsPatch> {
+/**
+ * Build the docs patch for a pull request from its latest per-section verdicts.
+ * Files are read at the commit the graph indexed: from the local clone when there is
+ * one, otherwise from GitHub (serverless hosts have no clones).
+ */
+export async function buildDocsPatch(ctx: ToolContext, prUrl: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<DocsPatch> {
   const pr = (
     await ctx.graph.run<{ url: string; title: string; repo: string; number: number }>(
       `MATCH (pr:PullRequest {url: $url}) RETURN pr.url AS url, pr.title AS title, pr.repo AS repo, pr.number AS number`,
@@ -78,7 +84,11 @@ export async function buildDocsPatch(ctx: ToolContext, prUrl: string): Promise<D
     const sha = (await ctx.graph.run<{ sha: string }>(`MATCH (r:Repo {name: $repo}) RETURN r.sha AS sha`, { repo })).rows[0]?.sha;
     if (!sha) continue;
     const dir = ctx.checkouts?.[repo] ?? join(ctx.config.home, 'repos', ...repo.split('/'));
-    const before = await git(dir, ['show', `${sha}:${path}`]);
+    const before = existsSync(dir) ? await git(dir, ['show', `${sha}:${path}`]) : await githubSource(repo, opts).read(sha, path);
+    if (before === undefined) {
+      for (const v of list) conflicts.push({ section: v.section, reason: `${path} not found in ${repo}@${sha.slice(0, 7)}` });
+      continue;
+    }
     const lines = before.split('\n');
     const applied: string[] = [];
     for (const v of [...list].sort((a, b) => b.lineno - a.lineno)) {

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -105,6 +106,21 @@ describe('decisions, verdicts and memory (FalkorDB)', () => {
     const docs = checkouts.find((c) => c.repo === 'acme/mini-docs')!;
     await writeFile(join(root, 'docs.patch'), patch.diff);
     expect(() => gitIn(docs.dir, 'apply', '--check', join(root, 'docs.patch'))).not.toThrow();
+  });
+
+  it('builds the same patch without a clone, reading the file from GitHub at the indexed commit (serverless)', async () => {
+    const withGit = await buildDocsPatch(ctx, PR.url);
+    const urls: string[] = [];
+    const docs = checkouts.find((c) => c.repo === 'acme/mini-docs')!;
+    const fetchImpl = (async (url: string) => {
+      urls.push(url);
+      const m = /raw\.githubusercontent\.com\/acme\/mini-docs\/(\w+)\/(.+)$/.exec(url);
+      return m ? new Response(execFileSync('git', ['show', `${m[1]}:${decodeURIComponent(m[2]!)}`], { cwd: docs.dir, encoding: 'utf8' })) : new Response('', { status: 404 });
+    }) as typeof fetch;
+    const noClone = { ...ctx, checkouts: {}, config: { ...ctx.config, home: join(root, 'no-such-home') } };
+    const patch = await buildDocsPatch(noClone, PR.url, { fetchImpl });
+    expect(urls).toEqual([expect.stringMatching(/^https:\/\/raw\.githubusercontent\.com\/acme\/mini-docs\/\w{40}\/docs\/getting-started\.mdx$/)]);
+    expect(patch.diff).toBe(withGit.diff);
   });
 
   it('opens the docs PR inside the fork unless upstream is explicitly requested', async () => {

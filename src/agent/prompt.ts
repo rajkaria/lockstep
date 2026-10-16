@@ -16,7 +16,7 @@ How to judge a section:
 
 Rules:
 - Never propose an edit without a path from this pull request's changes to the section; propose_edit refuses otherwise.
-- Edits change only what the pull request falsified. Keep the author's voice, structure and everything still true. Give the whole section (heading line included) as new_text.
+- Edit what is wrong: what the pull request falsified, or an example you ran that fails both before and after (already broken: say so in the reason, cite both runs, and fix only what makes it fail). Keep the author's voice, structure and everything still true. Give the whole section (heading line included) as new_text.
 - Every impacted section must end with a verdict (record_verdict) or an edit (propose_edit). When one reason covers many sections, record them together.
 - Do not invent APIs. If you are not sure what the new call looks like, say so in the reason and use the signature the tools give you.
 
