@@ -4,6 +4,7 @@ import { parse as parseToml } from 'smol-toml';
 import type { MdDoc } from './markdown.js';
 import type { ParsedRepo } from './index.js';
 import { trackedOrWalked } from './files.js';
+import { bareModule } from './typescript.js';
 
 export interface DependsOn {
   from: string;
@@ -46,6 +47,23 @@ export function distName(spec: string): string {
   return normalizeDist(spec.trim().split(/[\s\[<>=!~;@(]/)[0] ?? '');
 }
 
+const JS = new Set(['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']);
+
+/**
+ * An npm package's name and dependencies, normalised like Python distributions so one map
+ * serves both (`js-` prefixed: an npm `falkordb` is not the PyPI `falkordb`).
+ */
+export function readPackageJson(text: string): PythonProject {
+  try {
+    const pkg = JSON.parse(text) as { name?: string; private?: boolean; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const npm = (n: string) => normalizeDist(bareModule(n).split('.')[0]!);
+    const deps = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})].map(npm);
+    return { name: pkg.name && !pkg.private ? npm(pkg.name) : undefined, deps };
+  } catch {
+    return { deps: [] };
+  }
+}
+
 export function readRequirements(text: string): string[] {
   return text
     .split('\n')
@@ -68,6 +86,7 @@ export async function dependencyEdges(parsed: ParsedRepo[], docsByRepo: Map<stri
       const base = posix.basename(f);
       if (base === 'pyproject.toml') list.push(readPyproject(await readFile(join(p.checkout.dir, f), 'utf8')));
       else if (/^requirements[\w.-]*\.txt$/.test(base)) list.push({ deps: readRequirements(await readFile(join(p.checkout.dir, f), 'utf8')) });
+      else if (base === 'package.json' && !/(^|\/)node_modules\//.test(f)) list.push(readPackageJson(await readFile(join(p.checkout.dir, f), 'utf8')));
     }
     projects.set(p.checkout.repo, list);
   }
@@ -85,9 +104,12 @@ export async function dependencyEdges(parsed: ParsedRepo[], docsByRepo: Map<stri
   }
   for (const [repo, docs] of docsByRepo) {
     for (const doc of docs) {
-      for (const ex of doc.examples.filter((e) => e.lang === 'python')) {
-        for (const m of ex.code.matchAll(/^\s*(?:from\s+([\w]+)[\w.]*\s+import|import\s+([\w]+))/gm)) {
-          const pkg = m[1] ?? m[2]!;
+      for (const ex of doc.examples.filter((e) => e.lang === 'python' || JS.has(e.lang))) {
+        const imported =
+          ex.lang === 'python'
+            ? [...ex.code.matchAll(/^\s*(?:from\s+([\w]+)[\w.]*\s+import|import\s+([\w]+))/gm)].map((m) => m[1] ?? m[2]!)
+            : [...ex.code.matchAll(/(?:from\s+|require\(\s*)["']([^"'./][^"']*)["']/g)].map((m) => bareModule(m[1]!).split('.')[0]!);
+        for (const pkg of imported) {
           for (const target of packageRepos.get(pkg) ?? []) {
             const key = `${repo}->${target}`;
             if (target !== repo && !edges.has(key)) edges.set(key, { from: repo, to: target, spec: `examples import ${pkg}` });

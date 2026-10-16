@@ -1,4 +1,6 @@
 import { extractPython, type DefKind, type PyDef, type PyModule } from '../indexer/python.js';
+import { extractTs } from '../indexer/typescript.js';
+import { readManifest, relativeResolver, tsModuleNames, type NpmPackage, type TsModuleName } from '../indexer/tsmodules.js';
 import { classifyFile, git, moduleNames } from '../indexer/repo.js';
 import type { PullRequestInfo } from './github.js';
 
@@ -99,13 +101,15 @@ export async function diffWith(source: DiffSource, repo: string, before: string,
   const files = await source.changedFiles(before, after);
   const docsTouched = files.filter((f) => classifyFile(f.path) === 'markdown').map((f) => f.path);
   const pyChanged = files.filter((f) => classifyFile(f.path) === 'python' || (f.oldPath && classifyFile(f.oldPath) === 'python'));
-  if (pyChanged.length === 0) return { before, after, files, symbols: [], docsTouched };
+  const tsChanged = files.filter((f) => classifyFile(f.path) === 'typescript' || (f.oldPath && classifyFile(f.oldPath) === 'typescript'));
+  const tsSymbols: ChangedSymbol[] = tsChanged.length ? await diffTs(source, repo, before, after, tsChanged) : [];
+  const symbols: ChangedSymbol[] = [];
+  if (pyChanged.length === 0) return { before, after, files, symbols: tsSymbols, docsTouched };
 
   const pyAt = async (sha: string) => (await source.files(sha)).filter((p) => classifyFile(p) === 'python');
   const namesBefore = moduleNames(await pyAt(before));
   const namesAfter = moduleNames(await pyAt(after));
 
-  const symbols: ChangedSymbol[] = [];
   for (const f of pyChanged) {
     const oldPath = f.oldPath ?? f.path;
     const oldSrc = f.status.startsWith('A') ? undefined : await source.read(before, oldPath);
@@ -117,7 +121,38 @@ export async function diffWith(source: DiffSource, repo: string, before: string,
     const hunks = oldMod && newMod ? await source.hunks(before, after, oldPath, f.path) : undefined;
     symbols.push(...compareModules(repo, oldMod, newMod, hunks, { old: oldSrc, new: newSrc }));
   }
-  return { before, after, files, symbols, docsTouched };
+  return { before, after, files, symbols: [...symbols, ...tsSymbols], docsTouched };
+}
+
+/** TypeScript/JavaScript module names at a commit, from the package manifests there. */
+async function tsNamesAt(source: DiffSource, sha: string): Promise<Map<string, TsModuleName>> {
+  const all = await source.files(sha);
+  const packages: NpmPackage[] = [];
+  for (const path of all.filter((p) => /(^|\/)package\.json$/.test(p) && !/(^|\/)node_modules\//.test(p))) {
+    const text = await source.read(sha, path);
+    const pkg = text ? readManifest(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', text) : undefined;
+    if (pkg) packages.push(pkg);
+  }
+  return tsModuleNames(all.filter((p) => classifyFile(p) === 'typescript'), packages);
+}
+
+async function diffTs(source: DiffSource, repo: string, before: string, after: string, changed: ChangedFile[]): Promise<ChangedSymbol[]> {
+  const [namesBefore, namesAfter] = await Promise.all([tsNamesAt(source, before), tsNamesAt(source, after)]);
+  const out: ChangedSymbol[] = [];
+  for (const f of changed) {
+    const oldPath = f.oldPath ?? f.path;
+    const oldMeta = namesBefore.get(oldPath);
+    const newMeta = namesAfter.get(f.path);
+    if (!oldMeta && !newMeta) continue;
+    const oldSrc = f.status.startsWith('A') || !oldMeta ? undefined : await source.read(before, oldPath);
+    const newSrc = f.status.startsWith('D') || !newMeta ? undefined : await source.read(after, f.path);
+    const tsx = (p: string) => !/\.(ts|mts|cts)$/.test(p);
+    const oldMod = oldSrc !== undefined && oldMeta ? await extractTs(oldSrc, { module: oldMeta.module, path: oldPath, tsx: tsx(oldPath), resolve: relativeResolver(oldPath, namesBefore) }) : undefined;
+    const newMod = newSrc !== undefined && newMeta ? await extractTs(newSrc, { module: newMeta.module, path: f.path, tsx: tsx(f.path), resolve: relativeResolver(f.path, namesAfter) }) : undefined;
+    const hunks = oldMod && newMod ? await source.hunks(before, after, oldPath, f.path) : undefined;
+    out.push(...compareModules(repo, oldMod, newMod, hunks, { old: oldSrc, new: newSrc }));
+  }
+  return out;
 }
 
 async function show(dir: string, sha: string, path: string): Promise<string | undefined> {
@@ -266,6 +301,8 @@ export function compareModules(
   if (oldMod && newMod) {
     const newAliases = new Set(newMod.imports.map((i) => i.alias));
     for (const imp of oldMod.imports) {
+      // TypeScript: only names the module exported (`export { X } from`) were part of its API.
+      if (oldMod.lang === 'ts' && !imp.exported) continue;
       if (imp.alias === '*' || newAliases.has(imp.alias) || newDefs.has(`${newMod.module}.${imp.alias}`)) continue;
       if (!imp.target.startsWith(`${oldMod.module.split('.')[0]}.`)) continue; // only the package's own names
       out.push({

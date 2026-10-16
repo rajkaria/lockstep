@@ -1,6 +1,8 @@
 import * as Q from '../graph/queries.js';
 import { fromRepl } from '../indexer/docs.js';
 import { arityOfSignature, extractPython, type PyCall } from '../indexer/python.js';
+import { shown } from '../indexer/resolve.js';
+import { bareModule, extractTs } from '../indexer/typescript.js';
 import { checkArgs, trustsSignature, type Arity, type MismatchKind } from '../indexer/signature.js';
 import type { Tracer } from '../tools/types.js';
 
@@ -41,6 +43,7 @@ export interface KnownMismatch {
 interface Row {
   example: string;
   code: string;
+  lang: string;
   lineno: number;
   url: string;
   repo: string;
@@ -90,12 +93,23 @@ function dropsFirst(row: Row, call: PyCall): boolean | undefined {
   return receiver !== className && !receiver.endsWith(`.${className}`);
 }
 
-async function callsIn(code: string): Promise<PyCall[]> {
+async function callsIn(code: string, lang: string): Promise<PyCall[]> {
   try {
+    if (lang !== 'python') return (await extractTs(code, { module: '__predict__', path: '__predict__.tsx', tsx: true })).calls;
     return (await extractPython(fromRepl(code), { module: '__predict__', path: '__predict__.py' })).calls;
   } catch {
     return [];
   }
+}
+
+/** A JavaScript import of `name` from a specifier that names `module` (`import { X } from 'pkg'`, `require`). */
+export function importsNameJs(code: string, module: string, name: string): boolean {
+  for (const m of code.matchAll(/import\s+(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']|\{([^}]*)\}\s*=\s*require\(\s*["']([^"']+)["']\s*\)/g)) {
+    const names = (m[1] ?? m[3] ?? '').split(',').map((x) => x.trim().split(/\s+as\s+|\s*:\s*/)[0]!.replace(/^type\s+/, ''));
+    const spec = m[2] ?? m[4] ?? '';
+    if (names.includes(name) && !spec.startsWith('.') && module.startsWith(bareModule(spec).split('.')[0]!)) return true;
+  }
+  return false;
 }
 
 /** The calls in an example that a USES edge points at: same callee text, closest to the recorded line. */
@@ -109,13 +123,13 @@ function matchingCalls(calls: PyCall[], row: Row): PyCall[] {
 
 /** Predicted breaks for every example that uses a symbol the pull request removed, renamed or re-signed. */
 export async function predictBreaks(tracer: Tracer, prUrl: string): Promise<PredictedBreak[]> {
-  return predictFromRows((await tracer.run<Row>(Q.predictedCalls, { pr: prUrl })).rows);
+  return predictFromRows((await tracer.run<Row>(Q.predictedCalls, { pr: prUrl })).rows, 'this pull request');
 }
 
 /** The same prediction for changes that are not a pull request (a working tree, an editor's buffers). */
 export async function predictBreaksForChanges(tracer: Tracer, changes: ChangeRow[]): Promise<PredictedBreak[]> {
   if (!changes.length) return [];
-  return predictFromRows((await tracer.run<Row>(Q.predictedCallsOfChanges, { changes })).rows);
+  return predictFromRows((await tracer.run<Row>(Q.predictedCallsOfChanges, { changes })).rows, 'these changes');
 }
 
 /** One changed symbol as the `*OfChanges` queries take it. */
@@ -127,7 +141,10 @@ export interface ChangeRow {
   renamed_to: string;
 }
 
-async function predictFromRows(rows: Row[]): Promise<PredictedBreak[]> {
+async function predictFromRows(rows: Row[], subject: string): Promise<PredictedBreak[]> {
+  // "this pull request removes" / "these changes remove"
+  const plural = subject.startsWith('these');
+  const v = (verb: string) => (plural ? verb : `${verb}s`);
   const out: PredictedBreak[] = [];
   const parsed = new Map<string, Promise<PyCall[]>>();
   const arities = new Map<string, Promise<Arity | undefined>>();
@@ -158,7 +175,7 @@ async function predictFromRows(rows: Row[]): Promise<PredictedBreak[]> {
 
   for (const row of rows) {
     if (row.resolved !== 'exact' && row.resolved !== 'late') continue;
-    if (!parsed.has(row.example)) parsed.set(row.example, callsIn(row.code));
+    if (!parsed.has(row.example)) parsed.set(row.example, callsIn(row.code, row.lang ?? 'python'));
     const calls = await parsed.get(row.example)!;
     const docLine = (call?: PyCall) => (call ? row.lineno + call.lineno - 1 : (row.line ?? row.lineno));
     const short = row.symbol.split('.').slice(-2).join('.');
@@ -169,16 +186,19 @@ async function predictFromRows(rows: Row[]): Promise<PredictedBreak[]> {
       if (row.resolved === 'late' && hits.length === 0) continue;
       const detail =
         row.change === 'renamed' && row.renamedTo
-          ? `calls \`${short}\`, which this pull request renames to \`${row.renamedTo.split('.').slice(-2).join('.')}\``
-          : `calls \`${short}\`, which this pull request removes`;
+          ? `calls \`${short}\`, which ${subject} ${v('rename')} to \`${row.renamedTo.split('.').slice(-2).join('.')}\``
+          : `calls \`${short}\`, which ${subject} ${v('remove')}`;
       add(row, docLine(hits[0]), 'removed', detail, hits[0]?.text ?? row.text ?? row.name);
       continue;
     }
     if (row.change === 'export-removed') {
       const m = /^from\s+(\S+)\s+import\s+(\S+)/.exec(row.before);
-      if (!m || !importsName(row.code, m[1]!, m[2]!)) continue;
-      const idx = fromRepl(row.code).split('\n').findIndex((l) => importsName(l, m[1]!, m[2]!) || new RegExp(`from\\s+${escapeRe(m[1]!)}\\s+import`).test(l));
-      add(row, row.lineno + Math.max(0, idx), 'missing-import', `imports \`${m[2]}\` from \`${m[1]}\`, which this pull request stops exporting`, row.before);
+      if (!m) continue;
+      const js = row.lang !== 'python';
+      if (js ? !importsNameJs(row.code, m[1]!, m[2]!) : !importsName(row.code, m[1]!, m[2]!)) continue;
+      const lines = js ? row.code.split('\n') : fromRepl(row.code).split('\n');
+      const idx = lines.findIndex((l) => (js ? new RegExp(`\\b${escapeRe(m[2]!)}\\b`).test(l) && /\b(import|require)\b/.test(l) : importsName(l, m[1]!, m[2]!) || new RegExp(`from\\s+${escapeRe(m[1]!)}\\s+import`).test(l)));
+      add(row, row.lineno + Math.max(0, idx), 'missing-import', `imports \`${m[2]}\` from \`${shown(m[1]!)}\`, which ${subject} ${v('stop')} exporting`, js ? `import { ${m[2]} }` : row.before);
       continue;
     }
     if (row.change !== 'signature' || row.resolved !== 'exact') continue;

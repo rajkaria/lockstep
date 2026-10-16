@@ -1,6 +1,7 @@
 import type { Expr, PyBinding, PyCall, PyDef, PyModule } from './python.js';
 import { exprText } from './python.js';
 import { checkArgs, trustsSignature, type MismatchKind } from './signature.js';
+import { NPM_NAMES } from './typescript.js';
 
 export type Resolution = 'exact' | 'by-name';
 
@@ -188,7 +189,7 @@ export class SymbolTable {
     if (v?.t === 'sym' && v.sym.def.kind !== 'module') {
       const targets = [{ to: v.sym.id, resolved: 'exact' as const }];
       if (v.sym.def.kind === 'class') {
-        const init = this.findMethod(v.sym, '__init__', 0);
+        const init = this.findMethod(v.sym, '__init__', 0) ?? this.findMethod(v.sym, 'constructor', 0);
         if (init) targets.push({ to: init.id, resolved: 'exact' });
       }
       return targets;
@@ -262,7 +263,7 @@ export class SymbolTable {
         kind: 'missing-import',
         target: sym.id,
         name,
-        detail: i === parts.length - 1 ? `\`${prefix}\` has no \`${name}\`` : `\`${prefix}\` has no module \`${name}\``,
+        detail: i === parts.length - 1 ? `\`${shown(prefix)}\` has no \`${name}\`` : `\`${shown(prefix)}\` has no module \`${name}\``,
       };
     }
     return undefined;
@@ -275,7 +276,7 @@ export class SymbolTable {
       if (!entry || this.resolveDotted(`${base.name}.${attr}`, ctx.depth, ctx.repo)) return undefined;
       if (!this.moduleIsClosed(base.name) || this.moduleBinds(base.name, attr)) return undefined;
       const sym = this.symbol(base.name, entry.repo);
-      return sym ? { kind: 'missing-attribute', target: sym.id, name: attr, detail: `\`${base.name}\` has no \`${attr}\`` } : undefined;
+      return sym ? { kind: 'missing-attribute', target: sym.id, name: attr, detail: `\`${shown(base.name)}\` has no \`${attr}\`` } : undefined;
     }
     const cls = base.t === 'instance' ? base.cls : base.t === 'sym' && base.sym.def.kind === 'class' ? base.sym : undefined;
     if (!cls || !this.classIsClosed(cls)) return undefined;
@@ -331,12 +332,16 @@ export class SymbolTable {
     return entry.mod.imports.every((i) => i.alias !== '*' || this.packageRepos.has(i.target.split('.')[0]!));
   }
 
-  /** A module-level assignment or import binds the name (`__version__ = ...`, `Graph = _Graph`). */
-  private moduleBinds(module: string, name: string): boolean {
+  /**
+   * A module-level assignment, import or type declaration binds the name (`__version__ = ...`,
+   * `Graph = _Graph`, `export interface Options`), here or in a module it star-imports.
+   */
+  private moduleBinds(module: string, name: string, depth = 0): boolean {
     const entry = this.modules.get(module);
-    if (!entry) return false;
+    if (!entry || depth > 6) return false;
     if (entry.mod.imports.some((i) => i.alias === name)) return true;
-    return (this.bindingsByScope.get(module) ?? []).some((b) => b.target === name);
+    if ((this.bindingsByScope.get(module) ?? []).some((b) => b.target === name)) return true;
+    return entry.mod.imports.some((i) => i.alias === '*' && this.moduleBinds(i.target, name, depth + 1));
   }
 
   /**
@@ -374,7 +379,7 @@ export class SymbolTable {
       out.add(cls.id);
       for (const [q, infos] of this.byQualname) {
         if (!q.startsWith(`${cls.def.qualname}.`) || q.slice(cls.def.qualname.length + 1).includes('.')) continue;
-        for (const m of infos) if (m.repo === cls.repo && m.def.kind === 'method' && !m.def.name.startsWith('_')) out.add(m.id);
+        for (const m of infos) if (m.repo === cls.repo && m.def.kind === 'method' && !m.def.name.startsWith('_') && !m.def.decorators.includes('private')) out.add(m.id);
       }
       for (const b of this.basesOf(cls)) addClass(b, depth + 1);
     };
@@ -383,8 +388,13 @@ export class SymbolTable {
       const names = new Map<string, string>();
       const entry = this.modules.get(module);
       if (!entry || depth > 4) return names;
-      for (const d of entry.mod.defs) if (d.parent === module && !d.name.startsWith('_')) names.set(d.name, `${module}.${d.name}`);
+      // TypeScript exports only what it says it exports; a Python module offers every name it binds.
+      const ts = entry.mod.lang === 'ts';
+      for (const d of entry.mod.defs) {
+        if (d.parent === module && !d.name.startsWith('_') && !(ts && d.decorators.includes('internal'))) names.set(d.name, `${module}.${d.name}`);
+      }
       for (const i of entry.mod.imports) {
+        if (ts && !i.exported) continue;
         if (i.alias === '*') {
           for (const [n, q] of namesOf(i.target, depth + 1)) if (!names.has(n)) names.set(n, q);
         } else if (!i.alias.includes('.') && !i.alias.startsWith('_')) {
@@ -394,7 +404,7 @@ export class SymbolTable {
       return names;
     };
     for (const mod of modules) {
-      const isInit = /(^|\/)__init__\.py$/.test(mod.path);
+      const isInit = /(^|\/)__init__\.py$/.test(mod.path) || (mod.lang === 'ts' && !mod.module.includes('.'));
       if ((!isInit && mod.module.includes('.')) || isPrivate(mod.module)) continue;
       // PEP 562 lazy exports: what the package offers isn't visible in its source.
       if (mod.defs.some((d) => d.parent === mod.module && d.name === '__getattr__')) return new Set();
@@ -673,6 +683,13 @@ interface Ctx {
   scope: string;
   depth: number;
   seen: Set<string>;
+}
+
+/** A module as its users write it: npm packages without the `js-` namespace (`js-falkordb.graph` → `falkordb/graph`). */
+export function shown(module: string): string {
+  if (!module.startsWith('js-')) return module;
+  const [token, ...rest] = module.split('.');
+  return [NPM_NAMES.get(token!) ?? token!.slice(3), ...rest].join('/');
 }
 
 export function symbolId(repo: string, qualname: string): string {

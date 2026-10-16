@@ -313,6 +313,14 @@ export function identifiersIn(span: string): SpanIdent[] {
 /** Package names a span or command points at: `pip install graphrag-sdk` → graphrag_sdk, `falkordb` → falkordb. */
 export function packagesNamedIn(span: string): string[] {
   const s = span.trim();
+  // npm/yarn/pnpm/bun: JavaScript packages, namespaced like the indexer names them (`js-<name>`).
+  const npm = /^(?:npm\s+(?:i|install|add)|yarn\s+add|pnpm\s+(?:add|i|install)|bun\s+add)\s+(.*)$/.exec(s);
+  if (npm) {
+    return npm[1]!
+      .split(/\s+/)
+      .filter((x) => x && !x.startsWith('-'))
+      .map((n) => `js-${n.replace(/(?<=.)@[^/]*$/, '').replace(/^@/, '').replace(/[^A-Za-z0-9_-]/g, '-')}`);
+  }
   const install =
     /^(?:pip3?|uv\s+pip|python3?\s+-m\s+pip)\s+install\s+(.*)$/.exec(s) ?? /^(?:poetry|uv)\s+add\s+(.*)$/.exec(s);
   const names = install

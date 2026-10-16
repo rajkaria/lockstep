@@ -5,7 +5,8 @@ import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
 import { identifiersIn, packagesNamedIn, scanDoc, type ExampleDirective, type MdDoc } from './markdown.js';
 import { matchesAny } from './repo-config.js';
-import { extractPython } from './python.js';
+import { extractPython, type PyModule } from './python.js';
+import { bareModule, extractTs } from './typescript.js';
 import type { ParsedRepo } from './index.js';
 import { fileId, writeBatched } from './write.js';
 import type { Mismatch, Resolution, SymbolTable } from './resolve.js';
@@ -31,6 +32,8 @@ interface Row {
 }
 
 const MAX_BODY = 8000;
+/** Fence languages read as JavaScript/TypeScript. */
+export const JS_LANGS = new Set(['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']);
 const MAX_CODE = 20000;
 
 export function sectionId(repo: string, path: string, anchor: string): string {
@@ -88,6 +91,19 @@ export async function writeDocs(
       mismatches.push({ from, to: m.target, kind: m.kind, name: m.name, detail: m.detail, line: lineOf(m.line), text: m.text });
     }
   };
+  /** USES edges and MISMATCH findings for one example's calls in an (ephemeral) module. */
+  const linkExample = (id: string, mod: PyModule, startLine: number, lineOf: (line: number) => number, directive?: ExampleDirective, groups = callGroupsRef.current) => {
+    for (const call of mod.calls.filter((c) => c.lineno >= startLine)) {
+      groups.push(
+        table
+          .resolveCall(repo, mod, call)
+          .filter((r) => codeRepos.has(r.to.split(':')[0]!))
+          .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: lineOf(call.lineno), text: call.text })),
+      );
+    }
+    if (!directive) addMismatches(id, table.checkModule(repo, mod, startLine), lineOf);
+  };
+  const callGroupsRef: { current: Row[][] } = { current: [] };
   const sectionIdsByPath = new Map<string, Map<string, string>>();
 
   for (const doc of docs) {
@@ -103,7 +119,9 @@ export async function writeDocs(
     // Python examples on a page are resolved cumulatively: a later fragment that uses
     // `g` from an earlier block resolves `g` through that earlier binding.
     const callGroups: Row[][] = [];
+    callGroupsRef.current = callGroups;
     let acc = '';
+    let jsAcc = '';
     const skipPage = matchesAny(doc.path, p.config?.skipExamples ?? []);
     for (const ex of doc.examples) {
       const id = exampleId(repo, doc.path, ex.index);
@@ -132,6 +150,18 @@ export async function writeDocs(
         }
         const own = await extractPython(code, { module: pseudoModule(repo, doc.path), path: doc.path });
         idents = own.idents;
+      } else if (JS_LANGS.has(ex.lang)) {
+        // JavaScript/TypeScript examples resolve the same way, cumulatively per page, against npm packages.
+        const startLine = jsAcc ? jsAcc.split('\n').length + 1 : 1;
+        jsAcc = jsAcc ? `${jsAcc}\n${ex.code}` : ex.code;
+        const mod = await extractTs(jsAcc, { module: `${pseudoModule(repo, doc.path)}_js`, path: doc.path, tsx: true });
+        const dispose = table.addEphemeral(repo, mod);
+        try {
+          linkExample(id, mod, startLine, (line) => ex.lineno + (line - startLine), directive);
+        } finally {
+          dispose();
+        }
+        idents = [...new Set(ex.code.match(/[A-Za-z_$][\w$]*/g) ?? [])].sort();
       } else {
         idents = [...new Set(ex.code.match(/[A-Za-z_]\w*/g) ?? [])].sort();
       }
@@ -196,6 +226,41 @@ export async function writeDocs(
         if (target && target !== id) links.push({ from: id, to: target });
       }
     }
+  }
+
+  // Example scripts shipped inside code repositories (examples/*.js, *.ts) are docs too.
+  for (const f of p.files.filter((x) => x.kind === 'js-example')) {
+    const code = await readFile(join(p.checkout.dir, f.path), 'utf8');
+    const id = exampleId(repo, f.path, 0);
+    const mod = await extractTs(code, { module: `${pseudoModule(repo, f.path)}_js`, path: f.path, tsx: !/\.(ts|mts|cts)$/.test(f.path) });
+    const dispose = table.addEphemeral(repo, mod);
+    const groups: Row[][] = [];
+    try {
+      linkExample(id, mod, 1, (line) => line, matchesAny(f.path, p.config?.skipExamples ?? []) ? 'skip' : undefined, groups);
+    } finally {
+      dispose();
+    }
+    const used = usedScopes(groups);
+    for (const g of groups) uses.push(...narrow(g, used));
+    exampleRows.push({
+      id,
+      file: fileId(repo, f.path),
+      section: '',
+      props: {
+        repo,
+        path: f.path,
+        index: 0,
+        lang: /\.(ts|tsx|mts|cts)$/.test(f.path) ? 'typescript' : 'javascript',
+        meta: '',
+        code: code.slice(0, MAX_CODE),
+        lineno: 1,
+        end_lineno: code.split('\n').length,
+        idents: mod.idents,
+        kind: 'script',
+        directive: matchesAny(f.path, p.config?.skipExamples ?? []) ? 'skip' : '',
+        url: blob(f.path, 1),
+      },
+    });
   }
 
   // Example scripts shipped inside code repositories (examples/*.py) are docs too.
@@ -318,6 +383,8 @@ export function pageContext(doc: MdDoc, ownPackages: Set<string>, table: SymbolT
       for (const m of ex.code.matchAll(/^\s*(?:from\s+(\w+)|import\s+(\w+))/gm)) packages.add(m[1] ?? m[2]!);
     } else if (ex.lang === 'bash') {
       for (const line of ex.code.split('\n')) for (const pkg of packagesNamedIn(line.replace(/^\$\s*/, ''))) packages.add(pkg);
+    } else if (JS_LANGS.has(ex.lang)) {
+      for (const m of ex.code.matchAll(/(?:from\s+|require\(\s*|import\(\s*)["']([^"'./][^"']*)["']/g)) packages.add(bareModule(m[1]!).split('.')[0]!);
     }
   }
   for (const s of doc.sections) for (const span of s.inlineCode) for (const pkg of packagesNamedIn(span.text)) packages.add(pkg);

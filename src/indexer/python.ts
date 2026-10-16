@@ -48,6 +48,8 @@ export interface PyImport {
   /** Absolute dotted target. */
   target: string;
   lineno: number;
+  /** TypeScript/JavaScript: re-exported (`export { X } from`, `export *`); Python re-exports every import. */
+  exported?: boolean;
 }
 
 export interface PyBinding {
@@ -82,6 +84,8 @@ export interface PyModule {
   calls: PyCall[];
   /** Every identifier that appears in the source (for docs examples' late linking). */
   idents: string[];
+  /** Source language (absent: Python). */
+  lang?: 'python' | 'ts';
 }
 
 interface Scope {

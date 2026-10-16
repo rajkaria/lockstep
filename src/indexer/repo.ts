@@ -104,13 +104,22 @@ const TEST_FILE = /(^|\/)(tests?|testing)\/|(^|\/)test_[^/]*\.py$|_test\.py$|(^|
 /** Repository housekeeping files are not product documentation. */
 const NON_DOCS_MD = /(^|\/)(CHANGELOG|CHANGES|HISTORY|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT|AGENTS|CLAUDE|GEMINI|LICENSE|NOTICE|PULL_REQUEST_TEMPLATE|ISSUE_TEMPLATE)[^/]*\.(mdx?|rst)$/i;
 
-export type FileKind = 'python' | 'markdown' | 'python-example';
+export type FileKind = 'python' | 'markdown' | 'python-example' | 'typescript' | 'js-example';
+
+const TS_TEST = /(^|\/)(__tests__|__mocks__|tests?|test-utils|e2e|cypress|playwright|fixtures|coverage|out|\.next|\.docusaurus|\.vitepress)\/|\.(test|spec|stories|bench)\.[cm]?[jt]sx?$|\.d\.[cm]?ts$|\.min\.js$|(^|\/)[\w.-]+\.config\.[cm]?[jt]s$/;
 
 /** Classify a tracked path; `undefined` means the indexer skips it. */
 export function classifyFile(path: string): FileKind | undefined {
   if (IGNORED_DIRS.test(path)) return undefined;
   if (/\.(md|mdx|rst)$/i.test(path)) {
     return NON_DOCS_MD.test(path) || /(^|\/)(tests?|testing|fixtures)\//.test(path) ? undefined : 'markdown';
+  }
+  // TypeScript/JavaScript: library code only when it belongs to a published package (decided in parseRepo).
+  if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(path)) {
+    if (TS_TEST.test(path)) return undefined;
+    if (/(^|\/)(examples?|samples?)\//.test(path)) return 'js-example';
+    if (/(^|\/)(scripts?|benchmarks?|docs|site|website)\//.test(path)) return undefined;
+    return 'typescript';
   }
   if (!path.endsWith('.py')) return undefined;
   if (TEST_FILE.test(path)) return undefined;

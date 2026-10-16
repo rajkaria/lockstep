@@ -8,6 +8,8 @@ import { readDocs, writeDocs, type DocsIndexReport } from './docs.js';
 import { trackedOrWalked } from './files.js';
 import type { MdDoc } from './markdown.js';
 import { extractPython, type PyModule } from './python.js';
+import { extractTs } from './typescript.js';
+import { packageModules, readManifest, relativeResolver, tsModuleNames, type NpmPackage } from './tsmodules.js';
 import { classifyFile, moduleNames, type Checkout, type FileKind } from './repo.js';
 import { symbolId, SymbolTable } from './resolve.js';
 import { fileId, writeBatched } from './write.js';
@@ -58,9 +60,25 @@ export async function listFiles(dir: string): Promise<{ path: string; kind: File
   });
 }
 
+/** Published npm packages of a checkout (every non-private `package.json` with a name). */
+export async function npmPackages(dir: string, paths: string[]): Promise<NpmPackage[]> {
+  const out: NpmPackage[] = [];
+  for (const path of paths.filter((p) => /(^|\/)package\.json$/.test(p) && !/(^|\/)node_modules\//.test(p))) {
+    const pkg = readManifest(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', await readFile(join(dir, path), 'utf8').catch(() => ''));
+    if (pkg) out.push(pkg);
+  }
+  return out;
+}
+
 export async function parseRepo(checkout: Checkout): Promise<ParsedRepo> {
   const config = await loadRepoConfig(checkout.dir);
-  const files = (await listFiles(checkout.dir)).filter((f) => !matchesAny(f.path, config.ignore));
+  const all = await trackedOrWalked(checkout.dir);
+  const packages = await npmPackages(checkout.dir, all);
+  const tsNames = tsModuleNames(all.filter((p) => classifyFile(p) === 'typescript'), packages);
+  const files = (await listFiles(checkout.dir))
+    .filter((f) => !matchesAny(f.path, config.ignore))
+    // TypeScript/JavaScript outside a published package (a docs site, an app, tooling) is not library code.
+    .filter((f) => f.kind !== 'typescript' || tsNames.has(f.path));
   const py = files.filter((f) => f.kind === 'python').map((f) => f.path);
   const names = moduleNames(py);
   const modules: PyModule[] = [];
@@ -74,6 +92,16 @@ export async function parseRepo(checkout: Checkout): Promise<ParsedRepo> {
       parseErrors.push(`${path}: ${(err as Error).message}`);
     }
   }
+  for (const f of files.filter((x) => x.kind === 'typescript')) {
+    const name = tsNames.get(f.path)!;
+    try {
+      const source = await readFile(join(checkout.dir, f.path), 'utf8');
+      modules.push(await extractTs(source, { module: name.module, path: f.path, tsx: !/\.(ts|mts|cts)$/.test(f.path), resolve: relativeResolver(f.path, tsNames) }));
+    } catch (err) {
+      parseErrors.push(`${f.path}: ${(err as Error).message}`);
+    }
+  }
+  modules.push(...packageModules(packages, tsNames));
   return { checkout, files, modules, parseErrors, config };
 }
 
@@ -124,7 +152,8 @@ export async function writeCode(
           end_lineno: d.endLineno,
           signature: d.signature,
           doc: d.doc ?? '',
-          visibility: visibility(d.name),
+          visibility:
+            d.decorators.includes('private') || d.decorators.includes('internal') ? 'private' : d.kind === 'method' && d.name === 'constructor' ? 'special' : visibility(d.name),
           decorators: d.decorators,
           exported: exported.has(symbolId(repo, d.qualname)),
         },
@@ -195,7 +224,7 @@ export async function indexOrg(
   const docs: DocsIndexReport[] = [];
   const docsByRepo = new Map<string, MdDoc[]>();
   for (const p of parsed) {
-    if (!p.files.some((f) => f.kind === 'markdown' || f.kind === 'python-example')) continue;
+    if (!p.files.some((f) => f.kind === 'markdown' || f.kind === 'python-example' || f.kind === 'js-example')) continue;
     onProgress({ phase: 'docs', repo: p.checkout.repo, message: 'linking docs to code' });
     docs.push(await writeDocs(graph, p, table, run, codeRepos));
     docsByRepo.set(p.checkout.repo, await readDocs(p));

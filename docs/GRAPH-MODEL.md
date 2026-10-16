@@ -172,9 +172,10 @@ RETURN [n IN nodes(p) | coalesce(n.qualname, n.id)] AS path
 MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
 WHERE c.kind IN ['removed', 'renamed', 'signature', 'export-removed']
 MATCH (e:CodeExample)-[u:USES]->(s)
-WHERE e.status = 'live' AND e.lang = 'python' AND coalesce(e.directive, '') = ''
+WHERE e.status = 'live' AND coalesce(e.directive, '') = ''
+  AND (e.lang = 'python' OR (c.kind <> 'signature' AND e.lang IN ['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']))
 OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
-RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
+RETURN e.id AS example, e.code AS code, e.lang AS lang, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
        coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
        s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
        c.kind AS change, c.before AS before, c.after AS after, c.renamed_to AS renamedTo
@@ -244,9 +245,10 @@ UNWIND $changes AS ch
 MATCH (s:Symbol {id: ch.id})
 WHERE ch.kind IN ['removed', 'renamed', 'signature', 'export-removed']
 MATCH (e:CodeExample)-[u:USES]->(s)
-WHERE e.status = 'live' AND e.lang = 'python' AND coalesce(e.directive, '') = ''
+WHERE e.status = 'live' AND coalesce(e.directive, '') = ''
+  AND (e.lang = 'python' OR (ch.kind <> 'signature' AND e.lang IN ['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']))
 OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
-RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
+RETURN e.id AS example, e.code AS code, e.lang AS lang, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
        coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
        s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
        ch.kind AS change, ch.before AS before, ch.after AS after, ch.renamed_to AS renamedTo
