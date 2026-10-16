@@ -485,10 +485,10 @@ OPTIONAL MATCH (d:DocSection {id: row.section})
 FOREACH (_ IN CASE WHEN d IS NULL THEN [] ELSE [1] END | MERGE (e)-[:IN_SECTION]->(d))
 ```
 
-**`deleteRepoDocEdges`** — Drop a docs repository's MENTIONS/USES/LINKS_TO edges before re-linking.
+**`deleteRepoDocEdges`** — Drop a docs repository's MENTIONS/USES/LINKS_TO/MISMATCH edges before re-linking.
 
 ```cypher
-MATCH (d {repo: $repo})-[r:MENTIONS|USES|LINKS_TO]->()
+MATCH (d {repo: $repo})-[r:MENTIONS|USES|LINKS_TO|MISMATCH]->()
 WHERE d:DocSection OR d:CodeExample
 DELETE r
 ```
@@ -511,6 +511,16 @@ MATCH (e:CodeExample {id: row.from})
 MATCH (s:Symbol {id: row.to})
 MERGE (e)-[u:USES]->(s)
 SET u.line = row.line, u.resolved = row.resolved, u.text = row.text
+```
+
+**`upsertMismatches`** — Record an example line that no longer fits the code it calls: an unknown keyword, a wrong argument count, a name that does not exist.
+
+```cypher
+UNWIND $rows AS row
+MATCH (e:CodeExample {id: row.from})
+MATCH (s:Symbol {id: row.to})
+MERGE (e)-[m:MISMATCH {kind: row.kind, name: row.name, detail: row.detail}]->(s)
+SET m.line = row.line, m.text = row.text
 ```
 
 **`upsertLinks`** — Link doc sections that hyperlink to each other (input to PageRank).

@@ -137,7 +137,8 @@ program
       for (const d of report.docs) {
         console.log(
           `  ${d.repo.padEnd(28)} docs     ${String(d.sections).padStart(5)} sections ${String(d.examples.total).padStart(5)} examples  ` +
-            `${d.uses.exact + d.uses.byName} uses  ${d.mentions} mentions  ${d.links} links`,
+            `${d.uses.exact + d.uses.byName} uses  ${d.mentions} mentions  ${d.links} links` +
+            (d.mismatches ? `  ${d.mismatches} mismatch${d.mismatches === 1 ? '' : 'es'} (staleproof audit ${d.repo})` : ''),
         );
       }
       for (const dep of report.dependsOn) console.log(`  ${dep.from} → ${dep.to} (${dep.spec})`);

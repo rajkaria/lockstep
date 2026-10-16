@@ -1,4 +1,5 @@
 import type { Node } from 'web-tree-sitter';
+import type { Arity, ArityParam, CallArgs } from './signature.js';
 import { pythonParser } from './treesitter.js';
 
 /**
@@ -35,6 +36,8 @@ export interface PyDef {
   /** Base class expressions as written. */
   bases: string[];
   params: PyParam[];
+  /** What a call must pass: parameter kinds, defaults, `*args`/`**kwargs` (functions and methods). */
+  arity?: Arity;
   doc?: string;
   isAsync: boolean;
 }
@@ -66,6 +69,8 @@ export interface PyCall {
   /** Source text of the callee, e.g. `self._graph.query`. */
   text: string;
   lineno: number;
+  /** The arguments as written: positional count, keyword names, splats. */
+  args?: CallArgs;
 }
 
 export interface PyModule {
@@ -180,6 +185,7 @@ export async function extractPython(source: string, opts: ExtractOptions): Promi
         const paramsNode = node.childForFieldName('parameters');
         const returnType = node.childForFieldName('return_type');
         const params = paramsNode ? parseParams(paramsNode) : [];
+        const arity = paramsNode ? parseArity(paramsNode) : { params: [], varArgs: false, varKw: false };
         const isAsync = node.children.some((c) => c?.type === 'async');
         const kind: DefKind = scope.kind === 'class' ? 'method' : 'function';
         const def: PyDef = {
@@ -195,6 +201,7 @@ export async function extractPython(source: string, opts: ExtractOptions): Promi
           returnExprs: [],
           bases: [],
           params,
+          arity,
           doc: docstring(node.childForFieldName('body')),
           isAsync,
         };
@@ -312,6 +319,7 @@ export async function extractPython(source: string, opts: ExtractOptions): Promi
             fn: selfAware(toExpr(fn), scope),
             text: fn.text,
             lineno: node.startPosition.row + 1,
+            args: callArgs(node.childForFieldName('arguments')),
           });
         }
         visitChildren(node, scope);
@@ -431,6 +439,86 @@ function parseParams(node: Node): PyParam[] {
     }
   }
   return params;
+}
+
+/** Parameter kinds and defaults, as Python binds arguments to them. */
+export function parseArity(node: Node): Arity {
+  const params: ArityParam[] = [];
+  let varArgs = false;
+  let varKw = false;
+  let kwOnly = false;
+  const add = (name: string | undefined, required: boolean) => {
+    if (name) params.push({ name, kind: kwOnly ? 'kw-only' : 'pos', required });
+  };
+  for (const c of node.namedChildren) {
+    if (!c) continue;
+    switch (c.type) {
+      case 'identifier':
+        add(c.text, true);
+        break;
+      case 'typed_parameter': {
+        const splat = c.namedChildren.find((x) => x?.type === 'list_splat_pattern' || x?.type === 'dictionary_splat_pattern');
+        if (splat?.type === 'list_splat_pattern') {
+          varArgs = true;
+          kwOnly = true;
+        } else if (splat?.type === 'dictionary_splat_pattern') {
+          varKw = true;
+        } else {
+          add(c.namedChildren.find((x) => x?.type === 'identifier')?.text, true);
+        }
+        break;
+      }
+      case 'default_parameter':
+      case 'typed_default_parameter':
+        add(c.childForFieldName('name')?.text, false);
+        break;
+      case 'list_splat_pattern':
+        varArgs = true;
+        kwOnly = true;
+        break;
+      case 'dictionary_splat_pattern':
+        varKw = true;
+        break;
+      case 'keyword_separator':
+        kwOnly = true;
+        break;
+      case 'positional_separator':
+        for (const p of params) p.kind = 'pos-only';
+        break;
+      default:
+        break;
+    }
+  }
+  return { params, varArgs, varKw };
+}
+
+/** What a call passes, read from its argument list. */
+export function callArgs(node: Node | null): CallArgs | undefined {
+  const out: CallArgs = { positional: 0, keywords: [], starArgs: false, starKwargs: false };
+  if (!node) return out;
+  // `Graph(name: str, timeout: int = 0)` in an API reference is a signature written as a
+  // call: it doesn't parse as one, and its "arguments" say nothing about a real call.
+  if (node.hasError) return undefined;
+  // `f(x for x in xs)`: the generator is the single positional argument.
+  if (node.type === 'generator_expression') return { ...out, positional: 1 };
+  for (const c of node.namedChildren) {
+    if (!c || c.type === 'comment') continue;
+    if (c.type === 'keyword_argument') {
+      const name = c.childForFieldName('name')?.text;
+      if (name) out.keywords.push(name);
+    } else if (c.type === 'list_splat') out.starArgs = true;
+    else if (c.type === 'dictionary_splat') out.starKwargs = true;
+    else out.positional++;
+  }
+  return out;
+}
+
+/** The arity of a signature string as stored on the graph (`def f(a, *, b=1)`, `async def g(self) -> X`). */
+export async function arityOfSignature(signature: string): Promise<Arity | undefined> {
+  const sig = signature.trim();
+  if (!/^(async\s+)?def\s/.test(sig)) return undefined;
+  const mod = await extractPython(`${sig}:\n    pass\n`, { module: '__sig__', path: '__sig__.py' });
+  return mod.defs.find((d) => d.kind === 'function')?.arity;
 }
 
 function docstring(body: Node | null): string | undefined {

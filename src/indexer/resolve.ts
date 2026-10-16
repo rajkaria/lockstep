@@ -1,5 +1,6 @@
 import type { Expr, PyBinding, PyCall, PyDef, PyModule } from './python.js';
 import { exprText } from './python.js';
+import { checkArgs, trustsSignature, type MismatchKind } from './signature.js';
 
 export type Resolution = 'exact' | 'by-name';
 
@@ -43,6 +44,26 @@ export const GENERIC = new Set([
 ])
 
 const MAX_BY_NAME = 4;
+
+/** A docs example line that no longer fits the code it reaches (see `SymbolTable.checkModule`). */
+export interface Mismatch {
+  kind: MismatchKind;
+  /** Line in the checked module. */
+  line: number;
+  /** The symbol the finding is about: the callee, or the module/class missing a name. */
+  target: string;
+  /** The missing name or the callee's qualified name. */
+  name: string;
+  detail: string;
+  /** Source text of the callee or import target. */
+  text: string;
+}
+
+/**
+ * External base classes that add no attributes a docs example would call
+ * (so a class built on them still has a closed set of members).
+ */
+const INERT_BASES = new Set(['object', 'ABC', 'abc.ABC', 'Generic', 'typing.Generic', 'Protocol', 'typing.Protocol']);
 
 /**
  * An organisation-wide symbol table over every indexed Python module, used to
@@ -185,6 +206,159 @@ export class SymbolTable {
       return candidates.map((s) => ({ to: s.id, resolved: 'by-name' as const }));
     }
     return [];
+  }
+
+  /**
+   * Static checks of a module that uses the organisation's code (a docs page's examples):
+   * names imported from the org's packages that do not exist, attributes called on org
+   * modules and classes that do not exist, and calls whose arguments the target's
+   * signature rejects. Only exact resolutions are checked, and a check is skipped
+   * whenever the code could supply the name or accept the call dynamically
+   * (`__getattr__`, external base classes, metaclasses, decorators, splats).
+   */
+  checkModule(repo: string, mod: PyModule, fromLine = 1): Mismatch[] {
+    const out: Mismatch[] = [];
+    for (const imp of mod.imports) {
+      if (imp.lineno < fromLine || imp.alias === '*') continue;
+      const m = this.missingImport(imp.target);
+      if (m) out.push({ ...m, line: imp.lineno, text: imp.target });
+    }
+    for (const call of mod.calls) {
+      if (call.lineno < fromLine) continue;
+      const ctx: Ctx = { repo, mod, scope: call.scope, depth: 0, seen: new Set() };
+      if (call.fn.k === 'attr' && !call.fn.attr.startsWith('__')) {
+        const base = this.evalExpr(call.fn.obj, ctx);
+        const missing = base ? this.missingMember(base, call.fn.attr, ctx) : undefined;
+        if (missing) {
+          out.push({ ...missing, line: call.lineno, text: call.text });
+          continue;
+        }
+      }
+      if (!call.args) continue;
+      const target = this.callTarget(call, ctx);
+      if (!target) continue;
+      for (const a of checkArgs(call.args, target.def.arity!, { dropFirst: target.dropFirst, callee: target.label })) {
+        out.push({ kind: a.kind, line: call.lineno, target: target.sym.id, name: target.sym.def.qualname, detail: a.detail, text: call.text });
+      }
+    }
+    return out;
+  }
+
+  /** `from pkg.mod import Name` where `pkg` is the org's and `Name` exists nowhere. */
+  private missingImport(target: string): Omit<Mismatch, 'line' | 'text'> | undefined {
+    const parts = target.split('.');
+    if (parts.length < 2 || !this.packageRepos.has(parts[0]!)) return undefined;
+    if (this.modules.has(target) || this.resolveDotted(target)) return undefined;
+    // The longest prefix that is a real module of the org.
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const prefix = parts.slice(0, i).join('.');
+      const entry = this.modules.get(prefix);
+      if (!entry) continue;
+      const name = parts[i]!;
+      if (!this.moduleIsClosed(prefix) || this.moduleBinds(prefix, name)) return undefined;
+      const sym = this.symbol(prefix, entry.repo);
+      if (!sym) return undefined;
+      return {
+        kind: 'missing-import',
+        target: sym.id,
+        name,
+        detail: i === parts.length - 1 ? `\`${prefix}\` has no \`${name}\`` : `\`${prefix}\` has no module \`${name}\``,
+      };
+    }
+    return undefined;
+  }
+
+  /** `mod.gone()`, `Cls.gone()`, `obj.gone()` on an org module or a class whose members are all known. */
+  private missingMember(base: Val, attr: string, ctx: Ctx): Omit<Mismatch, 'line' | 'text'> | undefined {
+    if (base.t === 'module') {
+      const entry = this.modules.get(base.name);
+      if (!entry || this.resolveDotted(`${base.name}.${attr}`, ctx.depth, ctx.repo)) return undefined;
+      if (!this.moduleIsClosed(base.name) || this.moduleBinds(base.name, attr)) return undefined;
+      const sym = this.symbol(base.name, entry.repo);
+      return sym ? { kind: 'missing-attribute', target: sym.id, name: attr, detail: `\`${base.name}\` has no \`${attr}\`` } : undefined;
+    }
+    const cls = base.t === 'instance' ? base.cls : base.t === 'sym' && base.sym.def.kind === 'class' ? base.sym : undefined;
+    if (!cls || !this.classIsClosed(cls)) return undefined;
+    if (this.findMethod(cls, attr, 0) || this.classHas(cls, attr, 0)) return undefined;
+    return {
+      kind: 'missing-attribute',
+      target: cls.id,
+      name: attr,
+      detail: `\`${cls.def.name}\` has no attribute \`${attr}\``,
+    };
+  }
+
+  /** The function a call reaches, if its signature can be trusted to judge the call. */
+  private callTarget(call: PyCall, ctx: Ctx): { sym: SymbolInfo; def: PyDef; dropFirst: boolean; label: string } | undefined {
+    const v = this.evalExpr(call.fn, ctx);
+    if (v?.t !== 'sym') return undefined;
+    const sym = v.sym;
+    if (sym.def.kind === 'class') {
+      if (!this.classIsClosed(sym) || this.findMethod(sym, '__new__', 0)) return undefined;
+      const init = this.findMethod(sym, '__init__', 0);
+      if (!init || !this.trusted(init)) return undefined;
+      return { sym: init, def: init.def, dropFirst: true, label: sym.def.name };
+    }
+    if (sym.def.kind !== 'function' && sym.def.kind !== 'method') return undefined;
+    if (!this.trusted(sym)) return undefined;
+    const label = sym.def.kind === 'method' ? `${sym.def.parent?.split('.').pop()}.${sym.def.name}` : sym.def.name;
+    if (sym.def.kind === 'function') return { sym, def: sym.def, dropFirst: false, label };
+    const isStatic = sym.def.decorators.includes('staticmethod');
+    const isClassMethod = sym.def.decorators.includes('classmethod');
+    if (isStatic) return { sym, def: sym.def, dropFirst: false, label };
+    if (isClassMethod) return { sym, def: sym.def, dropFirst: true, label };
+    // A plain method: bound when reached through an instance, unbound through the class.
+    if (call.fn.k !== 'attr') return undefined;
+    const recv = this.evalExpr(call.fn.obj, ctx);
+    if (recv?.t === 'instance') return { sym, def: sym.def, dropFirst: true, label };
+    if (recv?.t === 'sym' && recv.sym.def.kind === 'class') return { sym, def: sym.def, dropFirst: false, label };
+    return undefined;
+  }
+
+  /** One definition, a signature-preserving decorator stack, and a parsed arity. */
+  private trusted(sym: SymbolInfo): boolean {
+    if (!sym.def.arity || !trustsSignature(sym.def.decorators)) return false;
+    if (sym.def.decorators.some((d) => d === 'property' || d.endsWith('.setter') || d.endsWith('cached_property'))) return false;
+    // `@overload` stubs or conditional definitions: more than one def under the name.
+    return (this.byQualname.get(sym.def.qualname) ?? []).filter((s) => s.repo === sym.repo).length === 1;
+  }
+
+  /** A module whose names are all visible: no module `__getattr__`, no star import from outside the org. */
+  private moduleIsClosed(module: string): boolean {
+    const entry = this.modules.get(module);
+    if (!entry) return false;
+    if (this.symbol(`${module}.__getattr__`, entry.repo)) return false;
+    return entry.mod.imports.every((i) => i.alias !== '*' || this.packageRepos.has(i.target.split('.')[0]!));
+  }
+
+  /** A module-level assignment or import binds the name (`__version__ = ...`, `Graph = _Graph`). */
+  private moduleBinds(module: string, name: string): boolean {
+    const entry = this.modules.get(module);
+    if (!entry) return false;
+    if (entry.mod.imports.some((i) => i.alias === name)) return true;
+    return (this.bindingsByScope.get(module) ?? []).some((b) => b.target === name);
+  }
+
+  /**
+   * Every member of the class is visible in the org's source: bases are org classes
+   * (or inert ones like `ABC`), no class decorators, no metaclass, no `__getattr__`.
+   */
+  private classIsClosed(cls: SymbolInfo, depth = 0): boolean {
+    if (depth > 8) return false;
+    if (cls.def.decorators.length > 0 || /metaclass\s*=/.test(cls.def.signature)) return false;
+    if (this.findMethod(cls, '__getattr__', 0) || this.findMethod(cls, '__getattribute__', 0)) return false;
+    const orgBases = this.basesOf(cls);
+    const external = cls.def.bases.filter((b) => !INERT_BASES.has(b.replace(/\[.*$/s, '').trim()));
+    if (orgBases.length < external.length) return false;
+    return orgBases.every((b) => this.classIsClosed(b, depth + 1));
+  }
+
+  /** Class-level names: `X = 1`, `y: int`, `self.z = ...` in any method, through org bases. */
+  private classHas(cls: SymbolInfo, attr: string, depth: number): boolean {
+    if (depth > 8) return false;
+    const bindings = this.bindingsByScope.get(cls.def.qualname) ?? [];
+    if (bindings.some((b) => b.target === attr || b.target === `self.${attr}`)) return true;
+    return this.basesOf(cls).some((b) => this.classHas(b, attr, depth + 1));
   }
 
   /** Repositories whose packages this module imports (plus its own). */

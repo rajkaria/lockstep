@@ -7,7 +7,7 @@ import { identifiersIn, packagesNamedIn, scanMarkdown, type MdDoc } from './mark
 import { extractPython } from './python.js';
 import type { ParsedRepo } from './index.js';
 import { fileId, writeBatched } from './write.js';
-import type { Resolution, SymbolTable } from './resolve.js';
+import type { Mismatch, Resolution, SymbolTable } from './resolve.js';
 
 export interface DocsIndexReport {
   repo: string;
@@ -17,6 +17,8 @@ export interface DocsIndexReport {
   mentions: number;
   uses: { exact: number; byName: number };
   links: number;
+  /** Example lines that no longer fit the code they call (MISMATCH edges). */
+  mismatches: number;
   gone: number;
 }
 
@@ -78,6 +80,13 @@ export async function writeDocs(
   const mentions: Row[] = [];
   const uses: Row[] = [];
   const links: Row[] = [];
+  const mismatches: Row[] = [];
+  const addMismatches = (from: string, found: Mismatch[], lineOf: (line: number) => number) => {
+    for (const m of found) {
+      if (!codeRepos.has(m.target.split(':')[0]!)) continue;
+      mismatches.push({ from, to: m.target, kind: m.kind, name: m.name, detail: m.detail, line: lineOf(m.line), text: m.text });
+    }
+  };
   const sectionIdsByPath = new Map<string, Map<string, string>>();
 
   for (const doc of docs) {
@@ -113,6 +122,7 @@ export async function writeDocs(
                 .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: ex.lineno + (call.lineno - startLine), text: call.text })),
             );
           }
+          addMismatches(id, table.checkModule(repo, mod, startLine), (line) => ex.lineno + (line - startLine));
         } finally {
           dispose();
         }
@@ -199,6 +209,7 @@ export async function writeDocs(
             .map((r) => ({ from: id, to: r.to, resolved: r.resolved, line: call.lineno, text: call.text })),
         );
       }
+      addMismatches(id, table.checkModule(repo, mod, 1), (line) => line);
     } finally {
       dispose();
     }
@@ -233,6 +244,8 @@ export async function writeDocs(
   await writeBatched(graph, Q.upsertMentions, dedupedMentions);
   await writeBatched(graph, Q.upsertUses, dedupedUses);
   await writeBatched(graph, Q.upsertLinks, dedupedLinks);
+  const dedupedMismatches = [...new Map(mismatches.map((m) => [`${m.from}|${m.to}|${m.kind}|${m.name}|${m.detail}`, m])).values()];
+  await writeBatched(graph, Q.upsertMismatches, dedupedMismatches);
   const gone = await graph.run<{ gone: number }>(Q.markGoneDocs, { repo, run });
 
   return {
@@ -249,6 +262,7 @@ export async function writeDocs(
       byName: dedupedUses.filter((u) => u.resolved === 'by-name').length,
     },
     links: dedupedLinks.length,
+    mismatches: dedupedMismatches.length,
     gone: gone.rows[0]?.gone ?? 0,
   };
 }

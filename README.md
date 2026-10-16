@@ -586,7 +586,7 @@ MATCH (v:Verdict {check: $id})-[:ABOUT]->(d:DocSection)
 RETURN DISTINCT d.id AS id
 ```
 
-Indexing and reporting queries (36 more) are in [docs/GRAPH-MODEL.md](docs/GRAPH-MODEL.md).
+Indexing and reporting queries (37 more) are in [docs/GRAPH-MODEL.md](docs/GRAPH-MODEL.md).
 <!-- generated:cypher:end -->
 
 ## Develop
