@@ -92,6 +92,8 @@ describe('checkMarkdown', () => {
     });
     expect(md.split('\n')[1]).toBe('### Staleproof: this pull request breaks 1 docs example');
     expect(md).toContain('**breaks**: passes before this PR, fails after (after: the page as this PR edits it) |');
+    const fixed = checkMarkdown({ impact: { ...impact, pr: { ...impact.pr, repo: 'acme/docs', docsTouched: ['a.mdx'] } }, summary: 's', cleared: [], org: 'acme' });
+    expect(fixed.split('\n')[1]).toBe('### Staleproof: the doc section this pull request reaches is on pages it edits');
     expect(md).toContain('(page edited in this PR)');
     expect(md).toContain('This pull request also edits `a.mdx`: examples on those pages are run after the change as the pull request leaves them;');
   });

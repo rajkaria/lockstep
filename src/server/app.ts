@@ -122,6 +122,12 @@ export function createApp(opts: AppOptions): Hono {
     return undefined;
   };
   const repoOfId = (id: string) => /^([\w.-]+\/[\w.-]+):/.exec(id)?.[1];
+  /** On the hosted service the visitor can't set the server's GITHUB_TOKEN: say what they can do instead. */
+  const visitorMessage = (message: string) =>
+    hosted && /rate limit/i.test(message)
+      ? `${message.replace(/ \(60 requests\/hour without a token; set GITHUB_TOKEN to raise it\)/, '')} This shared server reads pull requests through GitHub's API, which limits it per hour. ` +
+        'Until then, run the same check yourself (npx -y staleproof check <pr-url>) or add the GitHub Action: both use your own GitHub quota.'
+      : message;
   const userError = (err: unknown) => err instanceof HostedLimitError || err instanceof RepoTooLargeError || err instanceof NotIndexedError;
 
   app.onError((err, c) => c.json({ error: err.message }, userError(err) ? 400 : 500));
@@ -288,7 +294,7 @@ export function createApp(opts: AppOptions): Hono {
           else await runGraphCheck(ctx, pr, { onEvent: send, maxRuns: target.curated ? undefined : 0 });
         });
       } catch (err) {
-        send({ type: 'error', message: (err as Error).message });
+        send({ type: 'error', message: visitorMessage((err as Error).message) });
       }
       await chain;
     });
