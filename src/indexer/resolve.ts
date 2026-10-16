@@ -378,15 +378,29 @@ export class SymbolTable {
       }
       for (const b of this.basesOf(cls)) addClass(b, depth + 1);
     };
+    /** Public names a module binds, following `from x import *` into the org's modules. */
+    const namesOf = (module: string, depth = 0): Map<string, string> => {
+      const names = new Map<string, string>();
+      const entry = this.modules.get(module);
+      if (!entry || depth > 4) return names;
+      for (const d of entry.mod.defs) if (d.parent === module && !d.name.startsWith('_')) names.set(d.name, `${module}.${d.name}`);
+      for (const i of entry.mod.imports) {
+        if (i.alias === '*') {
+          for (const [n, q] of namesOf(i.target, depth + 1)) if (!names.has(n)) names.set(n, q);
+        } else if (!i.alias.includes('.') && !i.alias.startsWith('_')) {
+          names.set(i.alias, `${module}.${i.alias}`);
+        }
+      }
+      return names;
+    };
     for (const mod of modules) {
       const isInit = /(^|\/)__init__\.py$/.test(mod.path);
       if ((!isInit && mod.module.includes('.')) || isPrivate(mod.module)) continue;
-      const names = new Set<string>();
-      for (const d of mod.defs) if (d.parent === mod.module && !d.name.startsWith('_')) names.add(d.name);
-      for (const i of mod.imports) if (i.alias !== '*' && !i.alias.includes('.') && !i.alias.startsWith('_')) names.add(i.alias);
-      for (const name of names) {
-        const v = this.resolveDotted(`${mod.module}.${name}`, 0, repo);
-        if (v?.t !== 'sym') continue;
+      // PEP 562 lazy exports: what the package offers isn't visible in its source.
+      if (mod.defs.some((d) => d.parent === mod.module && d.name === '__getattr__')) return new Set();
+      for (const dotted of namesOf(mod.module).values()) {
+        const v = this.resolveDotted(dotted, 0, repo);
+        if (v?.t !== 'sym' || v.sym.repo !== repo) continue;
         if (v.sym.def.kind === 'class') addClass(v.sym);
         else out.add(v.sym.id);
       }

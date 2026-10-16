@@ -16,6 +16,7 @@ import { packageVersion } from '../pkg.js';
 import { ALL_TOOLS, inputJsonSchema } from '../tools/index.js';
 import type { ToolContext, ToolDef, ToolResult } from '../tools/types.js';
 import { unknownParamsError } from '../tools/types.js';
+import { auditTool } from '../audit.js';
 
 /** A tool only MCP clients get: the docs patch, for the human driving Claude Code to apply locally. */
 const docsPatchTool: ToolDef<{ pr_url: string }, { diff: string; title: string; body: string; files: string[] }> = {
@@ -59,12 +60,13 @@ export const checkPullRequestTool: ToolDef<{ pr_url: string; run_examples?: bool
   },
 };
 
-export const MCP_TOOLS: ToolDef[] = [checkPullRequestTool, ...ALL_TOOLS, docsPatchTool];
+export const MCP_TOOLS: ToolDef[] = [checkPullRequestTool, auditTool, ...ALL_TOOLS, docsPatchTool];
 
 export const MCP_INSTRUCTIONS =
   "Staleproof keeps docs true to code over a FalkorDB graph of an organisation's repositories. For a pull request, call check_pull_request first: " +
   'it returns every doc section and example the change can make false, with the evidence path for each. To judge sections one by one: impact, ' +
   'read_section and run_example, decisions_for before editing, then propose_edit or record_verdict for every impacted section, and docs_patch for the diff. ' +
+  'With no pull request, audit_docs reports which examples no longer fit the code and which public API no doc covers. ' +
   'Every result lists the Cypher it ran.';
 
 /** Tool description for MCP clients: what it does, then the Cypher it runs. */
@@ -148,6 +150,10 @@ export async function serveMcp(store: GraphStore, config: Config, opts: { org?: 
     const graph = store.org(opts.org ?? owner ?? config.org);
     if (prUrl && ['check_pull_request', 'impact', 'clearance'].includes(tool.name)) {
       await ensureIndexed(graph, config, [parsePrUrl(prUrl).fullName], (p) => process.stderr.write(`staleproof: ${p.message}\n`));
+    }
+    const repos = Array.isArray(input.repos) ? (input.repos as string[]) : [];
+    if (tool.name === 'audit_docs' && repos.length) {
+      await ensureIndexed(graph, config, repos, (p) => process.stderr.write(`staleproof: ${p.message}\n`));
     }
     if (prUrl) input.pr_url = await canonicalPrUrl(graph, prUrl);
     return { graph, config, prUrl: input.pr_url as string | undefined };

@@ -175,6 +175,7 @@ export function CodeBlock({ code, lang, title }: { code: string; lang?: string; 
 
 export const NAV: { href: string; label: string }[] = [
   { href: '#/install', label: 'Install' },
+  { href: '#/audit', label: 'Audit' },
   { href: '#/how-it-works', label: 'How it works' },
   { href: '#/use-cases', label: 'Use cases' },
   { href: '#/integrations', label: 'Integrations' },
@@ -235,6 +236,7 @@ export function Footer({ meta }: { meta?: ReactNode }) {
           <a href="#/how-it-works">How it works</a>
           <a href="#/use-cases">Use cases</a>
           <a href="#/try">Check a pull request</a>
+          <a href="#/audit">Audit a repository</a>
           <a href="#/install">Install</a>
           <a href="#/model">Graph model</a>
         </div>

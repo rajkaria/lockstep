@@ -17,7 +17,7 @@ export interface McpHttpOptions {
 }
 
 /** Tools that read a pull request and may index its repository first on a hosted server. */
-const INDEXING_TOOLS = new Set(['check_pull_request', 'impact', 'clearance']);
+const INDEXING_TOOLS = new Set(['check_pull_request', 'impact', 'clearance', 'audit_docs']);
 
 export { repoOfArgs } from './args.js';
 
@@ -48,7 +48,7 @@ export async function handleMcpRequest(request: Request, opts: McpHttpOptions): 
     const repo = repoOfArgs(input);
     if (!repo) {
       if (tool.name === 'decisions_for' || tool.name === 'write_decision') return { graph, config, prUrl };
-      throw new Error('name a repository: pass a pull request URL (pr_url) or ids that start with owner/repo:');
+      throw new Error('name a repository: pass a pull request URL (pr_url), repos: ["owner/name"], or ids that start with owner/repo:');
     }
     const target = INDEXING_TOOLS.has(tool.name) ? (await workspaces.ensure(repo)).graph : (await workspaces.locate(repo))?.graph;
     if (!target) throw new Error(`${repo} is not indexed yet: call check_pull_request with one of its pull requests first`);

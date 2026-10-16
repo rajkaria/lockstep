@@ -111,6 +111,19 @@ Available to MCP clients.
 
 Cypher it runs: `impact`, `clearance`, `rankSections` ([full text](GRAPH-MODEL.md)).
 
+### `audit_docs`
+
+Audit the docs of indexed repositories with no pull request: a 0-100 health score, every example line that no longer fits the code it calls (unknown keywords, wrong argument counts, names that no longer exist, found statically across repositories), API coverage (public symbols no doc names or calls, most used first) and the latest example runs at the indexed commits.
+
+Available to MCP clients.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `repos` | string[] | no | Repositories to audit as owner/name (default: every repository in the graph) |
+| `limit` | integer 0–200 | no | How many undocumented symbols to list (default 25) |
+
+Cypher it runs: `auditRepos`, `auditExamples`, `auditMismatches`, `auditRuns`, `auditSymbols` ([full text](GRAPH-MODEL.md)).
+
 ### `impact`
 
 Find every doc section and code example a pull request can falsify, in any repository of the organisation. Walks changed symbol ← callers (up to max_hops, across repositories) ← MENTIONS/USES ← doc. Returns impacted sections ordered by severity (breaking: removed/renamed; api: signature; behavior: body changed) with the evidence path for each. Call this first for a PR. At most 40 sections come back per call; when more are impacted, call again with offset to page.

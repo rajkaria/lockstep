@@ -6,6 +6,7 @@ import { DocsPage } from './Docs';
 import { PACKAGE, PRODUCT } from './docs/manifest';
 import { num, seedRepoColors } from './format';
 import { InstallPage } from './Install';
+import { AuditPage } from './Audit';
 import { Landing } from './Landing';
 import { Footer, Header } from './layout';
 import { HOME_SECTIONS, parseRoute, type Route } from './route';
@@ -38,6 +39,7 @@ export function App() {
   }, []);
   useEffect(() => {
     if (route.page === 'install') document.title = `Install ${PRODUCT}`;
+    else if (route.page === 'audit') document.title = `Docs audit${route.repo ? ` · ${route.repo}` : ''} · ${PRODUCT}`;
     else if (route.page !== 'docs') document.title = `${PRODUCT} — keep docs true to code`;
   }, [route]);
   // Section routes (#/use-cases) scroll once the landing is on screen.
@@ -58,7 +60,8 @@ export function App() {
     return (q: string) => map.get(q.split('.')[0]!);
   }, [facts]);
 
-  const current = route.page === 'docs' ? 'docs' : route.page === 'model' ? 'model' : route.page === 'install' ? 'install' : route.page === 'home' ? route.section : undefined;
+  const current =
+    route.page === 'docs' ? 'docs' : route.page === 'model' ? 'model' : route.page === 'install' ? 'install' : route.page === 'audit' ? 'audit' : route.page === 'home' ? route.section : undefined;
   const banners = (
     <>
       {loadError && <div className="banner err">The API is unreachable: {loadError}</div>}
@@ -94,6 +97,7 @@ export function App() {
           </div>
         )}
         {route.page === 'install' && <InstallPage initialRepo={route.repo} health={health} />}
+        {route.page === 'audit' && <AuditPage initialRepo={route.repo} health={health} />}
         {route.page === 'model' && (
           <div className="wrap page-pad">
             <ModelPage />
@@ -163,6 +167,7 @@ const EDGES: [string, string][] = [
   ['(Symbol)-[:CALLS {resolved}]->(Symbol)', 'call edges, across repositories, resolved through imports, attribute types and return annotations'],
   ['(DocSection)-[:MENTIONS]->(Symbol)', 'prose names a symbol in inline code'],
   ['(CodeExample)-[:USES]->(Symbol)', 'an example calls a symbol (resolved like code)'],
+  ['(CodeExample)-[:MISMATCH {kind, detail, line}]->(Symbol)', 'an example line the code no longer accepts: unknown keyword, wrong argument count, a name that no longer exists'],
   ['(CodeExample)-[:IN_SECTION]->(DocSection)', 'an example sits under a heading'],
   ['(DocSection)-[:LINKS_TO]->(DocSection)', 'hyperlinks between pages (PageRank input)'],
   ['(Repo)-[:DEPENDS_ON]->(Repo)', 'declared dependencies and docs that import a package'],

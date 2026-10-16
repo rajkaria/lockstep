@@ -109,9 +109,13 @@ export function publicApi(rows: SymRow[]): SymRow[] {
     if (seen.has(key)) return false;
     seen.add(key);
     if (r.visibility !== 'public' || NOT_API.test(r.path)) return false;
-    if (withExports.has(r.repo) && !r.exported) return false;
     const parts = r.qualname.split('.');
-    if (parts.some((p) => p.startsWith('_') && !/^__.*__$/.test(p))) return false;
+    // Exported names count wherever they are defined (`httpx._api.get` is `httpx.get`).
+    if (withExports.has(r.repo)) {
+      if (!r.exported) return false;
+    } else if (parts.some((p) => p.startsWith('_') && !/^__.*__$/.test(p))) {
+      return false;
+    }
     for (let i = 1; i < parts.length; i++) {
       if (fnLike.has(`${r.repo}:${parts.slice(0, i).join('.')}`)) return false;
     }

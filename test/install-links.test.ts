@@ -61,6 +61,8 @@ describe('routes', () => {
     expect(parseRoute('#/try')).toEqual({ page: 'home', section: 'try' });
     expect(parseRoute('#/check/chk-1')).toEqual({ page: 'check', id: 'chk-1' });
     expect(parseRoute('#/docs/mcp/hosted')).toEqual({ page: 'docs', slug: 'mcp', anchor: 'hosted' });
+    expect(parseRoute('#/audit?repo=encode%2Fhttpx')).toEqual({ page: 'audit', repo: 'encode/httpx' });
+    expect(parseRoute('#/audit')).toEqual({ page: 'audit', repo: undefined });
     expect(parseRoute('#/nowhere')).toEqual({ page: 'home' });
   });
 });

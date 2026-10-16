@@ -24,6 +24,8 @@ import { RepoTooLargeError } from '../indexer/tarball.js';
 import { parseRepoName } from '../indexer/repo.js';
 import { canonicalPrUrl, NotIndexedError } from '../pr/ingest.js';
 import { handleMcpRequest } from '../mcp/http.js';
+import { auditDocs, type AuditData } from '../audit.js';
+import { healthBadge } from './badge.js';
 
 export const DEFAULT_PRELOADED = [
   'https://github.com/FalkorDB/falkordb-py/pull/262',
@@ -103,6 +105,19 @@ export function createApp(opts: AppOptions): Hono {
   const limiter = new RateLimiter(opts.rateLimit ?? 30);
   const mcpLimiter = new RateLimiter((opts.rateLimit ?? 30) * 10);
   let factsCache: { at: number; facts: Facts } | undefined;
+  /** Audits by graph and repository, for badges (10 minutes; the CDN caches the SVG for an hour on top). */
+  const auditCache = new Map<string, { at: number; data: AuditData; summary: string }>();
+  const AUDIT_TTL = 10 * 60_000;
+  const cachedAudit = async (g: OrgGraph, repo: string, fresh = false) => {
+    const key = `${g.name}|${repo.toLowerCase()}`;
+    const hit = auditCache.get(key);
+    if (hit && !fresh && Date.now() - hit.at < AUDIT_TTL) return hit;
+    const name = (await g.run<{ name: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name`, { name: repo })).rows[0]?.name ?? repo;
+    const r = await auditDocs({ graph: g, config }, { repos: [name] });
+    const entry = { at: Date.now(), data: r.data, summary: r.summary };
+    auditCache.set(key, entry);
+    return entry;
+  };
   const app = new Hono();
 
   const clientKey = (c: { req: { header(n: string): string | undefined } }) =>
@@ -300,6 +315,74 @@ export function createApp(opts: AppOptions): Hono {
       }
       await chain;
     });
+  });
+
+  /** Docs audit of an indexed repository (no pull request): JSON. */
+  app.get('/api/audit', async (c) => {
+    let repo: string;
+    try {
+      repo = parseRepoName(c.req.query('repo') ?? '');
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    const g = await graphForRepo(repo);
+    const known = g && (await g.run(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name`, { name: repo })).rows.length > 0;
+    if (!g || !known) {
+      return c.json({ error: `${repo} is not indexed yet${hosted ? ': POST /api/audit {"repo": "owner/name"} indexes and audits it' : `: staleproof index ${repo}`}`, indexed: false }, 404);
+    }
+    const a = await cachedAudit(g, repo, c.req.query('fresh') === '1');
+    return c.json({ summary: a.summary, ...a.data });
+  });
+
+  /** Hosted: index a public repository if needed, then audit it, streaming progress (SSE). */
+  app.post('/api/audit', async (c) => {
+    if (!limiter.allow(`audit:${clientKey(c)}`)) return c.json({ error: 'rate limited: try again later' }, 429);
+    const body = await c.req.json<{ repo?: string; with?: unknown }>().catch(() => ({}) as { repo?: string; with?: unknown });
+    let repo: string;
+    let withRepos: string[];
+    try {
+      repo = parseRepoName(body.repo ?? '');
+      withRepos = (Array.isArray(body.with) ? body.with : []).map((r) => parseRepoName(String(r)));
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    return streamSSE(c, async (stream) => {
+      let chain: Promise<unknown> = Promise.resolve();
+      const send = (e: HostedEvent | { type: 'queued' } | { type: 'audit'; graph: string; summary: string; data: AuditData } | { type: 'error'; message: string }) => {
+        chain = chain.then(() => stream.writeSSE({ event: 'trace', data: JSON.stringify(e) })).catch(() => undefined);
+      };
+      try {
+        if (mutex.busy) send({ type: 'queued' });
+        const target = hosted ? await mutex.run(() => hosted.ensure(repo, { with: withRepos, onEvent: send })) : { graph };
+        const known = (await target.graph.run(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name`, { name: repo })).rows.length > 0;
+        if (!known) throw new Error(`${repo} is not indexed in the "${target.graph.name}" graph: staleproof index ${repo}`);
+        const a = await cachedAudit(target.graph, repo, true);
+        send({ type: 'audit', graph: target.graph.name, summary: a.summary, data: a.data });
+      } catch (err) {
+        send({ type: 'error', message: visitorMessage((err as Error).message) });
+      }
+      await chain;
+    });
+  });
+
+  /** README badge: docs health of an audited repository (grey until it has been audited). */
+  app.get('/api/badge/:owner/:name', async (c) => {
+    const svg = (body: string, maxAge: number) =>
+      c.body(body, 200, {
+        'content-type': 'image/svg+xml; charset=utf-8',
+        'cache-control': `public, max-age=${maxAge}, s-maxage=${maxAge}`,
+      });
+    let repo: string;
+    try {
+      repo = parseRepoName(`${c.req.param('owner')}/${c.req.param('name').replace(/\.svg$/i, '')}`);
+    } catch {
+      return svg(healthBadge(undefined), 300);
+    }
+    const g = await graphForRepo(repo).catch(() => undefined);
+    const known = g && (await g.run(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name`, { name: repo })).rows.length > 0;
+    if (!g || !known) return svg(healthBadge(undefined), 300);
+    const a = await cachedAudit(g, repo);
+    return svg(healthBadge(a.data), 3600);
   });
 
   app.get('/api/sections', async (c) => {

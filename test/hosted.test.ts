@@ -194,13 +194,40 @@ describe('hosted workspaces (FalkorDB)', () => {
     const text = (report.content as { text: string }[])[0]!.text;
     expect(text).toMatch(/^<!-- staleproof -->\n### Staleproof: (\d+ doc sections? this pull request can make false|this pull request is predicted to break 1 docs example)/);
     expect(text).toContain('acme/mini-docs');
+    const audit = await client.callTool({ name: 'audit_docs', arguments: { repos: ['acme/mini-client'] } });
+    expect((audit.content as { text: string }[])[0]!.text).toMatch(/^Docs health \d+\/100 \([A-F]\) for acme\/mini-client\./);
     const section = await client.callTool({ name: 'read_section', arguments: { section_id: 'acme/unknown:x.md#y' } });
     expect(section.isError).toBe(true);
     expect((section.content as { text: string }[])[0]!.text).toContain('not indexed yet');
     await client.close();
   });
 
+  it('audits a repository on demand over HTTP and serves its badge', async () => {
+    const app = createApp({ store, config: { ...config, org: curated.name }, workspaces: ws, webDir: '/nonexistent', rateLimit: 1000 });
+    // Not yet audited (and not indexed): a grey badge, a 404 with what to do.
+    const grey = await app.request('/api/badge/acme/stale-docs.svg');
+    expect(grey.headers.get('content-type')).toContain('image/svg+xml');
+    expect(await grey.text()).toContain('not audited');
+    const missing = await app.request('/api/audit?repo=acme/stale-docs');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ indexed: false, error: expect.stringContaining('POST /api/audit') });
+
+    const res = await app.request('/api/audit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repo: 'acme/mini-client' }) });
+    const events = (await res.text()).split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6)) as { type: string; summary?: string; data?: { score: number; coverage: { api: number } } });
+    const audit = events.find((e) => e.type === 'audit')!;
+    expect(audit.summary).toMatch(/^Docs health \d+\/100/);
+    expect(audit.data!.coverage.api).toBeGreaterThan(0);
+
+    const json = (await (await app.request('/api/audit?repo=ACME/Mini-Client')).json()) as { score: number; repos: { name: string }[] };
+    expect(json.repos.map((r) => r.name)).toEqual(['acme/mini-client']);
+    const badge = await app.request('/api/badge/acme/mini-client.svg');
+    expect(badge.headers.get('cache-control')).toBe('public, max-age=3600, s-maxage=3600');
+    expect(await badge.text()).toContain(`docs health: ${json.score} `);
+    expect((await app.request('/api/audit?repo=nope')).status).toBe(400);
+  });
+
   it('routes MCP calls by the repository their arguments name', () => {
+    expect(repoOfArgs({ repos: ['a/b', 'c/d'] })).toBe('a/b');
     expect(repoOfArgs({ pr_url: 'https://github.com/a/b/pull/1' })).toBe('a/b');
     expect(repoOfArgs({ section_ids: ['x/y:docs/a.md#h'] })).toBe('x/y');
     expect(repoOfArgs({ target_id: 'x/y:pkg.mod.f' })).toBe('x/y');

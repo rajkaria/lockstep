@@ -1,4 +1,4 @@
-import type { CheckRow, Facts, Health, NamedQuery, PreloadedPr, RepoStatus, SectionText, TraceEvent } from './types';
+import type { AuditData, CheckRow, Facts, Health, NamedQuery, PreloadedPr, RepoStatus, SectionText, TraceEvent } from './types';
 
 type HttpError = Error & { status?: number; body?: unknown };
 
@@ -69,6 +69,7 @@ export const api = {
   section: (id: string) => live<SectionText>(`/api/sections?id=${encodeURIComponent(id)}`, () => undefined),
   model: () => live<{ queries: NamedQuery[]; tools: { name: string; description: string; queries: string[] }[] }>('/api/model', (s) => s.model),
   repo: (name: string) => json<RepoStatus>(`/api/repos?name=${encodeURIComponent(name)}`),
+  audit: (repo: string) => json<AuditData>(`/api/audit?repo=${encodeURIComponent(repo)}`),
   patch: (pr: string) => live<{ title: string; body: string; diff: string }>(`/api/patch?pr=${encodeURIComponent(pr)}`, () => undefined),
   decide: async (text: string, governs: string[]) => {
     if (offline) throw new Error(SNAPSHOT_ONLY);
@@ -99,7 +100,12 @@ export async function streamCheck(
     const body = await res.json().catch(() => ({}));
     throw Object.assign(new Error((body as { error?: string }).error ?? `check failed (${res.status})`), { body, status: res.status });
   }
-  const reader = res.body.getReader();
+  await readSse(res.body, (e) => onEvent(e as TraceEvent));
+}
+
+/** Read server-sent events (`data:` lines, blank-line separated) as JSON objects. */
+async function readSse(body: ReadableStream<Uint8Array>, onEvent: (e: unknown) => void): Promise<void> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
   for (;;) {
@@ -115,7 +121,26 @@ export async function streamCheck(
         .filter((l) => l.startsWith('data:'))
         .map((l) => l.slice(5).trimStart())
         .join('\n');
-      if (data) onEvent(JSON.parse(data) as TraceEvent);
+      if (data) onEvent(JSON.parse(data));
     }
   }
+}
+
+export type AuditEvent =
+  | { type: 'queued' }
+  | { type: 'index_started'; repos: string[]; graph: string; reason: string }
+  | { type: 'index_progress'; message: string }
+  | { type: 'index_finished'; graph: string; ms: number; repos: { repo: string; sha: string; symbols: number; sections: number; examples: number }[] }
+  | { type: 'audit'; graph: string; summary: string; data: Omit<AuditData, 'summary'> }
+  | { type: 'error'; message: string };
+
+/** POST an audit: the server indexes the repository if it has to (streaming progress), then audits it. */
+export async function streamAudit(repo: string, onEvent: (e: AuditEvent) => void, signal?: AbortSignal): Promise<void> {
+  if (offline) throw new Error(SNAPSHOT_ONLY);
+  const res = await fetch('/api/audit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repo }), signal });
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => ({}));
+    throw Object.assign(new Error((body as { error?: string }).error ?? `audit failed (${res.status})`), { body, status: res.status });
+  }
+  await readSse(res.body, (e) => onEvent(e as AuditEvent));
 }

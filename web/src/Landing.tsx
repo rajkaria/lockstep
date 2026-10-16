@@ -74,6 +74,9 @@ function Hero() {
             <a className="btn btn-ghost" href="#/try">
               <Icon name="play" /> Check a pull request
             </a>
+            <a className="btn btn-ghost" href="#/audit">
+              <Icon name="eye" /> Audit a repository
+            </a>
           </div>
           <div className="install">
             <span className="prompt">$</span>

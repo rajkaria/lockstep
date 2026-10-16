@@ -218,3 +218,20 @@ export interface RepoStatus {
   indexedAt: number | null;
   workspace?: string[];
 }
+
+/** A docs audit (no pull request): GET/POST /api/audit. */
+export interface AuditData {
+  summary: string;
+  org: string;
+  repos: { name: string; sha: string; symbols: number; sections: number }[];
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  deductions: { points: number; why: string }[];
+  examples: { total: number; python: number; linked: number; mismatched: number };
+  mismatches: { example: string; url: string; repo: string; path: string; heading: string; line: number; kind: MismatchKind; detail: string; call: string; symbol: string }[];
+  coverage: { api: number; documented: number; percent: number };
+  undocumented: { qualname: string; repo: string; kind: string; signature: string; url: string; callers: number; crossRepoCallers: number }[];
+  runs: { example: string; url: string; status: 'pass' | 'fail' | 'timeout' | 'skipped' | 'error'; error: string; reason: string }[];
+  runCounts: { pass: number; fail: number; skipped: number; error: number };
+  generatedAt: number;
+}
