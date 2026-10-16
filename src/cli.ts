@@ -171,10 +171,11 @@ program
   .description('Run a docs code example in the sandbox (before and after a PR with --pr)')
   .argument('<example-id>', 'CodeExample id, e.g. FalkorDB/docs:commands/graph.explain.mdx:3')
   .option('--pr <url>', 'run at the commit before the pull request and at the pull request')
+  .option('--fresh', 're-run even if an identical run is recorded (replaces it)')
   .option('--json', 'print JSON')
-  .action(async (exampleId: string, opts: { pr?: string; json?: boolean }) => {
+  .action(async (exampleId: string, opts: { pr?: string; fresh?: boolean; json?: boolean }) => {
     await withGraph(async (store, org) => {
-      const ctx: ToolContext = { graph: store.org(org), config: settings(), log };
+      const ctx: ToolContext = { graph: store.org(org), config: settings(), log, freshRuns: opts.fresh };
       if (opts.pr) await impactTool.run(ctx, { pr_url: opts.pr });
       const r = await runExampleTool.run(ctx, { example_id: exampleId, pr_url: opts.pr });
       if (opts.json) {

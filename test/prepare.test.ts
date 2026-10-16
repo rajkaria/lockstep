@@ -53,6 +53,26 @@ describe('verdictOf', () => {
   });
 });
 
+describe('installFailure', () => {
+  it('names the pin when the resolver finds no solution', async () => {
+    const { installFailure } = await import('../src/runner/sandbox.js');
+    // uv's output for GraphRAG-SDK@35e67a0 with falkordb-py at falkordb-py#276 (recorded on the graph).
+    const stderr = [
+      '× No solution found when resolving dependencies:',
+      '  ╰─▶ Because only graphrag-sdk==1.4.0 is available and graphrag-sdk==1.4.0',
+      '      depends on falkordb[hiredis]>=1.8.0,<2, we can conclude that all',
+      '      versions of graphrag-sdk depend on falkordb[hiredis]>=1.8.0,<2.',
+    ].join('\n');
+    const msg = installFailure(['FalkorDB/GraphRAG-SDK@35e67a0', 'FalkorDB/falkordb-py@e307df3'], stderr);
+    expect(msg.split('\n')[0]).toBe(
+      "dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy " +
+        '(installing FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3)',
+    );
+    expect(msg).toContain('No solution found');
+    expect(installFailure(['a@1'], 'boom').split('\n')[0]).toBe('installing a@1 failed:');
+  });
+});
+
 describe('scratch guard', () => {
   it('never treats the org graph server as scratch', async () => {
     const { scratchIsOrgServer } = await import('../src/runner/scratch.js');
@@ -61,4 +81,25 @@ describe('scratch guard', () => {
     expect(scratchIsOrgServer(loadConfig({ FALKORDB_URL: 'falkor://user:pw@127.0.0.1:6379', LOCKSTEP_SCRATCH_PORT: '6379' }))).toBe(true);
     expect(scratchIsOrgServer(loadConfig({}))).toBe(false);
   });
+
+  it('removes UDF libraries between runs (FLUSHALL keeps them)', async () => {
+    const { ensureScratchDb, flushScratchDb } = await import('../src/runner/scratch.js');
+    const { loadConfig } = await import('../src/config.js');
+    const { FalkorDB } = await import('falkordb');
+    // Its own server: flushing the shared test server would wipe other tests' graphs.
+    const base = loadConfig({ LOCKSTEP_SCRATCH_PORT: '6392' });
+    const config = { ...base, scratch: { ...base.scratch, managed: true } };
+    await ensureScratchDb(config);
+    const db = await FalkorDB.connect({ socket: { host: config.scratch.host, port: config.scratch.port } });
+    try {
+      const conn = (await db.connection) as unknown as { sendCommand(args: string[]): Promise<unknown> };
+      await conn.sendCommand(['GRAPH.UDF', 'LOAD', 'REPLACE', 'StringUtils', "function f(s) { return s; }; falkor.register('f', f);"]);
+      expect(await conn.sendCommand(['GRAPH.UDF', 'LIST'])).toHaveLength(1);
+      await flushScratchDb(config);
+      // The docs' UDF example loads 'StringUtils'; a leftover library fails the next run with "already registered".
+      expect(await conn.sendCommand(['GRAPH.UDF', 'LIST'])).toEqual([]);
+    } finally {
+      await db.close();
+    }
+  }, 60_000);
 });

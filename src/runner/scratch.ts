@@ -21,7 +21,12 @@ export function scratchIsOrgServer(config: Config): boolean {
   return local(m[1]!) === local(config.scratch.host) && Number(m[2] ?? 6379) === config.scratch.port;
 }
 
-/** Wipe the scratch database so every example starts from an empty server. */
+/**
+ * Wipe the scratch database so every example starts from an empty server.
+ * FLUSHALL clears graphs but not UDF libraries, which live in the module: without
+ * `GRAPH.UDF FLUSH` the docs' UDF example passes once and then fails with
+ * "already registered", which reads as a pull request breaking it.
+ */
 export async function flushScratchDb(config: Config): Promise<void> {
   if (scratchIsOrgServer(config)) {
     throw new Error(
@@ -31,8 +36,14 @@ export async function flushScratchDb(config: Config): Promise<void> {
   }
   const db = await FalkorDB.connect({ socket: { host: config.scratch.host, port: config.scratch.port, connectTimeout: 5000 } });
   try {
-    const conn = (await db.connection) as unknown as { flushAll(): Promise<unknown> };
+    const conn = (await db.connection) as unknown as { flushAll(): Promise<unknown>; sendCommand(args: string[]): Promise<unknown> };
     await conn.flushAll();
+    try {
+      await conn.sendCommand(['GRAPH.UDF', 'FLUSH']);
+    } catch (err) {
+      // Servers older than UDF support have nothing to flush.
+      if (!/unknown (sub)?command/i.test((err as Error).message)) throw err;
+    }
   } finally {
     await db.close();
   }

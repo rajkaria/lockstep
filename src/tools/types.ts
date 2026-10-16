@@ -30,6 +30,8 @@ export interface ToolContext {
   log?: (msg: string) => void;
   /** Local clones by repository, overriding `<home>/repos` (tests, offline use). */
   checkouts?: Record<string, string>;
+  /** Re-run examples instead of answering from recorded runs (`run --fresh`). */
+  freshRuns?: boolean;
 }
 
 export interface ToolDef<I = any, O = any> {

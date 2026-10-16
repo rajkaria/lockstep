@@ -127,7 +127,13 @@ export function RunView({ run }: { run: RunExampleData }) {
           <span className="badge">{r.status}</span>
           <span className="muted">{r.side !== 'current' ? `${r.side} the PR` : 'indexed commit'} · {r.installed.map((i) => i.replace(/@(\w{7})\w+/, '@$1')).join(', ')}</span>
           {r.cached && <span className="muted"> · recorded earlier</span>}
-          {r.reason && <div className="run-reason">{r.reason}</div>}
+          {r.reason && <div className="run-reason">{r.reason.split('\n')[0]}</div>}
+          {r.reason?.includes('\n') && (
+            <details className="tb">
+              <summary>installer output</summary>
+              <pre>{r.reason.split('\n').slice(1).join('\n')}</pre>
+            </details>
+          )}
           {r.status === 'fail' && r.traceback && (
             <details className="tb">
               <summary>{r.error}</summary>

@@ -68,12 +68,13 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
             prUrl,
             log: ctx.log,
             checkouts: ctx.checkouts,
+            fresh: ctx.freshRuns,
           }),
         );
         if (runs[0]!.status === 'skipped') break;
       }
     } else {
-      runs.push(await runExample(tracer.graph, ctx.config, example, repos, { log: ctx.log, checkouts: ctx.checkouts }));
+      runs.push(await runExample(tracer.graph, ctx.config, example, repos, { log: ctx.log, checkouts: ctx.checkouts, fresh: ctx.freshRuns }));
     }
     const verdict = verdictOf(runs);
     const short = (sha: string) => sha.slice(0, 7);

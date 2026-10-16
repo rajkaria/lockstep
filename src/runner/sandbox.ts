@@ -122,6 +122,20 @@ export function ensureVenv(home: string, targets: InstallTarget[], log?: (m: str
   return p;
 }
 
+/**
+ * The error recorded when the repositories can't be installed. Its first line is what
+ * the agent and the UI show, so a resolver conflict names the pin that blocks it
+ * (e.g. an SDK requiring `falkordb<2` while the client under test is 2.x).
+ */
+export function installFailure(spec: string[], stderr: string): string {
+  const flat = stderr.replace(/\s+/g, ' ');
+  const pin = /(\S+==[^\s,]+) depends on (.+?), we can conclude/.exec(flat);
+  const head = pin
+    ? `dependency conflict: ${pin[1]} requires ${pin[2]}, which the other checkouts don't satisfy (installing ${spec.join(', ')})`
+    : `installing ${spec.join(', ')} failed:`;
+  return `${head}\n${stderr.trim().slice(-2000)}`;
+}
+
 async function buildVenv(home: string, key: string, targets: InstallTarget[], spec: string[], log?: (m: string) => void): Promise<string> {
   const venv = join(home, 'venvs', key);
   const python = join(venv, 'bin', 'python');
@@ -142,12 +156,12 @@ async function buildVenv(home: string, key: string, targets: InstallTarget[], sp
     const mk = await runProcess('uv', ['venv', '-q', '--python', PYTHON_VERSION, venv], { timeoutMs: 300_000, env });
     if (mk.code !== 0) throw new Error(`uv venv failed: ${mk.stderr.trim()}`);
     const inst = await runProcess('uv', ['pip', 'install', '-q', '--python', python, ...paths], { timeoutMs: 600_000, env });
-    if (inst.code !== 0) throw new Error(`installing ${spec.join(', ')} failed:\n${inst.stderr.trim().slice(-2000)}`);
+    if (inst.code !== 0) throw new Error(installFailure(spec, inst.stderr));
   } else {
     const mk = await runProcess('python3', ['-m', 'venv', venv], { timeoutMs: 300_000, env });
     if (mk.code !== 0) throw new Error(`python3 -m venv failed: ${mk.stderr.trim()}`);
     const inst = await runProcess(python, ['-m', 'pip', 'install', '-q', ...paths], { timeoutMs: 600_000, env });
-    if (inst.code !== 0) throw new Error(`installing ${spec.join(', ')} failed:\n${inst.stderr.trim().slice(-2000)}`);
+    if (inst.code !== 0) throw new Error(installFailure(spec, inst.stderr));
   }
   await writeFile(marker, JSON.stringify({ spec, python: PYTHON_VERSION, createdAt: new Date().toISOString() }));
   await rm(src, { recursive: true, force: true });

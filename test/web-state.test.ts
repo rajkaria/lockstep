@@ -33,3 +33,23 @@ describe('web view reducer', () => {
     expect(v.verdicts['r:b.md#y']).toEqual({ verdict: 'ok', reason: 'fine' });
   });
 });
+
+describe('runSummary', async () => {
+  const { runSummary } = await import('../web/src/format.js');
+  const both = (example: string, before: string, after: string) => [
+    { example, side: 'before', status: before },
+    { example, side: 'after', status: after },
+  ];
+  it('names breaks and fixes first, then counts the rest', () => {
+    expect(runSummary(both('r:README.md:4', 'fail', 'pass'))).toBe('README.md:4: fixed by this PR (fails before, passes after)');
+    const mixed = [
+      ...both('d:a.mdx:0', 'error', 'error'),
+      ...both('d:b.mdx:0', 'pass', 'pass'),
+      ...both('d:c.mdx:0', 'fail', 'fail'),
+      ...both('d:e.mdx:1', 'pass', 'fail'),
+      ...both('d:f.mdx:0', 'pass', 'pass'),
+      { example: 'd:g.mdx:0', side: 'before', status: 'skipped' },
+    ];
+    expect(runSummary(mixed)).toBe('e.mdx:1: breaks (passes before, fails after) · 1 already broken · 2 pass · 1 can\'t install');
+  });
+});

@@ -62,3 +62,34 @@ export function ago(ms: number): string {
 export function num(n: number | undefined): string {
   return (n ?? 0).toLocaleString('en-US');
 }
+
+type RunRow = { example: string; side: string; status: string };
+
+/**
+ * One line per pull request card: what the before/after runs proved, most telling first.
+ * Breaks and fixes are named; the rest are counted.
+ */
+export function runSummary(runs: RunRow[]): string {
+  const byExample = new Map<string, Record<string, string>>();
+  for (const r of runs) byExample.set(r.example, { ...(byExample.get(r.example) ?? {}), [r.side]: r.status });
+  const failed = (s: string) => s === 'fail' || s === 'timeout';
+  const named: Record<'breaks' | 'fixes', string[]> = { breaks: [], fixes: [] };
+  const counts = { 'already broken': 0, pass: 0, "can't install": 0 };
+  for (const [ex, { before, after }] of byExample) {
+    if (!before || !after) continue;
+    const name = ex.split(':').slice(1).join(':');
+    if (before === 'error' || after === 'error') counts["can't install"]++;
+    else if (!failed(before) && failed(after)) named.breaks.push(name);
+    else if (failed(before) && !failed(after)) named.fixes.push(name);
+    else if (failed(before) && failed(after)) counts['already broken']++;
+    else if (before === 'pass' && after === 'pass') counts.pass++;
+  }
+  const parts = [
+    ...named.breaks.map((n) => `${n}: breaks (passes before, fails after)`),
+    ...named.fixes.map((n) => `${n}: fixed by this PR (fails before, passes after)`),
+    ...Object.entries(counts)
+      .filter(([, n]) => n > 0)
+      .map(([label, n]) => `${n} ${label === 'pass' ? (n === 1 ? 'passes' : 'pass') : label}`),
+  ];
+  return parts.slice(0, 4).join(' · ');
+}

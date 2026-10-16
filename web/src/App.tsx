@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { api, streamCheck } from './api';
 import { ClearedList, CypherList, RepoChip, SectionCard, TraceList, type PackageRepo } from './components';
-import { ago, num, seedRepoColors } from './format';
+import { ago, num, runSummary, seedRepoColors } from './format';
 import { emptyView, reduce, replay, type CheckView } from './state';
 import type { CheckRow, Facts, Health, NamedQuery, PreloadedPr, TraceEvent } from './types';
 
@@ -194,7 +194,7 @@ function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRe
                 {p.ref.fullName}#{p.ref.number}
               </span>
               <span className="pr-title">{p.title ?? 'not checked yet'}</span>
-              {p.runs.length > 0 && <span className="pr-runs">{runLine(p.runs)}</span>}
+              {p.runs.length > 0 && <span className="pr-runs">{runSummary(p.runs)}</span>}
               {p.latestCheck && <span className="muted small">last checked {ago(p.latestCheck.startedAt)}</span>}
             </button>
           ))}
@@ -224,16 +224,6 @@ function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRe
   );
 }
 
-function runLine(runs: PreloadedPr['runs']): string {
-  const byExample = new Map<string, Record<string, string>>();
-  for (const r of runs) byExample.set(r.example, { ...(byExample.get(r.example) ?? {}), [r.side]: r.status });
-  const parts: string[] = [];
-  for (const [ex, sides] of byExample) {
-    const name = ex.split(':').slice(1).join(':');
-    if (sides.before && sides.after) parts.push(`${name}: ${sides.before} before, ${sides.after} after`);
-  }
-  return parts.slice(0, 2).join(' · ');
-}
 
 function CheckResults({ view, packageRepo }: { view: CheckView; packageRepo: PackageRepo }) {
   const sections = useMemo(() => {
