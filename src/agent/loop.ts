@@ -1,13 +1,12 @@
-import { unknownParamsError } from '../tools/types.js';
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import * as Q from '../graph/queries.js';
 import { parsePrUrl } from '../pr/github.js';
 import { ingestPullRequest } from '../pr/ingest.js';
-import type { ImpactData } from '../tools/graph-tools.js';
+import { impactTool, MAX_SECTIONS, type ImpactData } from '../tools/graph-tools.js';
 import { AGENT_TOOLS, modelTools, toolByName } from '../tools/index.js';
 import { sinceLastCheck, type SinceLastCheck } from '../tools/memory-tools.js';
-import type { ToolContext, ToolResult } from '../tools/types.js';
+import { unknownParamsError, type ToolContext, type ToolResult } from '../tools/types.js';
 import type { ModelClient, ModelMessageParam, ModelToolResult, ModelToolUse } from './model.js';
 import { SYSTEM_PROMPT, userPrompt } from './prompt.js';
 import { storedTrace, type CheckStatus, type TraceEvent } from './trace.js';
@@ -170,7 +169,11 @@ export async function runAgentCheck(ctx: ToolContext, model: ModelClient, prUrl:
         const t0 = Date.now();
         const out = await executeTool(tctx, use);
         if (out.ok && use.name === 'impact') {
-          for (const s of (out.result.data as ImpactData).sections) if (s.section.includes('#')) impacted.add(s.section);
+          // The stop condition covers every impacted section, including pages the model hasn't asked for yet.
+          const sections = await allImpactedSections(out.result.data as ImpactData, (offset) =>
+            impactTool.run(tctx, { ...(use.input as { pr_url: string; max_hops?: number }), pr_url: pr, offset }).then((r) => r.data),
+          );
+          for (const s of sections) impacted.add(s);
         }
         emit({
           type: 'tool_result',
@@ -244,6 +247,21 @@ export async function runAgentCheck(ctx: ToolContext, model: ModelClient, prUrl:
     verdicts,
   });
   return { checkId: id, pr, status, summary, events, impacted: [...impacted], missing, toolOrder, since };
+}
+
+/**
+ * Section ids of every impact page, starting from the page the model got. Later pages
+ * are fetched without showing them to the model; it pages through them itself.
+ */
+export async function allImpactedSections(first: ImpactData, fetchPage: (offset: number) => Promise<ImpactData>): Promise<string[]> {
+  const ids = first.sections.map((s) => s.section);
+  const seen = new Set<number>([first.offset ?? 0]);
+  for (let offset = 0; offset < (first.totalSections ?? 0); offset += MAX_SECTIONS) {
+    if (seen.has(offset)) continue;
+    seen.add(offset);
+    ids.push(...(await fetchPage(offset)).sections.map((s) => s.section));
+  }
+  return [...new Set(ids)].filter((s) => s.includes('#'));
 }
 
 type ExecOutcome = { ok: true; result: ToolResult } | { ok: false; error: string };

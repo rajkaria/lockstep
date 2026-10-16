@@ -141,3 +141,20 @@ describe('agent loop (scripted model, FalkorDB)', () => {
     expect(r.events.filter((e) => e.type === 'tool_result' && e.isError)).toHaveLength(1);
   });
 });
+
+describe('allImpactedSections', () => {
+  it('collects every page so the stop condition covers sections the model never paged to', async () => {
+    const { allImpactedSections } = await import('../src/agent/loop.js');
+    const ids = Array.from({ length: 43 }, (_, i) => `r:doc.md#s${i}`);
+    const page = (offset: number) =>
+      ({ sections: ids.slice(offset, offset + 40).map((section) => ({ section })), totalSections: 43, offset, truncated: offset + 40 < 43 }) as never;
+    const fetched: number[] = [];
+    const all = await allImpactedSections(page(0), async (o) => (fetched.push(o), page(o)));
+    expect(all).toHaveLength(43);
+    expect(fetched).toEqual([40]);
+    // The model asked for page 2 first: page 1 is fetched, page 2 isn't fetched twice.
+    fetched.length = 0;
+    expect(await allImpactedSections(page(40), async (o) => (fetched.push(o), page(o)))).toHaveLength(43);
+    expect(fetched).toEqual([0]);
+  });
+});

@@ -69,7 +69,7 @@ export interface ImpactData {
   counts: Record<Severity, number>;
 }
 
-const MAX_SECTIONS = 40;
+export const MAX_SECTIONS = 40;
 
 /** Ingest the PR once per check (idempotent anyway) and return its change set. */
 async function ensureIngested(ctx: ToolContext, tracer: Tracer, prUrl: string) {
