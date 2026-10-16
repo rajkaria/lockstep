@@ -1,13 +1,15 @@
 # Deploy
 
-A deployment is one Node.js process (`staleproof serve`: the web app and the HTTP API) plus FalkorDB. This page covers four ways to run it (Vercel with FalkorDB Cloud, Docker Compose on any VM, a plain host without Docker, and FalkorDB Cloud as the database for any of them), connecting Claude Code over MCP, the GitHub Action, and a checklist for running it for a team. It is for whoever operates the service; every variable is described in [Configuration](configuration.md).
+A deployment is one Node.js process (`staleproof serve`: the web app, the HTTP API and MCP over HTTP) plus FalkorDB. This page covers four ways to run it (Vercel with FalkorDB Cloud, Docker Compose on any VM, a plain host without Docker, and FalkorDB Cloud as the database for any of them), hosted mode and its limits (how staleproof.dev indexes any public repository on demand), connecting Claude Code over MCP, the GitHub Action, and a checklist for running it for a team. It is for whoever operates the service; every variable is described in [Configuration](configuration.md).
 
 ## Choose a host
 
 | | Vercel | Docker Compose, a VM or your machine |
 |---|---|---|
-| Web app and API | yes | yes |
+| Web app, API and MCP at `/api/mcp` | yes | yes |
+| Hosted mode (any public repository on demand) | on by default (`STALEPROOF_HOSTED=off` turns it off) | with `serve --hosted` or `STALEPROOF_HOSTED=on` |
 | Agent mode and graph mode | yes; agent checks stop at 240 s by default | yes; no time limit unless you set one |
+| Indexing | tarball downloads (no git), in hosted mode | git for `staleproof index`; tarball downloads in hosted mode |
 | Pull request ingestion | through the GitHub API (no git) | git |
 | Example runs | not executed; runs recorded on the graph by another host are answered | yes, in the sandbox |
 | Docs patch | yes, files read from GitHub at the indexed commit | yes, from the local clones |
@@ -19,9 +21,9 @@ The usual split: index and seed from a machine that can run examples, and serve 
 
 | Variable | Why |
 |---|---|
-| `FALKORDB_URL` | The FalkorDB holding the org graph. Default `falkor://localhost:6379` |
-| `STALEPROOF_ORG` | The graph name, if it is not `falkordb` |
-| `GITHUB_TOKEN` (or `GH_TOKEN`) | Without it GitHub allows 60 API requests per hour; required for `patch --open-pr` |
+| `FALKORDB_URL` | The FalkorDB holding the org graph. Default `falkor://localhost:6379`; `serve` starts a local server there when it is unset and nothing answers |
+| `STALEPROOF_ORG` | The graph the server answers from (the curated graph in hosted mode), if it is not `falkordb` |
+| `GITHUB_TOKEN` (or `GH_TOKEN`) | Without it GitHub allows 60 API requests per hour; private repositories need it; required for `patch --open-pr` |
 | `ANTHROPIC_API_KEY` | Agent mode. For an Anthropic-compatible provider such as DeepSeek, also `ANTHROPIC_BASE_URL` and `STALEPROOF_MODEL` (for example `deepseek-v4-pro`). Without a key the server runs graph mode and says so |
 
 The full list, with defaults and the commands that read each one, is in [Configuration](configuration.md#environment-variables).
@@ -30,7 +32,7 @@ A host that runs examples also needs `git`, `tar`, and `uv` or `python3`. With [
 
 ## Vercel
 
-The repository deploys to Vercel as is ([vercel.json](../vercel.json)): the web app is static (`web/dist`) and the API runs as a Vercel Function ([api/[...route].js](../api/[...route].js)). On Vercel, pull requests are read through the GitHub API (no `git`), `STALEPROOF_HOME` is `/tmp/staleproof`, and examples are not executed (no sandbox runtime): runs recorded by a local or container host are answered from the graph.
+The repository deploys to Vercel as is ([vercel.json](../vercel.json)): the web app is static (`web/dist`) and the API, MCP included, runs as a Vercel Function ([api/[...route].js](../api/[...route].js)). On Vercel, pull requests are read through the GitHub API (no `git`), repositories are downloaded as tarballs, `STALEPROOF_HOME` is `/tmp/staleproof`, and examples are not executed (no sandbox runtime): runs recorded by a local or container host are answered from the graph. The function runs in [hosted mode](#hosted-mode) unless `STALEPROOF_HOSTED=off`.
 
 1. Create a FalkorDB the function can reach ([FalkorDB Cloud](#falkordb-cloud)'s free tier works) and index into it from your machine:
    ```bash
@@ -42,16 +44,47 @@ The repository deploys to Vercel as is ([vercel.json](../vercel.json)): the web 
 2. Add the variables and redeploy:
    ```bash
    vercel env add FALKORDB_URL production
-   vercel env add GITHUB_TOKEN production         # recommended
+   vercel env add GITHUB_TOKEN production         # recommended: fine-grained, public repositories, read-only
    vercel env add ANTHROPIC_API_KEY production    # optional: agent mode
    vercel env add ANTHROPIC_BASE_URL production   # with STALEPROOF_MODEL, only for an Anthropic-compatible provider
    vercel env add STALEPROOF_MODEL production
    ```
-   `STALEPROOF_PRELOADED` (the pull requests on the home page) and `STALEPROOF_CHECK_BUDGET_MS` are optional. `PORT`, `HOST` and the scratch variables are not used there.
+   `STALEPROOF_PRELOADED` (the pull requests on the home page), `STALEPROOF_CHECK_BUDGET_MS`, `STALEPROOF_AGENT_CHECKS_PER_DAY` (default 50) and `STALEPROOF_HOSTED` are optional. `PORT`, `HOST` and the scratch variables are not used there.
 
 Without a reachable FalkorDB the function answers `503 {"error": "the Staleproof API is not connected to FalkorDB (<message>); set FALKORDB_URL", "offline": true}` and the web app shows the snapshot bundled at build time, labelled with the time it was taken ([snapshot mode](http-api.md#snapshot-mode); `npm run snapshot` regenerates `web/public/snapshot.json` from a graph).
 
 Function duration is capped at 300 s (`maxDuration`). An agent check in the server starts no model turn after 240 s (`STALEPROOF_CHECK_BUDGET_MS`) and ends `incomplete`, listing the sections still open; a 43-section agent check takes about 6 minutes, so run large checks from the CLI, which has no time limit. The function runs in `bom1` (Mumbai), next to the FalkorDB Cloud instance in AWS `ap-south-1`: a check makes dozens of graph round trips, so set `regions` in `vercel.json` to the Vercel region closest to your FalkorDB.
+
+## Hosted mode
+
+Hosted mode is how staleproof.dev checks pull requests in repositories nobody indexed for it. It is on by default in the Vercel function, and `staleproof serve --hosted` (or `STALEPROOF_HOSTED=on`) turns it on anywhere else. The code is [src/hosted/workspaces.ts](../src/hosted/workspaces.ts).
+
+- **The curated graph** is the server's own (`STALEPROOF_ORG`, else `falkordb`), indexed and seeded from the CLI as before. A repository it holds answers from it; hosted mode never re-indexes, evicts or adds to it.
+- **Workspaces.** Any other public repository is indexed on demand into the graph of its owner, `gh-<owner>` (the owner slugged), when a check, `POST /api/index` or an MCP call first names it. The repositories named with it (`with`: a docs site, an SDK) join the same workspace, and every repository of a workspace is indexed together on every refresh, so calls and doc links across them resolve.
+- **Downloads.** Each repository is downloaded as a tarball at its default branch head and only the files the indexer reads are extracted ([Indexing](indexing.md#without-git-tarballs)); translated docs directories, such as `docs/zh/` or `i18n/pt-BR/`, are skipped. The extracted files are deleted once the repository is indexed.
+- **Registry.** The graph `staleproof-hosted` records which workspace holds each repository, its commit, when it was indexed and last used, a lock per workspace (one indexing run at a time across every server instance; others wait up to 150 seconds), and the daily counters.
+- **No examples.** Graph-mode checks in a workspace run no examples, and the MCP endpoint does not offer `run_example`. A server with a sandbox still runs them for the curated graph.
+
+### Limits
+
+`DEFAULT_HOSTED_LIMITS`:
+
+| Limit | Value | What happens |
+|---|---|---|
+| Repositories per workspace | 4 | Indexing a fifth is refused, with the `npx -y staleproof index …` command to run it yourself |
+| Workspace graph size | 20 MB | A workspace bigger than this after indexing is dropped and refused (needs `GRAPH.MEMORY USAGE` on the server; without it, the size is not checked) |
+| Eviction | above 70 MB, down to 55 MB | Before indexing, when the FalkorDB server uses more than 70 MB, the least recently used workspaces are dropped until it uses less than 55 MB. If it still uses more than 70 MB, indexing is refused: `the hosted service is full right now.` A dropped workspace is indexed again the next time someone asks for it |
+| Re-index | after 7 days | A workspace indexed more than 7 days ago is indexed again at its default branch heads on its next use |
+| Index runs | 500 per day | Across the service, per UTC day |
+| Archive size | 150 MB | Compressed download, checked against `Content-Length` and while streaming |
+| Files | 3000 | Files the indexer would read (Python, Markdown and MDX, dependency manifests) |
+| Agent checks | 50 per day | `STALEPROOF_AGENT_CHECKS_PER_DAY` in the Vercel function; over it, agent checks answer 429 and graph mode still works |
+
+The eviction thresholds fit FalkorDB Cloud's free tier, which is 100 MB. `GET /api/health` reports the server's memory and the limits, and `GET /api/workspaces` lists every workspace ([HTTP API](http-api.md#get-apiworkspaces)).
+
+### A GitHub token for hosted mode
+
+Give the server a `GITHUB_TOKEN`. Unauthenticated GitHub API requests are limited to 60 an hour per IP address, and Vercel's egress IP addresses are shared with other deployments, so without a token pull request ingestion (up to five API requests per new pull request) runs into other people's limit. Use a fine-grained token with access to public repositories only and no write permission. Hosted mode downloads repositories without it (from codeload), so it indexes public repositories only whatever the token can read; the token only raises the API limit for reading pull requests.
 
 ## Docker Compose (any VM)
 
@@ -78,7 +111,7 @@ npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 npx -y staleproof serve --host 0.0.0.0 --port 8080
 ```
 
-`db start` installs the `falkordblite` wheel once into `~/.staleproof/falkordb/venv` (with uv, else `python3 -m venv` and pip; the wheel needs Python 3.12 or later) and keeps the data in `~/.staleproof/falkordb/data-6379`. The scratch server for example runs starts by itself on port 6390 the first time an example runs. `--host 0.0.0.0` exposes the unauthenticated API on every interface; keep the default `127.0.0.1` unless a proxy sits in front.
+`db start` installs the `falkordblite` wheel once into `~/.staleproof/falkordb/venv` (with uv, else `python3 -m venv` and pip; the wheel needs Python 3.12 or later) and keeps the data in `~/.staleproof/falkordb/data-6379`; without it, `serve` starts the same server itself. Add `--hosted` to `serve` to index any public repository on demand. The scratch server for example runs starts by itself on port 6390 the first time an example runs. `--host 0.0.0.0` exposes the unauthenticated API on every interface; keep the default `127.0.0.1` unless a proxy sits in front.
 
 ## FalkorDB Cloud
 
@@ -92,21 +125,23 @@ Keep the scratch server separate and disposable: leave `STALEPROOF_SCRATCH_URL` 
 claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
 ```
 
-Add `-e GITHUB_TOKEN=...` to raise the GitHub limit for pull requests the graph has not ingested yet. [MCP server](mcp.md) covers other clients and the ten tools.
+Add `-e GITHUB_TOKEN=...` to raise the GitHub limit for pull requests the graph has not ingested yet. A deployment also serves MCP over Streamable HTTP at `/api/mcp`, for example `claude mcp add --transport http staleproof https://<your host>/api/mcp`. [MCP server](mcp.md) covers other clients and the eleven tools.
 
 ## GitHub Action
 
-See [examples/staleproof.yml](../examples/staleproof.yml) and [GitHub Action](github-action.md). Store the FalkorDB URL as the `STALEPROOF_FALKORDB_URL` secret; add `ANTHROPIC_API_KEY` for agent verdicts. The workflow needs `pull-requests: write` to post its comment.
+See [examples/staleproof.yml](../examples/staleproof.yml) and [GitHub Action](github-action.md). The action needs no deployment: it starts a FalkorDB in the job. The workflow needs `pull-requests: write` to post its comment; add `ANTHROPIC_API_KEY` as a secret for agent verdicts.
 
-- Without a key, the action renders the comment from the graph (impact, clearance, ranking and existing verdicts) without running a check or any example.
-- With `reindex: 'true'`, the action re-indexes the pull request's repository before checking, alone and at the remote default branch head (its description says "at the base branch", but no ref is passed). Indexing one repository alone re-resolves its calls and docs links against that repository only, so cross-repository edges from it are dropped until the organisation is indexed together again.
-- The action is written but has not been run on a live repository yet.
+- Without a key, the action runs a graph-mode check: impact, clearance, ranking and up to 3 examples before and after the pull request.
+- To keep decisions, verdicts and runs between jobs, point `falkordb-url` at your deployment's FalkorDB (stored as a secret such as `STALEPROOF_FALKORDB_URL`) and set `org` to its graph.
+- With `reindex: 'true'` and `falkordb-url`, the action re-indexes the pull request's repository and `also-index` before checking, at the remote default branch head (no ref is passed). Repositories of the graph that are not listed are not re-indexed with them, so cross-repository edges into them are dropped until the organisation is indexed together again.
+- The action has run end to end on a private test repository with the one-click workflow (no inputs).
 
 ## Production checklist
 
 - **A separate scratch database.** Examples run against a FalkorDB that is flushed (`FLUSHALL` and `GRAPH.UDF FLUSH`) before every run. Use a dedicated, unauthenticated server on a private network, or the managed local one (127.0.0.1:6390). Never point it at the org graph's server: Staleproof refuses when the host and port match, but a different address for the same server is not detected.
-- **Authentication and rate limits.** The API has no authentication, only a limit of 30 POST requests per client per hour, counted in memory per process. Put an authenticating proxy in front of a public deployment. The limit keys on `Fly-Client-IP`, else the first `X-Forwarded-For` entry: make your proxy overwrite `X-Forwarded-For`, or a client can pick its own key; without a proxy, all clients share one bucket.
-- **`GITHUB_TOKEN`.** Without it, ingestion shares GitHub's 60 requests per hour per IP address; through the GitHub API (Vercel) one new pull request costs up to five requests.
+- **Authentication and rate limits.** The API has no authentication, only a limit of 30 POST requests per client per hour, counted in memory per process; `/api/mcp` is not limited. Put an authenticating proxy in front of a public deployment. The limit keys on `X-Real-IP`, else `Fly-Client-IP`, else the last `X-Forwarded-For` entry: have your proxy set `X-Real-IP`, or a client can pick its own key by sending it; without a proxy, all clients share one bucket.
+- **`GITHUB_TOKEN`.** Without it, ingestion shares GitHub's 60 requests per hour per IP address; through the GitHub API (Vercel) one new pull request costs up to five requests. In hosted mode, use a token limited to public repositories ([why](#a-github-token-for-hosted-mode)).
+- **Hosted mode's memory.** Workspaces are evicted by the FalkorDB server's total memory, so the curated graph counts toward the 70 MB threshold too. On a larger server, raise the limits through the library (`new Workspaces(store, config, curated, { limits })`).
 - **Function region next to FalkorDB.** Set `regions` in `vercel.json` to the region nearest your FalkorDB; a check makes dozens of graph round trips.
 - **Snapshot fallback.** Run `npm run snapshot` against the production graph before you build, so the page a visitor sees when the database is unreachable is recent. It is labelled with the time it was taken.
 - **Time budget.** On Vercel, keep `STALEPROOF_CHECK_BUDGET_MS` well under the function's 300 s. A function killed mid-check leaves its `Check` node `running`.

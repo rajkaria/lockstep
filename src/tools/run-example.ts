@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import * as Q from '../graph/queries.js';
 import { parsePrUrl } from '../pr/github.js';
-import { exampleAtCommit, installSet, loadExample, runExample, type ExampleForRun, type RunRecord } from '../runner/index.js';
+import { exampleAtCommit, installSet, loadExample, recordSkippedRun, runExample, type ExampleForRun, type RunRecord } from '../runner/index.js';
 import { result, Tracer, type ToolDef } from './types.js';
 
 export type RunVerdict = 'breaks' | 'fixes' | 'passes' | 'fails' | 'already-broken' | 'changed-failure' | 'skipped' | 'error';
@@ -77,7 +77,7 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
       for (const side of ['before', 'after'] as const) {
         const ex = side === 'after' ? after : example;
         if (ex === null) {
-          runs.push({ id: `run-removed-${example.id}`, example: example.id, status: 'skipped', reason: 'this pull request removes the example from its page', stdout: '', durationMs: 0, stitched: [], installed: [], side, cached: false, createdAt: Date.now() });
+          runs.push(await recordSkippedRun(tracer.graph, example.id, side, 'this pull request removes the example from its page', pr.after, prUrl));
           break;
         }
         runs.push(
@@ -100,7 +100,7 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
     const after = runs.find((r) => r.side === 'after') ?? runs[0]!;
     const summary =
       verdict === 'skipped'
-        ? `Not run: ${runs[0]!.reason}.`
+        ? `Not run: ${runs.find((r) => r.status === 'skipped')!.reason}.`
         : verdict === 'error'
           ? `The sandbox could not be prepared: ${runs.find((r) => r.status === 'error')!.reason?.split('\n')[0]}`
           : verdict === 'breaks'

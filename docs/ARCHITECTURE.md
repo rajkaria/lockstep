@@ -13,10 +13,15 @@ src/
   graph/client.ts        FalkorDB connection; one graph per org; every query can be traced
   graph/queries.ts       every Cypher statement, named (the README's Cypher section and GRAPH-MODEL.md are generated from it)
   graph/schema.ts        the exact-match indexes created before every index run
-  indexer/               repo.ts (checkout, file classification, module names), files.ts, treesitter.ts and
-                         python.ts (tree-sitter Python extractor), resolve.ts (org-wide symbol table and call
-                         resolver), markdown.ts (Markdown/MDX scanner), docs.ts (MENTIONS/USES/LINKS_TO),
-                         deps.ts (DEPENDS_ON), write.ts, index.ts (indexOrg)
+  indexer/               repo.ts (git checkout with the token in git's environment config, file classification,
+                         module names), tarball.ts (download a GitHub tarball and extract what the indexer reads,
+                         commit from the pax header; for hosts without git), ensure.ts (clone or download; index
+                         on first use), files.ts, treesitter.ts and python.ts (tree-sitter Python extractor),
+                         resolve.ts (org-wide symbol table and call resolver), markdown.ts (Markdown/MDX scanner),
+                         docs.ts (MENTIONS/USES/LINKS_TO), deps.ts (DEPENDS_ON), write.ts, index.ts (indexOrg)
+  hosted/workspaces.ts   hosted mode: a workspace graph per repository owner (gh-<owner>) indexed on demand from
+                         tarballs; the registry graph, cross-instance locks, size limits, least-recently-used
+                         eviction and daily budgets
   pr/                    github.ts (PR metadata), changes.ts (symbol-level diff between the PR's commits),
                          github-diff.ts (the same diff through the GitHub API when there is no git),
                          ingest.ts, open-pr.ts (the docs PR in a fork)
@@ -30,19 +35,27 @@ src/
   agent/                 loop.ts (runAgentCheck), prompt.ts, model.ts (ModelClient), anthropic.ts (Claude and
                          Anthropic-compatible providers), scripted.ts (ScriptedModel), graph-check.ts (graph mode),
                          trace.ts (trace events)
-  mcp/server.ts          stdio MCP server over the tools, plus docs_patch
-  server/app.ts          HTTP API (+ SSE), the static web UI and the docs as plain text
+  mcp/server.ts          MCP server over the tools, plus check_pull_request and docs_patch; stdio transport
+                         (indexes a pull request's repository on first use)
+  mcp/http.ts            MCP over Streamable HTTP, stateless; in hosted mode routed to the graph of the repository
+                         each call names, without run_example
+  server/app.ts          HTTP API (+ SSE), hosted routes (/api/index, /api/repos, /api/workspaces), /api/mcp,
+                         the static web UI and the docs as plain text
   patch.ts               verdicts → unified diff + PR description with evidence
   facts.ts               FACTS.md from the graph
-  format/                text.ts (terminal output), markdown.ts (the PR comment)
+  format/                text.ts (terminal output), markdown.ts (the PR comment's Markdown), report.ts (the
+                         report from the graph: impact, clearance, ranking, verdicts and the example runs before
+                         and after; what the Action posts and check_pull_request returns)
 web/
   index.html, vite.config.ts   Vite + React; the build also emits the docs as plain text (llms.ts)
   llms.ts                /llms.txt, /llms-full.txt, /docs/<slug>.md, robots.txt, sitemap.xml
   src/main.tsx, App.tsx  entry and routes (home, a stored check, the query catalogue, docs)
-  src/route.ts           hash routes: #/, #/<home section>, #/check/<id>, #/model, #/docs/<slug>/<anchor>
+  src/route.ts           hash routes: #/, #/<home section>, #/try?pr=<url>, #/check/<id>, #/install, #/model,
+                         #/docs/<slug>/<anchor>
   src/layout.tsx         header, footer, icons, code blocks
   src/Landing.tsx        the home page's content (also prerendered)
   src/TryIt.tsx          the live demo: paste a PR, watch the check stream in, recent checks
+  src/Install.tsx, install-links.ts   the install page: the prefilled workflow link, MCP buttons and commands
   src/CheckResults.tsx   a check's findings: changed symbols, sections, runs, verdicts; a stored check replayed
   src/components.tsx     evidence paths, Cypher lists, the trace, runs, diffs, the decision form
   src/state.ts           trace events → view (the same reducer live and replayed)
@@ -54,22 +67,25 @@ web/
   src/format.ts, types.ts, styles.css
   public/snapshot.json   what the API returned at one moment, for hosts without FalkorDB
 python/sitecustomize.py  the sandbox shim (socket and DNS)
+python/run_example.py    the sandbox entry point: runs example.py, on an event loop when it has top-level await
 grammars/                tree-sitter-python.wasm
 scripts/                 falkordb-local.sh (FalkorDB without Docker), seed.sh (index + graph-mode checks + facts),
                          gen-docs.ts (generated docs), snapshot.ts (web/public/snapshot.json),
                          prerender.ts (the home page into web/dist/index.html)
 api/[...route].js        the Vercel Function wrapping server/app.ts
-action/action.yml        composite GitHub Action
+action.yml               composite GitHub Action at the repository root (uses: rajkaria/staleproof@v1)
 examples/staleproof.yml    workflow using the Action
 test/                    vitest suite and the fixture organisation (test/fixtures/org)
 ```
 
 ## A check, end to end
 
+Before the check, the repository must be in a graph. `ensureIndexed` (CLI `check`, stdio MCP) indexes the pull request's repository and any `--with` repositories when the graph lacks one, cloning with git or downloading tarballs where there is none (`checkoutOrDownload`). In hosted mode `Workspaces.ensure` finds the graph that holds the repository, or indexes it into the owner's workspace under a lock, making room by evicting the least recently used workspaces first. Then:
+
 1. `ingestPullRequest`: PR metadata from GitHub → commits before/after → `diffRange` parses both versions of each changed Python file and compares definitions → `PullRequest` + `CHANGED_IN`; removed symbols recreated and late-linked to docs through the identifiers stored on each section. Without `git`, the same diff is read through the GitHub API.
 2. `runAgentCheck` creates a `Check` node and gives the model the system prompt, the PR URL and a "since the last check" summary from the graph. Each turn streams; tool inputs are checked for unknown parameters and validated (zod) before running; tool errors go back to the model as error results.
-3. Tools read and write the graph through a traced view, so every Cypher statement and its server time lands in the trace. `run_example` builds (or reuses) a virtualenv per set of repo@sha, flushes the scratch FalkorDB, and runs the example with the shim; identical runs are answered from `Run` nodes.
-4. After any `impact` call, the loop collects the section ids of every impact page itself. When the model stops, the loop checks that each of those sections has a verdict from this check; if not, it sends up to two reminders, then records the check as incomplete. The trace is stored on the `Check` node, linked to the PR and the verdicts it produced. Graph mode (`runGraphCheck`) runs impact, clearance, rank_sections and up to 3 example runs in that order instead, with no model and no verdicts.
+3. Tools read and write the graph through a traced view, so every Cypher statement and its server time lands in the trace. `run_example` builds (or reuses) a virtualenv per set of repo@sha, flushes the scratch FalkorDB, and runs the example with the shim through `python/run_example.py`; identical runs are answered from `Run` nodes.
+4. After any `impact` call, the loop collects the section ids of every impact page itself. When the model stops, the loop checks that each of those sections has a verdict from this check; if not, it sends up to two reminders, then records the check as incomplete. The trace is stored on the `Check` node, linked to the PR and the verdicts it produced. Graph mode (`runGraphCheck`) runs impact, clearance, rank_sections and up to 3 example runs in that order instead, with no model and no verdicts. `checkReport` then renders the report from what the graph holds: the comment the GitHub Action posts and what `check_pull_request` returns.
 5. `buildDocsPatch` applies the latest stale verdicts to each file at the indexed commit, read from the local clone or from raw.githubusercontent.com (refusing sections whose text changed since), and renders a unified diff and a PR description with the evidence per section.
 
 The details: [The agent](agent.md), [Example runner](example-runner.md), [Decisions and memory](memory.md).
@@ -81,6 +97,7 @@ The details: [The agent](agent.md), [Example runner](example-runner.md), [Decisi
 - By-name resolution is allowed only inside repositories the module imports, never for generic names, and is narrowed by what the same docs page uses exactly; every by-name edge is labelled.
 - Every variable-length pattern binds a path variable and clearance counts bound paths, because an anonymous variable-length pattern missed callers on FalkorDB 4.18; [test/traversal.test.ts](../test/traversal.test.ts) keeps it that way.
 - The agent never edits without a path: `propose_edit` checks the graph before writing a verdict.
+- Hosted mode drops and re-indexes only graphs named with its `gh-` prefix; the curated graph is never touched, and a workspace is always indexed whole, so its cross-repository edges stay resolved.
 - Unknown tool parameters are an error, in the agent loop and over MCP, so a model never gets the same answer to an argument that was silently dropped.
 - Code from a pull request never sees the server's environment: the install step (which runs build code) gets an allow-list of paths, locale, proxies, certificates and `UV_*`/`PIP_*` settings; the example gets nothing inherited.
 - Example runs are serialised in one process (the scratch server is flushed per run), and the server runs one check at a time.
@@ -123,6 +140,7 @@ The integration tests need a FalkorDB. Without `FALKORDB_TEST_URL`, the global s
 | Memory and patch | `memory.test.ts` (decisions, supersession, edit guard, verdict history, the docs patch, opening the docs PR, "since the last check") |
 | Agent | `agent.test.ts` (the loop with a scripted model, reminders, errors, time budget, unknown parameters, every impact page), `anthropic-model.test.ts` (the Claude and compatible request shapes against a local fake API) |
 | Interfaces | `mcp.test.ts`, `server.test.ts` (HTTP API and SSE), `format.test.ts` (the PR comment), `action.test.ts` (the Action calls real commands and flags), `web-state.test.ts` (the web view reducer) |
+| Hosted mode | `hosted.test.ts` (tarball download and the pax header, translated docs, workspaces on first use, limits and daily budgets, hosted checks and repository status, MCP over HTTP and its routing) |
 | Package and facts | `package.test.ts` (shipped assets, the built UI and the plain-text docs served), `facts.test.ts` |
 | Docs | `docs.test.ts` (generated sections, no internal material in tracked files), `docs-site.test.ts` (manifest, page shape, links and anchors, generated reference, llms.txt) |
 

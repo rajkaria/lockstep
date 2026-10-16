@@ -18,6 +18,8 @@ The CLI streams the trace as it happens: the check id and model, the "since the 
 | `--max-steps <n>` | `40` | Model turns before the loop stops |
 | `--json` | off | Print the whole result (events included) as JSON instead of the trace |
 | `--format markdown` | `text` | Also render the PR comment, with the agent's summary |
+| `--with <repos...>` | none | Repositories to index together with the pull request's when the graph lacks any of them |
+| `--no-index` | index on first use | Fail instead of indexing a repository the graph does not have |
 | `--out <file>` | none | Write the PR comment to a file |
 | `--no-agent` | off | Run [graph mode](#graph-mode) instead |
 
@@ -217,14 +219,14 @@ The order:
 
 Graph mode samples: it ranks the first `impact` page (40 sections) and runs at most 3 examples by default, so on a pull request with more sections, the rest are listed in the impact count but not ranked or run. It writes no verdicts and no edits, does not read decisions, sends no reminders and computes no "since" summary. A tool error is recorded in the trace and the remaining steps continue; only a failing `impact` ends the check as `error` (`The check failed: impact failed`). On #262 it makes 4 calls: impact, clearance, rank_sections and one run_example.
 
-| Setting | CLI | HTTP server |
-|---|---|---|
-| Example runs (`maxRuns`) | `--runs <n>`, default 3; `--runs 0` runs none | Always 3 |
-| Call hops (`maxHops`) | `--max-hops <n>`, default 3 | Always 3 |
+| Setting | CLI | HTTP server | MCP `check_pull_request` |
+|---|---|---|---|
+| Example runs (`maxRuns`) | `--runs <n>`, default 3; `--runs 0` runs none | 3; none in a hosted workspace | 0; 3 with `run_examples: true` |
+| Call hops (`maxHops`) | `--max-hops <n>`, default 3 | Always 3 | Always 3 |
 
-The summary is the impact and clearance summaries, then `Ran <n> example(s) before and after the PR: <id>: <outcome>; …` (or `Example runs not requested.` or `No exactly-linked Python example to run.`), then `Graph mode: fixed tool order and no verdicts — agent mode (Claude) judges each section and proposes the edits.` The CLI prints the impacted sections, the cleared symbols, each run and the summary, and stores the check like an agent check.
+The summary is the impact and clearance summaries, then `Ran <n> example(s) before and after the PR: <id>: <outcome>; …` (or `Example runs not requested.` or `No exactly-linked Python example to run.`), then `Graph mode: fixed tool order and no verdicts; agent mode (a model) judges each section and proposes the edits.` The CLI prints the impacted sections, the cleared symbols, each run and the summary, and stores the check like an agent check.
 
-`check --no-agent --format markdown`, which the GitHub Action runs without a model key, is different again: it renders the PR comment from impact, clearance, ranking and any verdicts already in the graph, and stores no `Check` and runs no examples.
+`check --no-agent --format markdown`, which the GitHub Action runs without a model key, runs this same graph-mode check and then renders the report from the graph: the examples run before and after, impact, clearance, ranking and any verdicts already recorded. The MCP tool `check_pull_request` does the same and returns the report.
 
 ## ScriptedModel for tests
 

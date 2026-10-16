@@ -10,13 +10,15 @@ Index every repository that shares code or docs in one command. Cross-repository
 npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
-Each argument is `owner/name`, `https://github.com/owner/name` (with or without `.git`) or `git@github.com:owner/name.git`. The graph is the one named by `--org` or `STALEPROOF_ORG` (default `falkordb`) on the server named by `--db` or `FALKORDB_URL`; see [Configuration](configuration.md). Add `--json` to print the full [index report](#the-index-report) instead of the summary.
+Each argument is `owner/name`, `https://github.com/owner/name` (with or without `.git`) or `git@github.com:owner/name.git`. The graph is the one named by `--org` or `STALEPROOF_ORG`, else the owner of the first repository (`falkordb` here), on the server named by `--db` or `FALKORDB_URL`; see [Configuration](configuration.md). Add `--json` to print the full [index report](#the-index-report) instead of the summary.
+
+You do not have to run `index` before a first check: `staleproof check`, the MCP tools `check_pull_request`, `impact` and `clearance`, and a hosted server index a pull request's repository the first time they see it, at its default branch head (`check --with` adds the repositories to index with it). Run `index` yourself to index several repositories together, to pick a ref, or to move the graph to newer commits.
 
 Progress goes to stderr, one line per phase: `checkout`, `parse`, `write`, `resolve`, `docs` and `done`.
 
 ## The pipeline
 
-1. **Checkout**: each repository is cloned or fetched (see [Checkouts](#checkouts)).
+1. **Checkout**: each repository is cloned or fetched, or downloaded as a tarball where there is no git (see [Checkouts](#checkouts)).
 2. **Parse**: every Python library file of every repository is parsed.
 3. **Symbol table**: one table is built over all the parsed repositories, so a call in one repository can resolve into another.
 4. **Write and resolve**: `Repo`, `File` and `Symbol` nodes are written, then each repository's `CALLS` edges are resolved against the whole table.
@@ -28,7 +30,8 @@ Every run first creates the exact-match indexes the queries rely on (already-exi
 ## Checkouts
 
 - **Where**: `<STALEPROOF_HOME>/repos/<owner>/<name>` (`~/.staleproof` by default).
-- **First time**: `git clone --filter=blob:none` over unauthenticated HTTPS, so only public repositories work. Blobs are fetched when needed.
+- **First time**: `git clone --filter=blob:none` over HTTPS. Blobs are fetched when needed.
+- **Private repositories**: with `GITHUB_TOKEN` (or `GH_TOKEN`) set, git sends the token to `https://github.com/` through its environment configuration (an `http.extraheader`, never in the remote URL or on the command line), so every repository the token can read clones like a public one. Without a token, terminal prompts are disabled and a private repository fails to clone.
 - **Later**: `git fetch --prune origin`.
 - **Which commit**: the remote's default branch head (`origin/HEAD`, falling back to `origin/main`), checked out detached. Its SHA becomes `Repo.sha`, the indexed commit that doc URLs, example runs and the docs patch are pinned to.
 - **A specific ref**: `--ref <repo>=<ref>`, repeatable, is passed to `git checkout --detach`. Use `origin/<branch>`, a tag or a commit SHA: a bare branch name refers to the clone's local branch, which later fetches do not move.
@@ -37,7 +40,18 @@ Every run first creates the exact-match indexes the queries rely on (already-exi
 npx -y staleproof index FalkorDB/falkordb-py FalkorDB/docs --ref FalkorDB/falkordb-py=origin/main
 ```
 
-Indexing always needs `git`; there is no GitHub API fallback for it (pull request ingestion has one). Files are listed with `git ls-files`, so untracked build output never enters the graph.
+Files are listed with `git ls-files`, so untracked build output never enters the graph.
+
+### Without git: tarballs
+
+When `git` is not installed (a serverless host), or with `STALEPROOF_INGEST=github`, each repository is downloaded as a tarball instead ([src/indexer/tarball.ts](../src/indexer/tarball.ts)):
+
+- **Where from**: `https://codeload.github.com/<owner>/<name>/tar.gz/<ref>` without a token, which costs no GitHub API request. With `GITHUB_TOKEN` (or `GH_TOKEN`), the API's `repos/<owner>/<name>/tarball/<ref>` endpoint, one API request, which also reads private repositories the token can see.
+- **Which commit**: `<ref>` defaults to `HEAD`, the default branch head. The commit SHA comes from the archive's pax header (the `comment=<sha>` record `git archive` writes), so learning it costs no API call. `--ref` must be a branch, tag or SHA GitHub knows; `origin/<branch>` exists only in a clone.
+- **What is extracted**: only the files the indexer reads, by the rules in the next section, plus every `pyproject.toml` and `requirements*.txt`; paths with a component starting with `.` are skipped. They go to `<STALEPROOF_HOME>/tarballs/<owner>/<name>/<sha>`, and a directory walk replaces `git ls-files`.
+- **Limits**: a compressed archive over 150 MB, or more than 4000 extracted files (3000 on a hosted server), is refused with `<repo> is too large to index from an archive here (...)` and the command to run it locally.
+
+Example runs and the text-match counts of `clearance` still need a git clone, so a host without git indexes and checks but runs no examples.
 
 ## Which files are indexed
 
@@ -55,6 +69,8 @@ Each tracked path is classified by these rules, in order:
 | 8 | Everything else ending in `.py` | Python library code |
 
 Rule 6 runs before rule 7, so `docs/examples/quickstart.py` is an example script. Example scripts are how examples shipped inside a code repository (such as GraphRAG-SDK's `graphrag_sdk/examples/*.py`) become docs.
+
+A hosted server ([hosted mode](DEPLOY.md#hosted-mode)) also skips translated docs: paths under `docs/`, `doc/`, `documentation/`, `i18n/`, `locale/`, `locales/`, `translation/`, `translations/` or `content/` followed by a language directory, such as `docs/zh/`, `docs/pt-BR/` or `i18n/ja/` (`TRANSLATION_DIR` in [src/hosted/workspaces.ts](../src/hosted/workspaces.ts)). The CLI indexes them.
 
 ## Python parsing
 
@@ -190,7 +206,7 @@ Re-running `index` is safe and idempotent, and it never deletes nodes.
 
 A section's id comes from its heading, so renaming a heading (or moving the file) gives the section a new id. The old one is marked `gone`, and decisions or verdicts attached to it stay on the old id.
 
-Because the symbol table holds only the repositories in the current command, re-indexing one repository alone re-resolves its outgoing edges against that repository only: its calls into other repositories and its docs' links into other repositories disappear. Re-index repositories together. The GitHub Action's `reindex` input re-indexes the pull request's repository alone; see [GitHub Action](github-action.md).
+Because the symbol table holds only the repositories in the current command, re-indexing one repository alone re-resolves its outgoing edges against that repository only: its calls into other repositories and its docs' links into other repositories disappear. Re-index repositories together. Indexing on first use (`check`, MCP) indexes the pull request's repository with the `--with` repositories only, and the GitHub Action's `reindex` input re-indexes the pull request's repository with its `also-index` repositories only; see [GitHub Action](github-action.md). A hosted workspace is always re-indexed whole.
 
 ## The index report
 
@@ -238,7 +254,7 @@ Only 5 call edges cross repositories, yet 1,257 symbol-to-doc paths do: the docs
 - **Index together for cross-repository edges.** Edges between repositories exist only when the repositories are indexed in one command; indexing one alone drops its edges into the others.
 - **Static resolution.** Calls the types do not reveal fall back to labelled by-name edges inside imported repositories, or to no edge.
 - **Late links do not survive a re-index** of the docs repository that holds them.
-- **Public GitHub repositories only**, cloned without credentials. Private repositories are not supported.
+- **GitHub only.** Repositories are cloned or downloaded from github.com. Private repositories need `GITHUB_TOKEN` (or `GH_TOKEN`) with read access; a hosted server indexes what its own token can read.
 - **Docs syntax**: ATX headings only; links resolve within one repository; section bodies are stored up to 8000 characters and example code up to 20000.
 - **Not read**: notebooks, reStructuredText, `setup.py` and `setup.cfg` dependencies.
 

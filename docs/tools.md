@@ -1,6 +1,6 @@
 # Tools reference
 
-This page is the reference for the ten tools that read and write the graph: the eight the agent chooses between, `write_decision` for people, and `docs_patch` for MCP clients. It covers how every tool reports its work, who can call which tool, the ids they take, the usual order of calls for one pull request, and how errors come back; then each tool's parameters (generated from the code) and the shape of its result, its summary text, its side effects and the errors it raises. It is for MCP client authors, library users and anyone reading a trace.
+This page is the reference for the eleven tools that read and write the graph: the eight the agent chooses between, `write_decision` for people, and `check_pull_request` and `docs_patch` for MCP clients. It covers how every tool reports its work, who can call which tool, the ids they take, the usual order of calls for one pull request, and how errors come back; then each tool's parameters (generated from the code) and the shape of its result, its summary text, its side effects and the errors it raises. It is for MCP client authors, library users and anyone reading a trace.
 
 ## How tools work
 
@@ -28,17 +28,18 @@ Named queries are listed with their full text in [Graph model and Cypher](GRAPH-
 How the result reaches you depends on the caller:
 
 - **The agent** receives `{summary, data}` as JSON, cut at 24,000 characters. The trace stored on the check keeps the queries too. See [The agent](agent.md#tool-results).
-- **MCP clients** receive three text items: the summary, the data as indented JSON, and `Cypher run on FalkorDB:` followed by each named query with its row count and time (left out when there are none).
+- **MCP clients** receive three text items: the summary, the data as indented JSON, and `Cypher run on FalkorDB:` followed by each named query with its row count and time (left out when there are none). `check_pull_request` returns two instead: the Markdown report, and `Stored as check <id>. <summary>`.
 - **The CLI and the HTTP API** call the tools inside commands and endpoints and print or return their data.
 
 ### Who can call which tool
 
 | Tool | Agent | Graph mode | MCP | CLI | HTTP API |
 |---|---|---|---|---|---|
+| `check_pull_request` | no | it runs graph mode | yes | `check --no-agent --format markdown` (the same report) | `POST /api/mcp` |
 | `impact` | yes | yes | yes | `check`, `run --pr` | inside `POST /api/check` |
 | `clearance` | yes | yes | yes | `check` | inside `POST /api/check` |
 | `read_section` | yes | no | yes | no | `GET /api/sections?id=` |
-| `run_example` | yes | yes (up to 3) | yes | `run` | inside `POST /api/check` |
+| `run_example` | yes | yes (up to 3) | yes, except on a hosted server | `run` | inside `POST /api/check` |
 | `decisions_for` | yes | no | yes | no | no |
 | `rank_sections` | yes | yes | yes | `check` | inside `POST /api/check` |
 | `propose_edit` | yes | no | yes | no | no |
@@ -46,7 +47,7 @@ How the result reaches you depends on the caller:
 | `write_decision` | never | no | yes | `decide` | `POST /api/decisions` |
 | `docs_patch` | no | no | yes | `patch` (same patch) | `GET /api/patch` (same patch) |
 
-The "Available to" line in each generated entry below lists the agent tools as available to graph mode "where it applies"; graph mode uses only the four marked yes here. See [MCP server](mcp.md), [CLI](cli.md) and [HTTP API](http-api.md).
+The "Available to" line in each generated entry below lists the agent tools as available to graph mode "where it applies"; graph mode uses only the four marked yes here. Over the HTTP API every MCP tool is also reachable through `POST /api/mcp`. See [MCP server](mcp.md), [CLI](cli.md) and [HTTP API](http-api.md).
 
 ## Ids
 
@@ -62,7 +63,7 @@ Section ids come from `impact` and `read_section`; example ids from `impact` (`e
 
 ## Typical call order for one pull request
 
-The agent decides its own order; this is the order the system prompt and the MCP server's instructions describe, and what a person driving an MCP client usually does:
+An MCP client usually starts with `check_pull_request`, which runs `impact`, `clearance` and `rank_sections` in one call (a graph-mode check) and returns the report; the steps below are for judging sections one by one. The agent decides its own order; this is the order the system prompt and the MCP server's instructions describe, and what a person driving an MCP client usually does:
 
 1. `impact` with the pull request URL. If the summary says `call impact again with offset=40 for the rest`, page with `offset`. The first call ingests the pull request.
 2. `read_section` for each impacted section, to see what it claims.
@@ -252,7 +253,21 @@ Cypher it runs: `verdictsForPr` ([full text](GRAPH-MODEL.md)).
 
 ## Results
 
-What each tool returns in `data`, the summary it writes, what it changes in the graph, and the errors it raises. The shapes are defined in [src/tools/](../src/tools/) and, for `docs_patch`, [src/mcp/server.ts](../src/mcp/server.ts).
+What each tool returns in `data`, the summary it writes, what it changes in the graph, and the errors it raises. The shapes are defined in [src/tools/](../src/tools/) and, for `check_pull_request` and `docs_patch`, [src/mcp/server.ts](../src/mcp/server.ts).
+
+### `check_pull_request` result
+
+| Field | Meaning |
+|---|---|
+| `report` | The Markdown report, the same one the GitHub Action posts: the title, the impact summary, the examples run before and after, the impacted sections with their evidence paths in PageRank order, the cleared symbols and the latest verdicts ([format](github-action.md#the-comment)) |
+| `checkId` | The `Check` node stored for this call (`chk-…`) |
+| `status` | `done`, or `error` when `impact` failed |
+
+Summary: the graph-mode check's summary: the impact and clearance summaries, then `Example runs not requested.` (or the runs' outcomes with `run_examples`), then `Graph mode: fixed tool order and no verdicts; agent mode (a model) judges each section and proposes the edits.` Over MCP the client receives the report and `Stored as check <id>. <summary>`.
+
+Side effects: a graph-mode check ([`runGraphCheck`](agent.md#graph-mode)): the pull request is ingested on the first call, a `Check` node with the trace is stored, and with `run_examples: true` up to 3 examples run before and after (Run nodes). The local stdio server first indexes the pull request's repository when the graph does not have it; a hosted server indexes it into its owner's workspace, and executes no examples.
+
+Errors: those of `impact`, and on a hosted server the [hosted limits](troubleshooting.md#hosted-service).
 
 ### `impact` result
 
@@ -289,8 +304,8 @@ Errors:
 
 - `not a GitHub pull request URL: "<input>" (expected https://github.com/<owner>/<repo>/pull/<n>)`
 - `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`
-- `GitHub API rate limit reached (60/hour without a token). Set GITHUB_TOKEN to raise it.`
-- `GitHub: <path> not found (private repositories are not supported)`
+- `GitHub API rate limit reached (60 requests/hour without a token; set GITHUB_TOKEN to raise it). It resets in <n> min.`
+- `GitHub: <path> not found (a private repository needs GITHUB_TOKEN with read access)` (without the parenthesis when a token is set)
 - `GitHub <METHOD> <path> failed: <status> <body>`, `git <args> failed in <dir>: <stderr>`, `merge commit <sha> has no parent`
 
 ### `clearance` result
@@ -331,6 +346,7 @@ Summary: `<heading> (<path>, lines <a>-<b>, <n> examples).` For example `falkord
 | `url` | Its GitHub link |
 | `verdict` | The [outcome](concepts.md#run-outcomes): `breaks`, `fixes`, `passes`, `already-broken`, `changed-failure`, `fails`, `skipped` or `error` |
 | `runs[]` | One record per run, `before` then `after` with a pull request, otherwise one `current` run |
+| `editedByPr` | `true` when the pull request edits the example's page and the after run used the page as the pull request leaves it ([details](example-runner.md#pull-requests-that-edit-the-page)) |
 
 Each run record: `id`, `example`, `status` (`pass`, `fail`, `timeout`, `skipped`, `error`), `reason`, `error` (last traceback line), `traceback`, `stdout`, `durationMs`, `stitched` (ids of earlier examples prepended), `installed` (`repo@sha` list), `side`, `cached` (answered from the graph) and `createdAt`. See [The Run node](example-runner.md#the-run-node).
 
@@ -347,7 +363,7 @@ Summary, by outcome (commits shortened to 7 characters):
 | `skipped` | `Not run: <reason>.` |
 | `error` | `The sandbox could not be prepared: <first line of the reason>` |
 
-` (recorded earlier; not re-run)` is appended when a run was answered from the graph. If the `before` run is skipped, the `after` run is not attempted.
+` The after run uses the page as this pull request edits it.` is appended when the pull request edits the example's page, and ` (recorded earlier; not re-run)` when a run was answered from the graph. If the `before` run is skipped, the `after` run is not attempted.
 
 Side effects: a `Run` node per side (unless an identical run is reused), with `OF` to the example and `AT` to the pull request; clones or fetches the repositories, builds a virtualenv, and flushes the scratch FalkorDB. See [Example runner](example-runner.md).
 

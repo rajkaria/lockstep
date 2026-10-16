@@ -13,13 +13,19 @@ npx -y staleproof run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com
 npx -y staleproof patch https://github.com/FalkorDB/falkordb-py/pull/262
 ```
 
-The first line starts a local FalkorDB, the second indexes three repositories into one graph, the third checks a pull request without a model ([graph mode](#check)), the fourth checks it with the agent (needs model credentials), the fifth runs one docs example before and after the pull request, and the last prints the docs patch.
+The first line starts a local FalkorDB (optional: any command starts one when none is configured, see [FalkorDB on first use](#falkordb-on-first-use)), the second indexes three repositories into one graph, the third checks a pull request without a model ([graph mode](#check)), the fourth checks it with the agent (needs model credentials), the fifth runs one docs example before and after the pull request, and the last prints the docs patch.
+
+For a repository nobody has indexed, `check` alone is enough: it indexes the pull request's repository on first use.
+
+```bash
+npx -y staleproof check https://github.com/<owner>/<repo>/pull/<n> --no-agent
+```
 
 ## Install or run with npx
 
 | How | Command | Notes |
 |---|---|---|
-| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.1.0 <command>`. |
+| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.2.0 <command>`. |
 | Global install | `npm install -g staleproof`, then `staleproof <command>` | Puts `staleproof` on your `PATH`. |
 | From a clone | `npm install && npm run build`, then `node dist/cli.js <command>` | Or `npm run dev -- <command>` to run the TypeScript source. |
 
@@ -29,12 +35,18 @@ All three need Node.js 20 or newer. The package carries the built web UI, the tr
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--org <org>` | `STALEPROOF_ORG`, else `falkordb` | The organisation, which names the graph (one graph per organisation). The value is turned into a slug: trimmed, lowercased, every run of characters other than `a-z`, `0-9`, `_` and `-` replaced by `-`. An empty result fails with `invalid org name`. |
+| `--org <org>` | `STALEPROOF_ORG`, else the owner of the repository the command is about, else `falkordb` | The organisation, which names the graph (one graph per organisation). The value is turned into a slug: trimmed, lowercased, every run of characters other than `a-z`, `0-9`, `_` and `-` replaced by `-`. An empty result fails with `invalid org name`. |
 | `--db <url>` | `FALKORDB_URL`, else `falkor://localhost:6379` | The FalkorDB server holding the graph. `falkor://` and `redis://` connect in plain TCP, `falkors://` and `rediss://` with TLS; credentials go in as `user:password@`. |
 | `-V`, `--version` | | Print the package version. |
 | `-h`, `--help` | | Print help. `staleproof <command> --help` or `staleproof help <command>` shows one command. |
 
 Global options work before or after the command: `staleproof --org encode check …` and `staleproof check … --org encode` are the same. Results go to stdout; progress and log lines go to stderr, so you can pipe `--json` output safely.
+
+**The default graph.** Without `--org` or `STALEPROOF_ORG`, a command uses the graph of the owner of the repository it is about, slugged: `check https://github.com/encode/httpx/pull/<n>` reads the graph `encode`, and FalkorDB's repositories land in `falkordb`. The repository is the first one given to `index`, the pull request's for `check` and `patch`, the example id's for `run`, and the first `--governs` id's for `decide`. `mcp`, `serve`, `verdict` and `facts` name no repository and use `falkordb`. Pass `--org` when one graph holds repositories of several owners.
+
+### FalkorDB on first use
+
+Every command except `db` connects to FalkorDB. When neither `--db` nor `FALKORDB_URL` is set and nothing answers on `localhost:6379`, it first starts a local server there, the same one as `db start` (falkordblite, installed into `$STALEPROOF_HOME/falkordb/venv` on first use, which takes a minute), logs `No FalkorDB on localhost:6379: starting a local one (falkordblite; the first start installs it, which takes a minute).` on stderr, and leaves it running. With `--db` or `FALKORDB_URL` set, an unreachable server is an error: `cannot reach FalkorDB at <url>: …`.
 
 ## Exit status
 
@@ -43,9 +55,10 @@ Global options work before or after the command: `staleproof --org encode check 
 | `0` | The command finished. |
 | `1` | Any error. The message is printed to stderr as `staleproof: <message>`. Typical causes: an invalid pull request URL, a repository not indexed in the graph, FalkorDB unreachable (`cannot reach FalkorDB at <url>: …`), missing model credentials, the GitHub API rate limit, an invalid `STALEPROOF_EFFORT`. |
 | `1` | `check` in agent mode, when the check ends with status `error` or `refused`. The output is printed and the check is stored first. `done` and `incomplete` exit `0`. |
+| `1` | `check --no-agent --format markdown`, when the stored check ends with status `error`. The comment is written first. |
 | `1` | `db status`, when no server answers on the port. |
 
-`check --no-agent` exits `0` even when the stored check ends with status `error` (for example when the impact query fails after the pull request was read); the summary line says so.
+`check --no-agent` without `--format markdown` exits `0` even when the stored check ends with status `error` (for example when the impact query fails after the pull request was read); the summary line says so.
 
 ## Ids
 
@@ -89,7 +102,7 @@ ORDER BY v.created_at DESC
 
 ### `index`
 
-Clone or update public GitHub repositories and index their code and docs into the organisation's graph.
+Clone or update GitHub repositories, or download them where there is no git, and index their code and docs into the organisation's graph.
 
 ```text
 staleproof index [--ref <repo=ref>]... [--json] <repos...>
@@ -110,7 +123,7 @@ npx -y staleproof --org encode index https://github.com/encode/httpx
 npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs --ref FalkorDB/docs=origin/main --json > index-report.json
 ```
 
-**What it does.** Each repository is cloned blob-less over HTTPS into `<STALEPROOF_HOME>/repos/<owner>/<name>` the first time and fetched afterwards, then checked out at the ref. Python files are parsed with tree-sitter, calls are resolved across every repository in the command, Markdown/MDX pages become doc sections and code examples linked to the code they mention or call, and dependencies between the repositories are read from `pyproject.toml` and `requirements*.txt` files and from the docs' imports. [Indexing](indexing.md) has the rules.
+**What it does.** Each repository is cloned blob-less over HTTPS into `<STALEPROOF_HOME>/repos/<owner>/<name>` the first time and fetched afterwards, then checked out at the ref; with `GITHUB_TOKEN` (or `GH_TOKEN`) set, git sends the token to github.com, so private repositories the token can read work too. When git is not installed, or with `STALEPROOF_INGEST=github`, each repository is downloaded as a tarball instead and only the files the indexer reads are extracted, into `<STALEPROOF_HOME>/tarballs/<owner>/<name>/<sha>` ([details](indexing.md#without-git-tarballs)). Python files are parsed with tree-sitter, calls are resolved across every repository in the command, Markdown/MDX pages become doc sections and code examples linked to the code they mention or call, and dependencies between the repositories are read from `pyproject.toml` and `requirements*.txt` files and from the docs' imports. [Indexing](indexing.md) has the rules.
 
 **Prints.** On stderr, `checkout  <repo>` per repository, then one line per phase (`parse`, `write`, `resolve`, `docs`, `done`). On stdout, `Indexed <n> repositories into graph "<org>" in <s>s`, then one line per repository (commit, symbols, calls and how many cross repositories, parse errors if any), one line per repository with docs (sections, examples, uses, mentions, links) and one line per dependency, for example `FalkorDB/GraphRAG-SDK → FalkorDB/falkordb-py (declares falkordb)`.
 
@@ -120,7 +133,9 @@ With `--json`: `{org, run, repos: [{repo, sha, files, symbols, calls: {exact, by
 
 - Index related repositories in one command. Calls and doc links cross repositories only among the repositories of one run; indexing a repository alone re-resolves its edges against itself and drops the cross-repository ones.
 - Re-indexing updates nodes in place. Symbols, sections and examples that disappeared are marked `gone`, never deleted, so decisions and verdicts keep pointing at them. Links that an earlier pull request check added for removed symbols (`late` links) are dropped and not recreated.
-- Indexing needs `git` and works on public repositories only.
+- Without git, `--ref` must be a branch, tag or commit SHA that GitHub knows; `origin/<branch>` names a ref in a git clone only.
+- Private repositories need `GITHUB_TOKEN` (or `GH_TOKEN`) with read access to them.
+- The graph defaults to the owner of the first repository: `index encode/httpx` writes `encode`.
 
 ### `check`
 
@@ -130,7 +145,7 @@ Check a pull request against the graph: with the agent (default) or in graph mod
 staleproof check [options] <pr-url>
 ```
 
-**Arguments.** `<pr-url>`: `https://github.com/<owner>/<repo>/pull/<n>` (a trailing `/files`, query or fragment is accepted) or `<owner>/<repo>#<n>`. The repository must be indexed in the graph.
+**Arguments.** `<pr-url>`: `https://github.com/<owner>/<repo>/pull/<n>` (a trailing `/files`, query or fragment is accepted) or `<owner>/<repo>#<n>`. When the graph does not have the repository yet, it is indexed first ([below](#check)), unless `--no-index` is given. Owner and name are case-insensitive: the URL is rewritten to the repository's indexed spelling.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -138,11 +153,13 @@ staleproof check [options] <pr-url>
 | `--model <id>` | `STALEPROOF_MODEL`, else `claude-sonnet-5-5` | Agent mode only. The model to call. With an Anthropic-compatible provider, a `claude-*` name is refused. |
 | `--effort <level>` | `STALEPROOF_EFFORT`, else `medium` | Agent mode only. `low`, `medium`, `high`, `xhigh` or `max`. The flag is passed to the model as given; only the environment variable is validated. |
 | `--max-steps <n>` | `40` | Agent mode only. Model turns before the loop stops; the check is then `incomplete`. |
-| `--max-hops <n>` | `3` | Graph mode only (not with `--format markdown`). Maximum call hops from a changed symbol to a doc. Clearance always uses 3. |
-| `--runs <n>` | `3` | Graph mode only (not with `--format markdown`). At most this many examples are run before and after the pull request; `0` runs none. |
+| `--max-hops <n>` | `3` | Graph mode only. Maximum call hops from a changed symbol to a doc. Clearance always uses 3. |
+| `--runs <n>` | `3` | Graph mode only. At most this many examples are run before and after the pull request; `0` runs none. |
 | `--json` | off | Print the check result as JSON instead of the trace and summary. Ignored with `--no-agent --format markdown`. |
 | `--format <format>` | `text` | `text` for the terminal, or `markdown` for the pull request comment the [GitHub Action](github-action.md) posts. |
 | `--out <file>` | stdout | With `--format markdown`, write the comment to this file. Ignored otherwise. |
+| `--with <repos...>` | none | Repositories to index together with the pull request's when the graph is missing any of them, for example the docs site: `--with FalkorDB/docs`. Each as `owner/name` or a GitHub URL. |
+| `--no-index` | index on first use | Fail with `<owner/repo> is not indexed in the "<graph>" graph` instead of indexing a repository the graph does not have. |
 
 **The four invocations.**
 
@@ -151,12 +168,15 @@ staleproof check [options] <pr-url>
 | `check <pr>` | The agent loop: the model calls the tools until every impacted section has a verdict or an edit. | A Check node with the full trace, verdicts, example runs. |
 | `check <pr> --no-agent` | Graph mode: `impact`, `clearance`, `rank_sections` over the first impact page, then `run_example` for at most `--runs` examples on sections whose evidence path is `exact`. | A Check node (model `graph-only (no model)`) with the trace and runs. No verdicts. |
 | `check <pr> --format markdown` | The agent check, then the comment, including the agent's summary. | As the agent check. |
-| `check <pr> --no-agent --format markdown` | Only the comment: impact, clearance, ranking and the verdicts already recorded for the pull request. | Only the pull request and its changes, the first time it is checked. No Check node, no example runs. |
+| `check <pr> --no-agent --format markdown` | Graph mode as above (its trace lines go to stderr), then the comment: the examples run before and after, impact, clearance, ranking and the verdicts already recorded for the pull request. This is what the [GitHub Action](github-action.md) runs without a model key. | As graph mode. |
+
+**Indexing on first use.** Before the check, `check` looks for the pull request's repository and every `--with` repository in the graph. If any is missing, it fetches all of them (a git clone, or a tarball without git) at their default branch heads and indexes them together in one run, logging `checkout  fetching <repo>`, the index phases and `indexed <repo>@<sha7>, … into graph "<org>" in <s>s` on stderr. When all are present it indexes nothing, so later checks start at once; re-index with [`index`](#index) to move the graph to newer commits.
 
 **Examples.**
 
 ```bash
 npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262 --no-agent
+npx -y staleproof check https://github.com/acme/acme-client/pull/12 --no-agent --with acme/acme-docs
 npx -y staleproof check FalkorDB/falkordb-py#276 --no-agent --runs 0
 npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --max-steps 60
 npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent --format markdown --out comment.md
@@ -211,6 +231,8 @@ Patch: staleproof patch <pr>   Trace: stored on chk-<id>
 ```
 
 The final status is `Done`, `Incomplete`, `refused` or `error`. The check is `Done` only when every impacted section, on every impact page, has a verdict or an edit. When the model stops with sections still open it is reminded up to twice; after that, or after `--max-steps` turns, the check is `Incomplete` and lists the open sections.
+
+**Prints, `--format markdown`.** The report the GitHub Action posts as its comment, on stdout or into `--out`: the title (what broke first), the impact summary, a table of the examples run before and after the pull request, the impacted sections with their evidence paths, the cleared symbols, the verdicts and, in agent mode, the agent's summary. [GitHub Action](github-action.md#the-comment) shows the format.
 
 **JSON.** `{checkId, pr, status, summary, events, impacted, missing, toolOrder, since}`. `events` holds every trace event, including each tool's full result in `tool_result.data`. In graph mode `impacted` and `missing` are empty; read the sections from the `impact` result in `events`.
 
@@ -359,17 +381,17 @@ staleproof mcp
 **Example.**
 
 ```bash
-claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
+claude mcp add staleproof -- npx -y staleproof mcp
 ```
 
-**Prints.** On stderr, `staleproof mcp: serving graph "<org>" from <url>` with any password masked. Stdout carries the protocol. It connects to FalkorDB at start and exits with an error if the server cannot be reached. [MCP server](mcp.md) covers clients, tools and security.
+**Prints.** On stderr, `staleproof mcp: serving graph "<org>" from <url>` (or `serving each repository's owner graph`) with any password masked, and `staleproof: <message>` lines while it indexes. Stdout carries the protocol. It connects to FalkorDB at start ([FalkorDB on first use](#falkordb-on-first-use)) and uses the graph named by `--org` or `STALEPROOF_ORG`, else the graph of the owner of the repository each call is about (as `check` does). `check_pull_request`, `impact` and `clearance` index the pull request's repository into that graph the first time they see it. [MCP server](mcp.md) covers clients, tools, the hosted server and security.
 
 ### `serve`
 
 Serve the web UI and the HTTP API.
 
 ```text
-staleproof serve [--port <port>] [--host <host>] [--preload <urls...>]
+staleproof serve [--port <port>] [--host <host>] [--preload <urls...>] [--hosted]
 ```
 
 | Option | Default | Meaning |
@@ -377,6 +399,7 @@ staleproof serve [--port <port>] [--host <host>] [--preload <urls...>]
 | `--port <port>` | `PORT`, else `8080` | Port to listen on. |
 | `--host <host>` | `HOST`, else `127.0.0.1` | Interface to bind. `0.0.0.0` accepts connections from other machines. |
 | `--preload <urls...>` | `STALEPROOF_PRELOADED` (comma-separated), else falkordb-py #262, #267 and #276 | Pull requests listed on the home page. |
+| `--hosted` | off, unless `STALEPROOF_HOSTED=on` | Hosted mode, as on staleproof.dev: a pull request in any public repository the served graph does not hold is downloaded and indexed on demand into a workspace graph of its owner (`gh-<owner>`). See [Deploy](DEPLOY.md#hosted-mode). |
 
 **Example.**
 
@@ -384,9 +407,9 @@ staleproof serve [--port <port>] [--host <host>] [--preload <urls...>]
 npx -y staleproof serve --host 0.0.0.0 --port 8080
 ```
 
-**Prints.** On stderr, `staleproof serve: http://<host>:<port> (graph "<org>", agent on, <model>)`, or `agent off: no Claude credentials, graph mode only` when no model credentials are found. Agent mode is on when `ANTHROPIC_API_KEY` or another credential the Anthropic SDK finds is present.
+**Prints.** On stderr, `staleproof serve: http://<host>:<port> (graph "<org>", agent on, <model>; MCP at /api/mcp)`, with `, hosted: any public repository on demand` after the graph in hosted mode, and `agent off: no model credentials, graph mode only` when no model credentials are found. Agent mode is on when `ANTHROPIC_API_KEY` or another credential the Anthropic SDK finds is present.
 
-**Notes.** The server runs one check at a time and queues the rest. Its POST endpoints are rate-limited per client (30 an hour) and it has no authentication. An agent check in the server has no time limit unless `STALEPROOF_CHECK_BUDGET_MS` is set (it defaults to 240 seconds on Vercel). See [HTTP API](http-api.md) and [Deploy](DEPLOY.md).
+**Notes.** It connects to FalkorDB before it listens ([FalkorDB on first use](#falkordb-on-first-use)). The server runs one check at a time and queues the rest. It serves MCP over Streamable HTTP at `/api/mcp`. Its POST endpoints other than `/api/mcp` are rate-limited per client (30 an hour) and it has no authentication. An agent check in the server has no time limit unless `STALEPROOF_CHECK_BUDGET_MS` is set (it defaults to 240 seconds on Vercel). See [HTTP API](http-api.md) and [Deploy](DEPLOY.md).
 
 ### `facts`
 
@@ -442,9 +465,9 @@ The variables most commands read. [Configuration](configuration.md) lists all of
 | Variable | Default | Used for |
 |---|---|---|
 | `FALKORDB_URL` | `falkor://localhost:6379` | The graph's server (`--db`). |
-| `STALEPROOF_ORG` | `falkordb` | The graph name (`--org`). |
-| `STALEPROOF_HOME` | `~/.staleproof` | Clones, the GitHub response cache, virtualenvs, the local FalkorDB. |
-| `GITHUB_TOKEN`, else `GH_TOKEN` | none | GitHub API requests (60 an hour without a token); required by `patch --open-pr`. |
+| `STALEPROOF_ORG` | the owner of the repository the command is about, else `falkordb` | The graph name (`--org`). |
+| `STALEPROOF_HOME` | `~/.staleproof` | Clones, downloaded tarballs, the GitHub response cache, virtualenvs, the local FalkorDB. |
+| `GITHUB_TOKEN`, else `GH_TOKEN` | none | GitHub API requests (60 an hour without a token), clones, tarball downloads and file reads, so private repositories work; required by `patch --open-pr`. |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `STALEPROOF_MODEL`, `STALEPROOF_EFFORT` | none, none, `claude-sonnet-5-5`, `medium` | Agent mode. |
 | `STALEPROOF_SCRATCH_URL`, `STALEPROOF_SCRATCH_PORT` | none, `6390` | The disposable FalkorDB examples run against. A URL with credentials is refused. |
 | `STALEPROOF_RUN_TIMEOUT_MS` | `30000` | Timeout for each example run. |

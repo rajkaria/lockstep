@@ -143,7 +143,7 @@ Nothing a check learns is kept only in memory. In order:
 | Each `propose_edit` or `record_verdict` | `Verdict` with `check` set to the check id | `ABOUT` → DocSection, `FOR` → PullRequest, `CITES` → Decision, `EVIDENCE` → Run |
 | The check ends | The `Check`'s status, summary, turns, tool calls, tool order, open sections, token counts and full trace | `PRODUCED` → each Verdict of this check |
 
-Graph mode writes the pull request, the check and its runs, but no verdicts. Tool calls over MCP write runs and verdicts (with an empty `check`) but no `Check` node. Decisions are only written by people.
+Graph mode writes the pull request, the check and its runs, but no verdicts. Tool calls over MCP write runs and verdicts (with an empty `check`) but no `Check` node, except `check_pull_request`, which stores a graph-mode check. Decisions are only written by people.
 
 ## Nothing is deleted on re-index
 

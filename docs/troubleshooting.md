@@ -15,7 +15,13 @@ cannot reach FalkorDB at <url>: <message>
 Start one locally with `npx staleproof db start` (or scripts/falkordb-local.sh start), or set FALKORDB_URL.
 ```
 
-Nothing answered at `FALKORDB_URL` (or `--db`) within 5 seconds, or the credentials were refused. The password in `<url>` is shown as `***`. Start a local server with `npx -y staleproof db start`, or fix the URL: `falkors://` for TLS endpoints, the password URL-encoded ([URL forms](configuration.md#graph-and-organisation)). After a connection drops, the client retries four times and then reports `FalkorDB unreachable`.
+Nothing answered at `FALKORDB_URL` (or `--db`) within 5 seconds, or the credentials were refused. The password in `<url>` is shown as `***`. With neither of them set, CLI commands start a local server on `localhost:6379` instead of failing, so from the CLI this error means a URL you configured did not answer, or the local server did not come up. Fix the URL (`falkors://` for TLS endpoints, the password URL-encoded; [URL forms](configuration.md#graph-and-organisation)), or unset it to use the local server. After a connection drops, the client retries four times and then reports `FalkorDB unreachable`.
+
+When the automatic start itself fails, the command stops, after the script's own message ([Local FalkorDB does not start](#local-falkordb-does-not-start)), with:
+
+```text
+could not start a local FalkorDB (see above). Start one yourself, e.g. docker run -d -p 6379:6379 falkordb/falkordb, or set FALKORDB_URL to a FalkorDB you have.
+```
 
 #### A query failed
 
@@ -49,9 +55,12 @@ The Python grammar is missing from the package, which happens with a partial ins
 
 #### Local FalkorDB does not start
 
-`falkordb-local: need uv or python3 to install falkordblite`
+```text
+falkordb-local: need uv (https://docs.astral.sh/uv/) or Python 3.12+ to install falkordblite; or run FalkorDB in Docker: docker run -d -p 6379:6379 falkordb/falkordb
+falkordb-local: falkordblite needs Python 3.12+ (python3 is <version>): install uv (https://docs.astral.sh/uv/), which fetches one, or run FalkorDB in Docker: docker run -d -p 6379:6379 falkordb/falkordb
+```
 
-`staleproof db start` (and the managed scratch server) installs the `falkordblite` wheel once, with uv or with `python3 -m venv` and pip. Install uv or Python 3.12 or later.
+`staleproof db start` (and the managed scratch server, and the local server a command starts when no FalkorDB is configured) installs the `falkordblite` wheel once, with uv or with `python3 -m venv` and pip. The wheel needs Python 3.12 or later: install uv, which fetches a Python 3.12, or run FalkorDB in Docker and leave `FALKORDB_URL` at its default.
 
 `falkordb-local: server did not answer PING on port <port> — see <data>/redis.log`
 
@@ -72,8 +81,19 @@ The server did not come up within 5 seconds. The log usually says why, for examp
 Common causes:
 
 - **A `--ref` git cannot check out.** The ref is passed to `git checkout --detach` unchanged. A bare branch name resolves to the clone's local branch, which fetching does not advance; use `origin/<branch>`, a tag or a SHA.
-- **A private or missing repository.** Clones are unauthenticated HTTPS with terminal prompts disabled, so a private repository fails here. Only public repositories are supported.
-- **No network, or git not installed.** Indexing always needs git; there is no API fallback for it.
+- **A private or missing repository.** Terminal prompts are disabled, so a private repository fails here unless `GITHUB_TOKEN` (or `GH_TOKEN`) is set to a token that can read it; git then sends it to github.com. Check the name, and the token's access.
+- **No network.** Clones and fetches need github.com. Without git installed at all, indexing downloads tarballs instead (next section).
+
+#### Tarball download failed
+
+Without git, or with `STALEPROOF_INGEST=github`, repositories are downloaded as tarballs ([Indexing](indexing.md#without-git-tarballs)):
+
+| Message | Meaning |
+|---|---|
+| `GitHub: <owner/repo>[@<ref>] not found (is it public? private repositories need GITHUB_TOKEN)` | GitHub answered 404: a wrong name or ref, or a private repository without a token that can read it |
+| `GitHub: downloading <owner/repo> failed: <status>` | Any other failed download |
+| `GitHub: the archive of <owner/repo> carries no commit id` | The archive had no pax header with the commit; nothing was indexed |
+| `<owner/repo> is too large to index from an archive here (<what>; the limit is 150 MB and <n> files). Run Staleproof where git is installed (npx -y staleproof check <pr-url>, which clones instead) or in the GitHub Action.` | The archive is over 150 MB, or it has more than 4000 files the indexer reads (3000 on a hosted server). The CLI writes the same text, so where git is available, install it and index again |
 
 ### Pull requests and GitHub
 
@@ -83,7 +103,7 @@ Common causes:
 not a GitHub pull request URL: "<input>" (expected https://github.com/<owner>/<repo>/pull/<n>)
 ```
 
-Accepted forms: `https://github.com/<owner>/<repo>/pull/<n>`, with an optional trailing `/files`, query or fragment, and `<owner>/<repo>#<n>`. Issue URLs, commit URLs and URLs of other hosts are refused. The HTTP API answers 400 for this on `POST /api/check` but 500 on `GET /api/patch`.
+Accepted forms: `https://github.com/<owner>/<repo>/pull/<n>`, with an optional trailing `/files`, query or fragment, and `<owner>/<repo>#<n>`. Issue URLs, commit URLs and URLs of other hosts are refused. The HTTP API answers 400 for this.
 
 #### Repository not indexed
 
@@ -91,19 +111,21 @@ Accepted forms: `https://github.com/<owner>/<repo>/pull/<n>`, with an optional t
 <owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).
 ```
 
-The pull request's repository is not in this graph. Index it together with the repositories that document it, and check that `--org` or `STALEPROOF_ORG` names the graph you indexed into.
+The pull request's repository is not in this graph, and the caller does not index on first use: `check --no-index`, `run --pr`, the library, or the check form and `POST /api/check` of `staleproof serve` without `--hosted`. `check`, both MCP servers and hosted servers index the repository themselves. Index it together with the repositories that document it, and check that the graph is the one you indexed into: the CLI and the stdio MCP server default to the graph of the repository's owner, `serve` to `STALEPROOF_ORG`, else `falkordb`.
 
 #### GitHub rate limit
 
-`GitHub API rate limit reached (60/hour without a token). Set GITHUB_TOKEN to raise it.`
+`GitHub API rate limit reached (60 requests/hour without a token; set GITHUB_TOKEN to raise it). It resets in <n> min.`
 
-Unauthenticated GitHub API requests are limited per IP address. Set `GITHUB_TOKEN` (or `GH_TOKEN`). Ingesting a pull request costs one request with git and up to five without it (Vercel, or `STALEPROOF_INGEST=github`); merged pull requests are cached under `STALEPROOF_HOME`.
+Unauthenticated GitHub API requests are limited per IP address. Set `GITHUB_TOKEN` (or `GH_TOKEN`). Ingesting a pull request costs one request with git and up to five without it (Vercel, or `STALEPROOF_INGEST=github`); merged pull requests are cached under `STALEPROOF_HOME`. With a token the message is `GitHub API rate limit reached. It resets in <n> min.` The reset time is left out when GitHub does not send it.
+
+On a hosted server, whose token you cannot change, a check that hits the limit ends with the same message followed by `This shared server reads pull requests through GitHub's API, which limits it per hour. Until then, run the same check yourself (npx -y staleproof check <pr-url>) or add the GitHub Action: both use your own GitHub quota.`
 
 #### Not found
 
-`GitHub: <path> not found (private repositories are not supported)`
+`GitHub: <path> not found (a private repository needs GITHUB_TOKEN with read access)`
 
-GitHub answered 404: the pull request number is wrong, the repository is private, or it was renamed. Other GitHub failures read `GitHub <METHOD> <path> failed: <status> <start of the response>`, and a failed file read reads `GitHub raw <path>@<sha7> failed: <status>`.
+GitHub answered 404: the pull request number is wrong, the repository is private, or it was renamed. With a token the message is `GitHub: <path> not found`, and a private repository then means the token cannot read it. Other GitHub failures read `GitHub <METHOD> <path> failed: <status> <start of the response>`, and a failed file read reads `GitHub raw <path>@<sha7> failed: <status>`.
 
 #### Merge commit without a parent
 
@@ -121,7 +143,9 @@ the agent needs model API credentials: set ANTHROPIC_API_KEY (or run `ant auth l
 
 `check` runs agent mode by default and found no credentials ([where it looks](configuration.md#model-agent-mode)). Set a key, or run `check --no-agent`. The same message with the API's own error appended in parentheses means the key was found but rejected; the check then ends with status `error`.
 
-On the server, the equivalent is `409 {"error": "agent mode needs Claude API credentials on the server (ANTHROPIC_API_KEY); graph mode works without them", "agentUnavailable": true}` for `mode: "agent"`. Graph mode needs no credentials.
+On the server, the equivalent is `409 {"error": "agent mode needs model API credentials on the server (ANTHROPIC_API_KEY); graph mode works without them", "agentUnavailable": true}` for `mode: "agent"`. Graph mode needs no credentials.
+
+A hosted server also limits agent checks per day: `429 {"error": "today's hosted agent checks are used up; graph mode still works, and the agent runs anywhere with your own key (npx -y staleproof check <pr-url>)", "agentUnavailable": true}`. The count resets at midnight UTC.
 
 #### A Claude model name on a compatible provider
 
@@ -203,6 +227,12 @@ A run that does not exit within `STALEPROOF_RUN_TIMEOUT_MS` (30 s by default) is
 
 The host lacks `git`, or both `uv` and `python3` (Vercel, for example). Recorded runs for the same program and commits are still answered. Run examples from a host that has them (`scripts/seed.sh`, `staleproof run`) to record them on the graph.
 
+#### An async example fails with a SyntaxError
+
+`SyntaxError: 'await' outside function`, or `'async with' outside async function`
+
+Since 0.2.0, examples with a top-level `await`, `async with` or `async for` run on an event loop ([Async examples](example-runner.md#async-examples)). A run recorded before that has the same program and commits, so it is answered from the graph with its old error. Re-run it with `staleproof run <example-id> --pr <url> --fresh`.
+
 #### Skipped runs
 
 A skipped run is not an error: it says why the example cannot prove anything. The reasons are `not Python (<lang>)`, `empty example`, `needs an LLM provider (<match>); Staleproof does not hold provider keys`, `reads a local file the docs do not provide (<file>)`, `contains placeholders to fill in (e.g. "<your-host>")`, `waits for user input`, `calls an external service`, `uses no symbol from an indexed repository`, and `fragment: <error> (the page never defines it)` for a fragment that uses a name nothing on its page defines. [Example runner](example-runner.md) has the exact rules.
@@ -233,13 +263,31 @@ The patch description lists them under "Not applied (file changed since indexing
 - `the patch is empty: no proposed edits to open a pull request for`: there is nothing to open.
 - `fork <owner/name> did not become available`: GitHub did not finish creating the fork within 30 polls 2 seconds apart. Run the command again; the existing fork is reused.
 
+### Hosted service
+
+These come from a server in hosted mode (staleproof.dev, `serve --hosted`): as an `error` event in the stream of `POST /api/check` or `POST /api/index`, as an MCP error result, or as `400 {"error": ...}` elsewhere. The limits are in [Deploy](DEPLOY.md#limits).
+
+| Message | Meaning |
+|---|---|
+| `the hosted workspace gh-<owner> would hold <n> repositories (limit 4: <repos>). Run Staleproof yourself for bigger organisations: npx -y staleproof index <repos>` | A workspace holds at most 4 repositories, counting the ones already in it |
+| `<repos> came to <mb> MB of graph, over the hosted limit of 20 MB. Run it on your own FalkorDB: npx -y staleproof check <pr-url>, or the GitHub Action.` | The indexed workspace was too big; it was dropped |
+| `the hosted service is full right now. Run Staleproof on your own machine or in CI instead: npx -y staleproof check <pr-url>, or the GitHub Action.` | Evicting the least recently used workspaces did not bring the server under 70 MB |
+| `the hosted service has indexed 500 workspaces today, its daily limit. Run it yourself: npx -y staleproof check <pr-url>` | The daily indexing budget is spent; it resets at midnight UTC |
+| `gh-<owner> is being indexed by another request; try again in a minute` | Another request held the workspace's lock for more than 150 seconds |
+| `<owner/repo> is in the curated "<graph>" graph, which the hosted service does not re-index; index other repositories on their own.` | `with` named repositories for a repository of the curated graph |
+| `<owner/repo> is too large to index from an archive here (...)` | The archive is over 150 MB or has more than 3000 files the indexer reads ([above](#tarball-download-failed)) |
+| `name a repository: pass a pull request URL (pr_url) or ids that start with owner/repo:` | MCP: the call names no repository, so the hosted server cannot pick a graph |
+| `<owner/repo> is not indexed yet: call check_pull_request with one of its pull requests first` | MCP: a tool other than `check_pull_request`, `impact` and `clearance` (for example `read_section` or `docs_patch`) for a repository no workspace holds |
+| `404 this server indexes from the CLI only: staleproof index <owner/repo>...` | `POST /api/index` on a server that is not in hosted mode |
+
 ### Server and web app
 
 | Status and message | Meaning |
 |---|---|
 | `429 rate limited: try again later` | Over 30 POST requests from one client in the last hour ([rate limits](http-api.md#rate-limits)) |
-| `404 no such check`, `no such section`, `no such verdict` | The id is unknown in this graph; check `--org` |
-| `400 id required`, `pr required` | The query parameter is missing |
+| `404 no such check`, `no such section`, `no such verdict` | The id is unknown in this graph (in hosted mode, in every graph); check `--org` |
+| `404 <owner/repo> is not indexed` | Hosted mode: `GET /api/patch` or `POST /api/decisions` for a repository no graph holds |
+| `400 id required` | `GET /api/sections` without `id`. `GET /api/patch` without `pr` answers `400 not a GitHub pull request URL: ""…` |
 | `400 status must be accepted or rejected` | The review body needs `status` |
 | `400 decision text is limited to 500 characters` | The HTTP API caps decision text; the CLI `decide` does not |
 | `503 the Staleproof API is not connected to FalkorDB (<message>); set FALKORDB_URL` | Vercel only: the function cannot reach FalkorDB |
@@ -272,10 +320,10 @@ Stated plainly; most are "not yet" rather than "never".
 
 - **Python code only.** Code repositories are parsed as Python. Docs can be any Markdown or MDX. JavaScript and other non-Python examples are indexed but not linked to code and not run; notebooks and `.rst` files are not indexed.
 - **Static call resolution.** Calls are resolved through imports, re-exports, attribute types, return annotations and base classes. Where the types do not say, a method call falls back to a by-name edge when 1 to 4 functions of that name exist in repositories the module imports; such edges are labelled `by-name` everywhere. Generic names (`get`, `run`, `close`, ...) are never matched by name.
-- **Cross-repository resolution needs the repositories indexed together.** Edges between repositories are resolved only within one `index` command. Indexing a repository alone (including the Action's `reindex`) drops its cross-repository edges until the organisation is indexed together again.
+- **Cross-repository resolution needs the repositories indexed together.** Edges between repositories are resolved only within one `index` command. Indexing a repository alone (including indexing on first use without `--with`, and the Action's `reindex` without `also-index`) drops its cross-repository edges until the organisation is indexed together again.
 - **Re-index semantics.** A re-index re-resolves calls and doc links and marks vanished symbols and sections `gone`. It also removes the late links that pull request ingestion created for removed symbols, and already-ingested pull requests are not ingested again. The Action's `reindex` uses the remote default branch head, not the base branch.
 - **Change detection.** `export-removed` is reported for any module that stops importing a name from its own package, not only `__init__.py`, so it can flag internal refactors. A moved or renamed file is reported as every definition removed and added, because renames are paired only within the same parent.
-- **Public repositories only.** Nothing private or login-protected is indexed.
+- **Private repositories need a token.** The CLI, a server you run and the GitHub Action read private GitHub repositories with `GITHUB_TOKEN` (the Action's default token reads its own repository). The hosted site, staleproof.dev, indexes public repositories only. Nothing outside GitHub is read.
 
 **Runs**
 
@@ -290,8 +338,8 @@ Stated plainly; most are "not yet" rather than "never".
 - **Model paths.** The agent was written for Claude; the Claude API path is tested against a local fake API only. It has run on `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API. The GitHub Action and the Docker image are written but have not been exercised on a live repository or built.
 - **An agent may edit an already-broken example only when it proved it.** Besides what a pull request falsified, the agent may fix an example that it ran and that fails both before and after the pull request, saying so in the reason and citing both runs. The path guard still applies: no edit without a path from the pull request's changes to the section.
 - **Sections over 8,000 characters always conflict in the patch**, because their stored text is truncated.
-- **`check --no-agent --format markdown`** renders the comment only: it stores no `Check` node and runs no examples. The Action uses it when it has no model key.
-- **Pull requests are ingested once.** A later check reuses the stored diff; nothing in the CLI forces re-ingestion (the library's `ingestPullRequest` does).
+- **The hosted service runs no examples.** Checks on staleproof.dev and its MCP endpoint report impact, clearance and ranking; runs come from the GitHub Action, the CLI or a local MCP server.
+- **Pull requests are ingested once per graph.** A later check reuses the stored diff; nothing in the CLI forces re-ingestion (the library's `ingestPullRequest` does). The GitHub Action's default FalkorDB starts empty on every run, so there each run diffs the pull request afresh.
 - **Verdicts written over MCP** have no check id, so no check counts them.
 - **Verdict ids are not printed** in the CLI's text output or in the pull request comment; they are in the trace (`check --json`, `GET /api/checks/<id>`).
 - **The HTTP API has no authentication**, and its rate limit is in memory, per process.
@@ -328,11 +376,15 @@ The impact query itself takes about 1 to 2 ms server-side on FalkorDB 4.22 ([FAC
 
 ### Can I use private repositories?
 
-Not yet. Clones are unauthenticated HTTPS, and the GitHub client reports a 404 as `private repositories are not supported`. Private repositories are part of the hosted plan in [VISION.md](../VISION.md).
+Yes, with the CLI, a server you run and the GitHub Action. Set `GITHUB_TOKEN` (or `GH_TOKEN`) to a token that can read them: it is sent to the GitHub API, to `raw.githubusercontent.com` and, through git's environment configuration, to git clones of github.com ([how](configuration.md#github)). In the Action the workflow's default token already reads its own repository. The hosted site, staleproof.dev, indexes public repositories only.
+
+### Do I need to set up FalkorDB?
+
+No. The CLI starts a local FalkorDB (falkordblite) when no `FALKORDB_URL` is set and nothing answers on `localhost:6379`; the GitHub Action starts one inside the job; the website and the hosted MCP server bring their own. Set up your own only to keep one graph for a team, as in [Deploy](DEPLOY.md).
 
 ### Can one server hold several organisations?
 
-Yes. Each organisation is its own graph on the same FalkorDB server, selected with `--org` or `STALEPROOF_ORG`; a second graph built from encode/httpx sits next to `falkordb` on the same server. Graphs never share edges, verdicts or decisions. One `staleproof serve` or `mcp` process serves one organisation; run one per organisation.
+Yes. Each organisation is its own graph on the same FalkorDB server, selected with `--org` or `STALEPROOF_ORG` (the CLI defaults to the repository's owner); a second graph built from encode/httpx sits next to `falkordb` on the same server. Graphs never share edges, verdicts or decisions. One `staleproof mcp` process, or `staleproof serve` without `--hosted`, serves one organisation; run one per organisation. `serve --hosted` answers for every owner from one process, indexing each into its own workspace graph on demand.
 
 ### How do I measure precision?
 
@@ -351,7 +403,7 @@ Because the question is a graph traversal. Impact is a variable-length path from
 
 ### Why did a re-check not notice new commits on the pull request?
 
-A pull request is ingested on its first check and reused afterwards, so later commits are not diffed again. The CLI has no option to force it; call `ingestPullRequest` from the [library](library.md#pull-requests), which always re-ingests. Example runs are likewise answered from recorded runs of the same program and commits; `staleproof run --fresh` re-runs one.
+A pull request is ingested on its first check and reused afterwards, so later commits are not diffed again. The CLI has no option to force it; call `ingestPullRequest` from the [library](library.md#pull-requests), which always re-ingests. The GitHub Action with its default FalkorDB is not affected: each run starts from an empty graph. Example runs are likewise answered from recorded runs of the same program and commits; `staleproof run --fresh` re-runs one.
 
 ## Related
 

@@ -97,8 +97,8 @@ function mb(bytes: number): string {
 
 function tooLarge(repo: string, what: string, limits: TarballLimits): string {
   return (
-    `${repo} is too large for the hosted service (${what}; the limit is ${mb(limits.maxBytes)} and ${limits.maxFiles} files). ` +
-    'Run it on your own machine or in CI instead: npx -y staleproof check <pr-url>, or the GitHub Action.'
+    `${repo} is too large to index from an archive here (${what}; the limit is ${mb(limits.maxBytes)} and ${limits.maxFiles} files). ` +
+    'Run Staleproof where git is installed (npx -y staleproof check <pr-url>, which clones instead) or in the GitHub Action.'
   );
 }
 

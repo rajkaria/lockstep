@@ -11,9 +11,10 @@ reject (`staleproof verdict accept|reject` already records it on the graph) and 
 undocumented" is the same graph walked from the other end: symbols with many questions and no doc within three hops.
 Staleproof opens those docs PRs too.
 
-**Month 6 — hosted.** One graph per organisation on managed FalkorDB, private repositories, more languages
-(TypeScript next: the same resolver over a second tree-sitter grammar), and decisions imported from ADRs and PR
-review threads.
+**Month 6 — hosted for teams.** staleproof.dev already indexes any public repository on first use into a graph of
+its own, and the CLI and the GitHub Action already read private repositories with a token. Next: private repositories
+on the hosted service with one graph per organisation on managed FalkorDB, more languages (TypeScript next: the same
+resolver over a second tree-sitter grammar), and decisions imported from ADRs and PR review threads.
 
 **Business.** Free for open source. Per-repository subscription for private repositories; devtools companies already
 pay developer-relations teams to do this by hand after every release.

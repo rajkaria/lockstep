@@ -203,6 +203,19 @@ export function venvRoot(config: Config): string {
   return join(config.home, 'venvs');
 }
 
+/** Record a run that could not happen (the example is gone at that commit), so reports see both sides. */
+export async function recordSkippedRun(graph: OrgGraph, exampleId: string, side: RunRecord['side'], reason: string, at: string, prUrl?: string): Promise<RunRecord> {
+  const key = createHash('sha1').update(JSON.stringify({ example: exampleId, at, skip: reason })).digest('hex').slice(0, 20);
+  const record: RunRecord = { id: `run-${key}`, example: exampleId, status: 'skipped', reason, stdout: '', durationMs: 0, stitched: [], installed: [], side, cached: false, createdAt: Date.now() };
+  await graph.run(Q.upsertRun, {
+    id: record.id,
+    example: exampleId,
+    props: { id: record.id, key, example: exampleId, status: 'skipped', reason, error: '', traceback: '', stdout: '', duration_ms: 0, stitched: [], installed: [], side, created_at: record.createdAt },
+  });
+  await linkRunToPr(graph, record.id, prUrl);
+  return record;
+}
+
 /**
  * A file of `repo` at `sha` (undefined when the commit has no such file): from the local
  * clone when git is here, else raw.githubusercontent.com. Throws when the commit is unknown.

@@ -1,25 +1,45 @@
 # Quickstart
 
-From nothing to a checked pull request: start FalkorDB, index FalkorDB's three public repositories, check a real pull request with and without a model, run one docs example before and after it, build the patch, open the web UI and connect Claude Code. Then index your own repositories. Every command here is copy-pasteable; you need no account other than an optional model API key.
+From nothing to a checked pull request. First the three ways to start: no install on the website, one click for the GitHub Action, or one command. Then the full walkthrough: start FalkorDB, index FalkorDB's three public repositories, check a real pull request with and without a model, run one docs example before and after it, build the patch, open the web UI and connect Claude Code; then your own repositories. Every command here is copy-pasteable; you need no account other than an optional model API key.
+
+## Three ways to start
+
+### No install: the website
+
+Open [staleproof.dev](https://staleproof.dev) and paste the URL of a pull request in any public Python repository on GitHub. The first check of a repository downloads and indexes it on the fly, then checks the pull request in graph mode: the doc sections it can make false with the evidence path for each, the changed symbols no doc reaches, and the ranking. Examples are not run on the hosted service, which has no sandbox. A docs site that lives in another repository can be named next to it, so both are indexed together.
+
+### One click: the GitHub Action
+
+On [staleproof.dev/#/install](https://staleproof.dev/#/install), type your repository and click **Add to owner/repo**: GitHub opens its "new file" page with `.github/workflows/staleproof.yml` filled in, and you click **Commit changes**. Or copy [examples/staleproof.yml](../examples/staleproof.yml) into the repository yourself. From then on every pull request gets one comment with the docs it can make false and the examples run before and after it. It needs no secrets and no database: the job starts its own FalkorDB. See [GitHub Action](github-action.md).
+
+### One command: the CLI
+
+```bash
+npx -y staleproof check https://github.com/<owner>/<repo>/pull/<n> --no-agent
+```
+
+With no FalkorDB configured, the CLI starts a local one (falkordblite, no Docker), indexes the pull request's repository at its default branch head on first use, checks the pull request in graph mode and runs up to 3 affected examples before and after it. Add `--with <owner>/<docs-repo>` when the docs live in another repository, and set `GITHUB_TOKEN` for a private repository. Without `--no-agent` the agent runs when model credentials are set ([step 4](#4-check-it-with-the-agent)); without them `check` prints a note and runs graph mode. It needs Node.js, git and uv or `python3` (below).
+
+[Install](install.md) compares these with the hosted and local MCP servers. The rest of this page walks through each part step by step.
 
 ## Prerequisites
 
 | You need | For | Notes |
 |---|---|---|
 | Node.js 20 or newer | everything | The package declares `node >= 20`. |
-| `git` | `index`, checking a pull request, example runs, `patch` | Repositories are cloned over unauthenticated HTTPS, blob-less, into `~/.staleproof/repos/<owner>/<name>`. Indexing has no fallback without git. |
-| `bash` | `db start\|stop\|status` and the scratch FalkorDB examples run against | Both use the bundled `scripts/falkordb-local.sh`. |
-| [uv](https://docs.astral.sh/uv/) (recommended), or `python3` 3.12 or newer with `pip` | `db start`, the scratch FalkorDB, example runs | `db start` installs the `falkordblite` wheel (redis-server plus the FalkorDB module), which needs Python 3.12 or newer; with uv, a Python 3.12 is fetched for you. Example runs build one virtualenv per set of commits: with uv they use Python 3.12; with only `python3` they use whatever version `python3` is. |
+| `git` | example runs; indexing, pull request ingestion and `patch` when it is installed | Repositories are cloned over HTTPS, blob-less, into `~/.staleproof/repos/<owner>/<name>`, sending `GITHUB_TOKEN` when it is set. Without git, indexing downloads a tarball of each repository and pull requests are read through the GitHub API, but examples cannot run. |
+| `bash` | the local FalkorDB (`db start`, or the one any command starts when none is configured) and the scratch FalkorDB examples run against | Both use the bundled `scripts/falkordb-local.sh`. |
+| [uv](https://docs.astral.sh/uv/) (recommended), or `python3` 3.12 or newer with `pip` | the local FalkorDB, the scratch FalkorDB, example runs | The local server comes from the `falkordblite` wheel (redis-server plus the FalkorDB module), which needs Python 3.12 or newer; with uv, a Python 3.12 is fetched for you. Example runs build one virtualenv per set of commits: with uv they use Python 3.12; with only `python3` they use whatever version `python3` is. |
 | `tar` | example runs | Sources are extracted with `git archive \| tar -x`. |
-| Docker (optional) | running FalkorDB in a container instead of `db start` | |
+| Docker (optional) | running FalkorDB in a container instead of the local server | |
 | `ANTHROPIC_API_KEY` (optional) | agent mode | Or an Anthropic-compatible provider; see [step 4](#4-check-it-with-the-agent). |
-| `GITHUB_TOKEN` (optional) | pull request metadata, `patch --open-pr` | Without a token, GitHub allows 60 API requests an hour. `GH_TOKEN` is read too. |
+| `GITHUB_TOKEN` (optional) | private repositories, pull request metadata, `patch --open-pr` | Without a token, GitHub allows 60 API requests an hour and only public repositories can be read. `GH_TOKEN` is read too. |
 
 You can run every command with `npx -y staleproof <command>`, or install it once with `npm install -g staleproof` and drop the `npx -y`. See [CLI](cli.md#install-or-run-with-npx).
 
 ## 1. Start FalkorDB
 
-Staleproof keeps everything in a FalkorDB graph. The CLI connects to `FALKORDB_URL`, which defaults to `falkor://localhost:6379`. Pick one of the three options below.
+Staleproof keeps everything in a FalkorDB graph. The CLI connects to `FALKORDB_URL`, which defaults to `falkor://localhost:6379`. Pick one of the three options below. You can also skip this step: when neither `FALKORDB_URL` nor `--db` is set and nothing answers on `localhost:6379`, any command starts the local server described next and leaves it running.
 
 ### Without Docker
 
@@ -60,7 +80,7 @@ Leave the scratch server local (the default) or point `STALEPROOF_SCRATCH_URL` a
 npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
-This clones the three repositories (the client library, the SDK built on it, and the docs site), parses their Python code and Markdown/MDX docs, resolves calls across all three, and writes the graph `falkordb` (the default organisation). Progress goes to stderr; at the end it prints one line per repository with its commit, symbol and call counts, one line per docs repository with sections, examples and links, and the dependencies it found between the repositories (for example `FalkorDB/GraphRAG-SDK → FalkorDB/falkordb-py (declares falkordb)`).
+This clones the three repositories (the client library, the SDK built on it, and the docs site), parses their Python code and Markdown/MDX docs, resolves calls across all three, and writes the graph `falkordb`: a command that names a repository uses the graph of its owner, lowercased, unless `--org` or `STALEPROOF_ORG` names another. Progress goes to stderr; at the end it prints one line per repository with its commit, symbol and call counts, one line per docs repository with sections, examples and links, and the dependencies it found between the repositories (for example `FalkorDB/GraphRAG-SDK → FalkorDB/falkordb-py (declares falkordb)`).
 
 Index related repositories in one command: calls and doc links resolve across repositories only within a single `index` run. Re-running the same command later is safe; it updates the graph in place and marks what disappeared as gone instead of deleting it.
 
@@ -152,15 +172,15 @@ npx -y staleproof patch <pr-url> --open-pr
 npx -y staleproof serve
 ```
 
-Open `http://127.0.0.1:8080`. Paste a pull request URL, pick agent mode (when the server has model credentials) or graph mode, and watch the trace stream in. The startup line on stderr says which graph is served and whether agent mode is on. Use `--port` and `--host` to change the address. The same process serves the [HTTP API](http-api.md).
+Open `http://127.0.0.1:8080`. Paste a pull request URL, pick agent mode (when the server has model credentials) or graph mode, and watch the trace stream in. The startup line on stderr says which graph is served and whether agent mode is on. Use `--port` and `--host` to change the address. The same process serves the [HTTP API](http-api.md) and MCP over HTTP at `/api/mcp`. With `--hosted`, it indexes any public repository on demand into a graph of its own, as staleproof.dev does.
 
 ## 8. Add it to Claude Code
 
 ```bash
-claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y staleproof mcp
+claude mcp add staleproof -- npx -y staleproof mcp
 ```
 
-Claude Code now has the ten tools. Ask it, for example: "What docs can https://github.com/FalkorDB/falkordb-py/pull/267 falsify? Show the evidence path for each." [MCP server](mcp.md) covers other clients and a full session.
+Claude Code now has the eleven tools, on the graph `falkordb` you indexed (the stdio server uses `STALEPROOF_ORG` when set, else the graph of the repository's owner, like the CLI). Ask it, for example: "What docs can https://github.com/FalkorDB/falkordb-py/pull/267 make false? Show the evidence path for each." It answers with `check_pull_request`, or step by step with `impact`, `read_section` and `run_example`. To skip the local setup, add the hosted server instead: `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` (no example runs there). [MCP server](mcp.md) covers other clients and a full session.
 
 ## Index your own repositories
 
@@ -168,16 +188,16 @@ Claude Code now has the ten tools. Ask it, for example: "What docs can https://g
 
 - **Code repositories in Python.** Every `.py` file is parsed, except tests (`test/`, `tests/`, `testing/`, `test_*.py`, `*_test.py`, `conftest.py`), `setup.py`, and files under `scripts/`, `benchmarks/` or `docs/`. Python files under `example/`, `examples/`, `sample/`, `samples/`, `tutorial/`, `tutorials/`, `notebook/` or `notebooks/` become runnable example scripts.
 - **Docs in Markdown or MDX.** Every `.md` and `.mdx` file in any indexed repository, except housekeeping files (`CHANGELOG`, `CONTRIBUTING`, `LICENSE` and similar). A docs site can be its own repository with no code at all. Notebooks and `.rst` files are not read.
-- **Public GitHub repositories only.** Private repositories cannot be cloned or read through the GitHub API.
+- **GitHub repositories, public or private.** The CLI, a server you run and the GitHub Action read private repositories with `GITHUB_TOKEN` (or `GH_TOKEN`) set to a token that can read them; the Action's default token reads its own repository. The hosted site, staleproof.dev, indexes public repositories only.
 
 [Indexing](indexing.md) has the full rules.
 
 ### Index everything in one command
 
-Give each organisation its own graph with `--org` (or `STALEPROOF_ORG`), and pass all its repositories to one `index` command:
+Each organisation gets its own graph, named after the owner of the first repository (`acme` here) unless `--org` or `STALEPROOF_ORG` names it. Pass all its repositories to one `index` command:
 
 ```bash
-npx -y staleproof --org acme index acme/acme-client acme/acme-sdk acme/acme-docs
+npx -y staleproof index acme/acme-client acme/acme-sdk acme/acme-docs
 ```
 
 Calls and doc links resolve across repositories only among the repositories of one `index` run. If you index a repository on its own, or re-index it alone later, its calls into the other repositories and its docs' links into their code are re-resolved against that repository only, and those cross-repository edges disappear. Re-index with the same full command.
@@ -190,14 +210,17 @@ npx -y staleproof --org acme index acme/acme-client acme/acme-docs --ref acme/ac
 
 ### Check your pull requests
 
-Use the same `--org` for every command. The pull request's repository must be indexed in that graph; otherwise the check stops with `<owner/repo> is not indexed in the "<org>" graph`.
+`check` uses the graph of the pull request's owner, so a pull request in `acme/acme-client` reads `acme`. If that graph does not have the repository yet, `check` indexes it first, together with the repositories you pass to `--with`; `--no-index` makes it stop with `<owner/repo> is not indexed in the "<org>" graph` instead.
 
 ```bash
-npx -y staleproof --org acme check https://github.com/acme/acme-client/pull/123 --no-agent
+npx -y staleproof check https://github.com/acme/acme-client/pull/123 --no-agent
 ```
+
+When one graph holds repositories of several owners (a docs site under another account, say), pass the same `--org` to every command, or set `STALEPROOF_ORG`, so they all use that graph.
 
 ## Next steps
 
+- Compare every way to install it: [Install](install.md).
 - Comment on every pull request automatically: [GitHub Action](github-action.md).
 - Learn every command and option: [CLI](cli.md).
 - Find the scenario closest to yours: [Use cases](use-cases.md).

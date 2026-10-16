@@ -1,10 +1,10 @@
 # Staleproof documentation
 
-Staleproof keeps a software organisation's documentation true to its code. This page explains what it does, the problem it solves, how a check works, and where to find everything else in these docs. Start here if you are new; jump to the [Quickstart](getting-started.md) if you want to run it.
+Staleproof keeps a software organisation's documentation true to its code. This page explains what it does, the problem it solves, how a check works, and where to find everything else in these docs. Start here if you are new; jump to [Install](install.md) or the [Quickstart](getting-started.md) if you want to run it.
 
 ## What it is
 
-`staleproof` is an open-source (MIT) command-line tool, MCP server, HTTP API and Node.js library. It indexes your repositories into a [FalkorDB](https://www.falkordb.com) graph: Python symbols and the calls between them across repositories, every Markdown/MDX doc section and code example, and the code each one mentions or calls. For a GitHub pull request it walks that graph to find every doc section the change can make false, runs the affected Python examples before and after the change in a sandbox, and (in agent mode) proposes the docs fix with the path in the graph behind each paragraph. Everything it concludes is written back to the graph, so the next check starts from what the last one learned.
+`staleproof` is an open-source (MIT) command-line tool, GitHub Action, MCP server, HTTP API and Node.js library, also hosted at [staleproof.dev](https://staleproof.dev). It indexes your repositories into a [FalkorDB](https://www.falkordb.com) graph: Python symbols and the calls between them across repositories, every Markdown/MDX doc section and code example, and the code each one mentions or calls. For a GitHub pull request it walks that graph to find every doc section the change can make false, runs the affected Python examples before and after the change in a sandbox, and (in agent mode) proposes the docs fix with the path in the graph behind each paragraph. Everything it concludes is written back to the graph, so the next check starts from what the last one learned.
 
 ## The problem
 
@@ -29,7 +29,7 @@ The same holds at larger scale. Across the four pull requests checked on FalkorD
 
 ## How a check works
 
-1. **Index.** `staleproof index` clones your public GitHub repositories and writes one graph per organisation: Python symbols and calls (resolved across repositories through imports, types and re-exports), doc sections and code examples, and the symbols each one mentions or uses.
+1. **Index.** `staleproof index` (or the first check of a repository) clones your GitHub repositories, or downloads them where there is no git, and writes one graph per organisation: Python symbols and calls (resolved across repositories through imports, types and re-exports), doc sections and code examples, and the symbols each one mentions or uses.
 2. **Ingest the pull request.** The diff between the pull request's two commits becomes symbol-level changes (removed, renamed, signature, modified, added, export-removed), attached to the pull request in the graph.
 3. **Trace.** Staleproof walks from each changed symbol back through up to 3 callers, in any repository, to the docs that mention or call them. That is the impact. The changed symbols with no such path are the clearance.
 4. **Prove.** For impacted Python examples, Staleproof installs the repositories from source at the commit before the pull request and at the pull request, runs the example in a sandbox against a scratch FalkorDB, and records both runs.
@@ -48,9 +48,10 @@ The terms used above, in plain language:
 
 | Interface | What it is for | Docs |
 |---|---|---|
-| CLI | `npx -y staleproof <command>`: index, check, run an example, record a decision, build the patch | [CLI](cli.md) |
-| GitHub Action | A comment on every pull request listing the docs it can falsify, with the evidence path for each | [GitHub Action](github-action.md) |
-| MCP server | The ten tools for Claude Code, Claude Desktop, Cursor or any MCP client, over stdio | [MCP server](mcp.md) |
+| Website | Paste a pull request URL of any public repository on [staleproof.dev](https://staleproof.dev): indexed on the fly, checked in graph mode, nothing installed | [Install](install.md) |
+| CLI | `npx -y staleproof <command>`: index, check, run an example, record a decision, build the patch; the first check starts FalkorDB and indexes the repository itself | [CLI](cli.md) |
+| GitHub Action | `uses: rajkaria/staleproof@v1`, no inputs or secrets: a comment on every pull request with the docs it can make false, the evidence path for each, and the examples run before and after | [GitHub Action](github-action.md) |
+| MCP server | The tools for Claude Code, Claude Desktop, claude.ai, Cursor, VS Code or any MCP client: hosted at `https://staleproof.dev/api/mcp`, or local over stdio | [MCP server](mcp.md) |
 | HTTP API | `staleproof serve`: checks streamed over server-sent events, traces, patches, decisions, and the web UI | [HTTP API](http-api.md) |
 | Node.js library | Index, check, patch and serve from your own TypeScript code | [Node.js library](library.md) |
 | Self-host | Vercel with FalkorDB Cloud, Docker Compose on a VM, or a single machine without Docker | [Deploy](DEPLOY.md) |
@@ -61,12 +62,12 @@ The terms used above, in plain language:
 - **Agent mode** was written for Claude (default model `claude-sonnet-5-5`) and runs on any Anthropic-compatible API through `ANTHROPIC_BASE_URL`. It has been run with a real model through DeepSeek's Anthropic-compatible endpoint (`deepseek-v4-pro`, also what the live demo uses). The Claude path is tested against a local fake API only.
 - **No edit proposed on FalkorDB's repositories yet.** The pull requests checked there are fixes, and every verdict recorded on #262, #267 and #276 is `ok`. Proposing edits and building the patch from them are exercised by the test suite on a fixture organisation.
 - **Written, not yet exercised**: the GitHub Action has not run on a live repository, and the Docker image has not been built.
-- **Live demo**: [staleproof.dev](https://staleproof.dev). Examples are not executed there (no sandbox on Vercel); their before/after results come from runs recorded on the graph.
+- **Live**: [staleproof.dev](https://staleproof.dev), in hosted mode: any public repository is indexed on first use into a workspace graph of its own, and MCP answers at `/api/mcp`. Examples are not executed there (no sandbox on Vercel); for FalkorDB's repositories, the before/after results come from runs recorded on the graph.
 
 ## Limits
 
 - Code repositories are parsed as Python only. Docs can be any Markdown/MDX; JavaScript or other examples in the docs are indexed but not linked to code or run.
-- Public GitHub repositories only.
+- GitHub repositories only. Private ones need `GITHUB_TOKEN` (the CLI, a server you run, the GitHub Action); the hosted site indexes public repositories only.
 - Call resolution is static. What types do not reveal falls back to by-name edges (labelled as such) or to no edge.
 - The example sandbox is a guard, not a security boundary, and example runs use today's third-party dependencies.
 
@@ -75,15 +76,16 @@ The terms used above, in plain language:
 **Start here**
 
 - [Introduction](README.md): this page.
-- [Quickstart](getting-started.md): a local FalkorDB, FalkorDB's three repositories indexed, a pull request checked, an example run, the patch, the web UI and MCP.
+- [Quickstart](getting-started.md): three ways to start (website, GitHub Action, one command), then a local FalkorDB, FalkorDB's three repositories indexed, a pull request checked, an example run, the patch, the web UI and MCP.
+- [Install](install.md): the website, the GitHub Action, the hosted and local MCP servers and the CLI, with what each needs and does.
 - [Use cases](use-cases.md): SDK teams with a separate docs site, DevRel after a release, maintainers reviewing pull requests, AI coding agents, platform teams with many repositories, and recording maintainer decisions.
 
 **Integrate**
 
 - [CLI](cli.md): every command and option, with examples, output and exit codes.
-- [GitHub Action](github-action.md): the workflow, inputs, permissions, the comment format and re-indexing.
-- [MCP server](mcp.md): client configuration, the ten tools, result format, a worked session and security notes.
-- [HTTP API](http-api.md): every endpoint of `staleproof serve`.
+- [GitHub Action](github-action.md): one-click install, what a run does, inputs and outputs, permissions, the comment format and keeping a graph between runs.
+- [MCP server](mcp.md): the hosted endpoint, client configuration, the eleven tools, result format, a worked session and security notes.
+- [HTTP API](http-api.md): every endpoint of `staleproof serve`, including indexing on demand and MCP over HTTP.
 - [Node.js library](library.md): using Staleproof from TypeScript.
 
 **How it works**
@@ -96,7 +98,7 @@ The terms used above, in plain language:
 
 **Reference**
 
-- [Tools reference](tools.md): the ten tools, their parameters and the Cypher each runs.
+- [Tools reference](tools.md): the eleven tools, their parameters and the Cypher each runs.
 - [Configuration](configuration.md): every environment variable and global option.
 - [Graph model and Cypher](GRAPH-MODEL.md): every Cypher statement Staleproof sends to FalkorDB, generated from the code.
 - [Facts from the graph](FACTS.md): every number quoted about FalkorDB's repositories, generated from the graph.
@@ -104,7 +106,7 @@ The terms used above, in plain language:
 
 **Operate**
 
-- [Deploy](DEPLOY.md): Vercel with FalkorDB Cloud, Docker Compose, or no Docker.
+- [Deploy](DEPLOY.md): Vercel with FalkorDB Cloud, Docker Compose, or no Docker; hosted mode and its limits.
 - [Troubleshooting and FAQ](troubleshooting.md): common errors, limits and answers.
 
 ## For LLMs and tools

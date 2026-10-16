@@ -1,6 +1,6 @@
 # Node.js library
 
-The `staleproof` package exports the engine the CLI is built on: configuration, the FalkorDB graph client, the indexer, pull request ingestion, the tools, the agent loop and graph mode, the docs patch, the HTTP app and the MCP server. This page lists every export with its signature and gives complete recipes, each type-checked against the source. It is for TypeScript and JavaScript developers who want to embed indexing or checks in their own tools, tests or servers instead of shelling out to the CLI.
+The `staleproof` package exports the engine the CLI is built on: configuration, the FalkorDB graph client, the indexer (with tarball downloads and indexing on first use), hosted workspaces, pull request ingestion, the tools, the agent loop and graph mode, the report, the docs patch, the HTTP app and the MCP server over stdio or HTTP. This page lists every export with its signature and gives complete recipes, each type-checked against the source. It is for TypeScript and JavaScript developers who want to embed indexing or checks in their own tools, tests or servers instead of shelling out to the CLI.
 
 ## Install
 
@@ -11,7 +11,7 @@ npm i staleproof
 - **Node.js 20 or later** (`engines` in [package.json](../package.json)).
 - **ESM only**. The package is `"type": "module"` and ships no CommonJS build: use `import`. From CommonJS, load it with `const staleproof = await import('staleproof')`.
 - **No type declarations yet.** The build compiles JavaScript only (`dts: false` in [tsup.config.ts](../tsup.config.ts)), so TypeScript sees the module as untyped. The signatures on this page come from the source. To run the recipes as written, use `npx tsx recipe.ts` (tsx strips types without checking them). In a type-checked project, add a declaration file with `declare module 'staleproof';`; every import is then `any`, so annotate callback parameters yourself.
-- **What it needs at run time** is the same as the CLI: a FalkorDB server, `git` to index and to ingest pull requests, `uv` or `python3` to run examples, and model credentials for agent mode. [Configuration](configuration.md) lists every variable.
+- **What it needs at run time** is the same as the CLI: a FalkorDB server, `git` to clone (without it, `checkoutOrDownload` and `downloadRepo` fetch tarballs and pull requests are read through the GitHub API), `git` and `uv` or `python3` to run examples, and model credentials for agent mode. The library does not start a FalkorDB for you; `GraphStore.connect` fails when none answers. [Configuration](configuration.md) lists every variable.
 
 ## A first script
 
@@ -42,6 +42,7 @@ Every export of [src/index.ts](../src/index.ts), grouped by purpose.
 | Export | Signature | What it does |
 |---|---|---|
 | `loadConfig` | `(env?: NodeJS.ProcessEnv) => Config` | Builds a `Config` from environment variables (default `process.env`). Pass `{}` for the defaults alone. Throws on an invalid `STALEPROOF_EFFORT`, an empty org name, or a `STALEPROOF_SCRATCH_URL` that carries credentials or does not parse |
+| `setting` | `(name: string, env?: NodeJS.ProcessEnv) => string \| undefined` | `STALEPROOF_<name>`, else `LOCKSTEP_<name>` (the former name), for example `setting('HOSTED')` |
 | `orgSlug` | `(raw: string) => string` | The graph name for an organisation: trimmed, lowercased, every run of characters outside `a-z`, `0-9`, `_` and `-` turned into `-`, leading and trailing `-` removed. Throws `invalid org name: "<raw>"` when nothing is left |
 | `DEFAULT_MODEL` | `'claude-sonnet-5-5'` | The agent model when `STALEPROOF_MODEL` is unset |
 | `Config` | type | See below |
@@ -74,6 +75,8 @@ Every export of [src/index.ts](../src/index.ts), grouped by purpose.
 | `store.org` | `(name: string) => OrgGraph` | The graph of one organisation; the name is slugged with `orgSlug` |
 | `store.serverVersion` | `() => Promise<string>` | The FalkorDB module version, for example `4.22.0`, or `unknown` |
 | `store.listGraphs` | `() => Promise<string[]>` | Every graph on the server (one per organisation) |
+| `store.memoryMb` | `() => Promise<{ used: number; max: number }>` | The server's memory in MB from `INFO memory`: what it uses now and its cap (`0` when uncapped) |
+| `store.graphMemoryMb` | `(name: string) => Promise<number \| undefined>` | One graph's size in MB (`GRAPH.MEMORY USAGE`), or `undefined` when the server cannot say |
 | `store.close` | `() => Promise<void>` | Closes the connection |
 | `graph.name` | `string` | The graph name |
 | `graph.run` | `<T = Record<string, unknown>>(query: NamedQuery \| string, params?: Record<string, unknown>) => Promise<QueryResult<T>>` | Runs one Cypher statement. Errors read `FalkorDB <query name or adhoc> failed on graph "<graph>": <message>` |
@@ -87,12 +90,29 @@ Every export of [src/index.ts](../src/index.ts), grouped by purpose.
 | Export | Signature | What it does |
 |---|---|---|
 | `parseRepoName` | `(input: string) => string` | `owner/name` from `owner/name`, `https://github.com/owner/name[.git]` or `git@github.com:owner/name[.git]`. Throws `not a GitHub repository: "<input>" (expected owner/name or a github.com URL)` |
-| `checkoutRepo` | `(home: string, repo: string, ref?: string) => Promise<Checkout>` | Clones a public repository (blob-less, unauthenticated HTTPS) into `<home>/repos/<owner>/<name>`, or fetches if it is there, then checks out `ref` detached (default: the remote's default branch head). `ref` goes to `git checkout --detach` as is: use `origin/<branch>`, a tag or a SHA |
+| `checkoutRepo` | `(home: string, repo: string, ref?: string) => Promise<Checkout>` | Clones a repository (blob-less, over HTTPS) into `<home>/repos/<owner>/<name>`, or fetches if it is there, then checks out `ref` detached (default: the remote's default branch head). `ref` goes to `git checkout --detach` as is: use `origin/<branch>`, a tag or a SHA. With `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment, git sends it to github.com, so private repositories work |
+| `downloadRepo` | `(home: string, repo: string, ref?: string, opts?: { token?: string; limits?: { maxBytes: number; maxFiles: number }; fetchImpl?: typeof fetch; skip?: (path: string) => boolean }) => Promise<Checkout>` | Downloads a tarball at `ref` (default `HEAD`) without git: from `codeload.github.com`, or with `token` from the API's tarball endpoint (private repositories too). Extracts only the files the indexer reads into `<home>/tarballs/<owner>/<name>/<sha>`, minus the paths `skip` accepts, and reads the commit from the archive's pax header. Default limits 150 MB and 4000 files; over them it throws a `too large` error |
+| `checkoutOrDownload` | `(config: Config, repo: string, ref?: string) => Promise<Checkout>` | `checkoutRepo` when git can run here, else `downloadRepo` with `config.githubToken`. What `staleproof index` uses |
+| `ensureIndexed` | `(graph: OrgGraph, config: Config, repos: string[], onProgress?: (p) => void) => Promise<IndexReport \| undefined>` | Indexes `repos` together, at their default branch heads, unless the graph already has every one of them; `undefined` when it indexed nothing. What `staleproof check` and the stdio MCP server do on first use |
 | `Checkout` | type | `{ repo: string; dir: string; sha: string }`. `dir` can be any local directory: without `.git` the indexer walks the tree, and `sha` is only used in links |
 | `indexOrg` | `(graph: OrgGraph, checkouts: Checkout[], onProgress?: (p: { phase: 'checkout' \| 'parse' \| 'write' \| 'resolve' \| 'docs' \| 'done'; repo?: string; message: string }) => void) => Promise<IndexReport>` | Parses every repository, resolves calls across all of them, links docs and examples to code, and writes `DEPENDS_ON`. Re-running is idempotent; see [Indexing](indexing.md) |
 | `IndexReport` | type | `{ org, run, repos, docs, dependsOn, ms }`. `repos[]`: `{ repo, sha, files, symbols, calls: { exact, byName, crossRepo }, gone, parseErrors }`. `docs[]`: `{ repo, pages, sections, examples: { total, python }, mentions, uses: { exact, byName }, links, gone }`. `dependsOn[]`: `{ from, to, spec }` |
 
 Cross-repository calls resolve only between repositories passed to the same `indexOrg` call. Index an organisation's repositories together.
+
+### Hosted workspaces
+
+| Export | Signature | What it does |
+|---|---|---|
+| `Workspaces` | `new (store: GraphStore, config: Config, curated: OrgGraph, opts?: { limits?: Partial<HostedLimits>; prefix?: string; registry?: string; fetchImpl?: typeof fetch })` | Hosted mode ([Deploy](DEPLOY.md#hosted-mode)): the curated graph plus a workspace graph per repository owner (`gh-<owner>`), indexed on demand from tarballs, recorded in the registry graph (default `staleproof-hosted`). Pass it to `createApp({ workspaces })` |
+| `workspaces.ensure` | `(repo: string, opts?: { with?: string[]; refresh?: boolean; onEvent?: (e) => void }) => Promise<{ graph: OrgGraph; curated: boolean; report?: IndexReport }>` | The graph for `repo`, indexing its workspace first when no graph has it, when it is older than the re-index age, when a `with` repository is missing, or with `refresh`. Holds a lock across instances, evicts least recently used workspaces to make room, and throws on the limits. `onEvent` receives `index_started`, `index_progress` and `index_finished` ([trace events](http-api.md#trace-events)) |
+| `workspaces.locate` | `(repo: string) => Promise<{ graph; curated; entry? } \| undefined>` | The graph that holds `repo`, without indexing |
+| `workspaces.list`, `workspaces.graphs` | `() => Promise<WorkspaceInfo[]>`, `() => Promise<OrgGraph[]>` | Every workspace (curated first, then hosted by most recent use) with its repositories; `graphs` returns their graphs in the same order |
+| `workspaces.graphNameFor` | `(repo: string) => string` | The workspace graph a repository would be indexed into |
+| `workspaces.evict` | `(graph: string) => Promise<void>` | Drops a hosted workspace and its registry entries; refuses a graph without the prefix |
+| `workspaces.withinDailyBudget` | `(kind: string, limit: number) => Promise<boolean>` | Counts one use of a daily (UTC) budget shared through the registry and says whether it is still within `limit` |
+| `DEFAULT_HOSTED_LIMITS` | `HostedLimits` | `{ maxRepos: 4, maxGraphMb: 20, evictAboveMb: 70, evictToMb: 55, staleAfterMs: 7 days, indexesPerDay: 500, tarball: { maxBytes: 150 MB, maxFiles: 3000 } }` |
+| `HostedLimits` | type | The fields above |
 
 ### Pull requests
 
@@ -139,6 +159,7 @@ Cross-repository calls resolve only between repositories passed to the same `ind
 |---|---|---|
 | `runAgentCheck` | `(ctx: ToolContext, model: ModelClient, prUrl: string, opts?: { maxSteps?: number; maxNudges?: number; budgetMs?: number; onEvent?: (e: TraceEvent) => void }) => Promise<CheckResult>` | The agent loop (defaults: 40 turns, 2 nudges, no time budget). Ingests the PR if needed, stores a `Check` node with the trace. Failures inside the loop end the check with status `error`; invalid URLs and ingestion errors throw before the check starts |
 | `runGraphCheck` | `(ctx: ToolContext, prUrl: string, opts?: { maxRuns?: number; maxHops?: number; onEvent?: (e: TraceEvent) => void }) => Promise<CheckResult>` | Graph mode: `impact` (default 3 hops), `clearance`, `rank_sections` on the first impact page, and up to `maxRuns` (default 3) example runs before and after the PR. No model, no verdicts |
+| `checkReport` | `(ctx: ToolContext, org: string, prUrl: string, agentSummary?: string) => Promise<string>` | The Markdown report of a checked pull request, from what the graph holds: the title, the examples run before and after (the latest run on each side), the impacted sections with evidence paths in PageRank order, the cleared symbols, the latest verdicts and `agentSummary`. `org` is the graph name printed in the footer. It runs no check itself, but `impact` ingests the pull request if needed. This is the GitHub Action's comment and what `check_pull_request` returns |
 | `CheckResult` | type | `{ checkId, pr, status, summary, events, impacted, missing, toolOrder, since? }`. `status` is `done`, `incomplete`, `refused` or `error`. In graph mode `impacted` and `missing` are empty |
 | `TraceEvent` | type | The union of `check_started`, `delta`, `thinking`, `text`, `tool_call`, `tool_result`, `nudge` and `check_finished`; fields in [HTTP API](http-api.md#trace-events) |
 | `AnthropicModel` | `new (opts: { model: string; effort?: Effort; fallbacks?: boolean; apiKey?: string; maxTokens?: number; baseURL?: string; compatible?: boolean })` | The model client for the Claude API (defaults: effort `medium`, fallbacks on, 32,000 max tokens per turn) or, with `compatible: true`, an Anthropic-compatible provider. The constructor throws for a `claude-*` model name in compatible mode, and `the agent needs model API credentials: ...` when there is no `apiKey` and no credentials in the environment |
@@ -160,10 +181,11 @@ Cross-repository calls resolve only between repositories passed to the same `ind
 
 | Export | Signature | What it does |
 |---|---|---|
-| `createApp` | `(opts: { store: GraphStore; config: Config; model?: () => ModelClient; preloaded?: string[]; webDir?: string; rateLimit?: number }) => Hono` | The HTTP API and web app of `staleproof serve` as a [Hono](https://hono.dev) app. Without `model`, agent mode answers 409. `preloaded` defaults to `DEFAULT_PRELOADED`, `webDir` to the package's `web/dist` (any missing directory gives an API-only app), `rateLimit` to 30 POST requests per client per hour. Routes: [HTTP API](http-api.md) |
+| `createApp` | `(opts: { store: GraphStore; config: Config; model?: () => ModelClient; preloaded?: string[]; webDir?: string; rateLimit?: number; workspaces?: Workspaces; agentChecksPerDay?: number }) => Hono` | The HTTP API, MCP endpoint and web app of `staleproof serve` as a [Hono](https://hono.dev) app. Without `model`, agent mode answers 409. `preloaded` defaults to `DEFAULT_PRELOADED`, `webDir` to the package's `web/dist` (any missing directory gives an API-only app), `rateLimit` to 30 POST requests per client per hour. With `workspaces` it runs in hosted mode, and `agentChecksPerDay` (default 50) caps agent checks per day. Routes: [HTTP API](http-api.md) |
 | `defaultModelFactory` | `(config: Config) => (() => ModelClient) \| undefined` | What `serve` passes as `model`: an `AnthropicModel` factory built from `config`, or `undefined` when no credentials are found |
 | `DEFAULT_PRELOADED` | `string[]` | falkordb-py pull requests #262, #267 and #276 |
-| `createMcpServer` | `(graph: OrgGraph, config: Config) => Server` | An MCP `Server` (from `@modelcontextprotocol/sdk`) with the ten tools, not yet connected to a transport. `staleproof mcp` connects it to stdio; see [MCP server](mcp.md) |
+| `createMcpServer` | `(target: OrgGraph \| ((tool: ToolDef, input: Record<string, unknown>) => Promise<ToolContext>), config: Config, opts?: { tools?: ToolDef[]; instructions?: string }) => Server` | An MCP `Server` (from `@modelcontextprotocol/sdk`) with the eleven tools (or `opts.tools`), not yet connected to a transport. `target` is the graph every call runs on, or a function that returns the context for each call (how the stdio server indexes on first use and the hosted server routes by repository). See [MCP server](mcp.md) |
+| `handleMcpRequest` | `(request: Request, opts: { store: GraphStore; config: Config; graph: OrgGraph; workspaces?: Workspaces }) => Promise<Response>` | MCP over Streamable HTTP for one web-standard `Request`, stateless (a fresh server per request, JSON responses; `GET` and `DELETE` answer 405). With `workspaces`, calls are routed to the graph of the repository they name and `run_example` is left out. `POST /api/mcp` of `createApp` is this function |
 
 ## Recipes
 
@@ -234,6 +256,31 @@ try {
 ```
 
 `sections` is the first page of at most 40; `totalSections` and `truncated` on the same object say whether there are more. The evidence path runs from the changed symbol to the doc ([Evidence path](concepts.md#evidence-path)).
+
+### Index on first use and print the report
+
+What `staleproof check <pr-url> --no-agent --format markdown` does, from a graph that may not have the repository yet:
+
+```ts
+import { checkReport, ensureIndexed, GraphStore, loadConfig, parsePrUrl, runGraphCheck } from 'staleproof';
+
+const config = loadConfig();
+const store = await GraphStore.connect(config.falkordbUrl);
+try {
+  const pr = parsePrUrl('https://github.com/FalkorDB/falkordb-py/pull/262');
+  const graph = store.org(pr.owner); // the CLI's default graph: the repository's owner, slugged
+  // Clones (or downloads) and indexes the repository unless the graph already has it.
+  const indexed = await ensureIndexed(graph, config, [pr.fullName], (p) => console.error(p.message));
+  if (indexed) console.error(`indexed ${indexed.repos.map((r) => r.repo).join(', ')}`);
+  const ctx = { graph, config };
+  await runGraphCheck(ctx, pr.url, { maxRuns: 0 });
+  console.log(await checkReport(ctx, graph.name, pr.url));
+} finally {
+  await store.close();
+}
+```
+
+Pass the docs repositories to `ensureIndexed` along with the code repository (`[pr.fullName, 'FalkorDB/docs']`) so they are indexed together. With `maxRuns` above 0 the report's examples table fills in.
 
 ### Run an agent check and stream its events
 
@@ -382,7 +429,23 @@ In tests and scripts you can skip the network: `await staleproof.request('/api/h
 
 ### Serve MCP over another transport
 
-`createMcpServer` returns an MCP `Server` without a transport, so any transport of `@modelcontextprotocol/sdk` works. Streamable HTTP, stateless, with a fresh server per request (the pattern of the SDK's own Hono example):
+`createApp` already serves MCP at `/api/mcp`, and `handleMcpRequest` serves it from any framework that hands you a web-standard `Request`:
+
+```ts
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
+import { GraphStore, handleMcpRequest, loadConfig } from 'staleproof';
+
+const config = loadConfig();
+const store = await GraphStore.connect(config.falkordbUrl);
+const graph = store.org(config.org);
+
+const app = new Hono();
+app.all('/mcp', (c) => handleMcpRequest(c.req.raw, { store, config, graph }));
+serve({ fetch: app.fetch, port: 3001, hostname: '127.0.0.1' });
+```
+
+`createMcpServer` returns an MCP `Server` without a transport, so any transport of `@modelcontextprotocol/sdk` works. The same Streamable HTTP endpoint built by hand, stateless, with a fresh server per request (the pattern of the SDK's own Hono example):
 
 ```ts
 import { serve } from '@hono/node-server';
@@ -521,14 +584,14 @@ The node and edge properties are listed in [Graph model and Cypher](GRAPH-MODEL.
 
 ## Types that are not exported
 
-Even when compiling against the source, several types the functions use are not exported from the package entry: the tool data types (`ImpactData`, `ImpactedSection`, `SectionText`, `RunExampleData`), `RunRecord`, `DocsPatch`, `PullRequestInfo`, `PrRef`, `PrDiff`, `IngestedPr`, `IndexProgress`, `Facts`, `AppOptions`, `CheckOptions`, `AnthropicModelOptions`, `ScriptedTurn` and `QueryTrace`. Derive them from the functions that use them, for example `Parameters<typeof recordPullRequest>[1]` or `Awaited<ReturnType<typeof buildDocsPatch>>`; `queries.NamedQuery` is reachable through the `queries` namespace.
+Even when compiling against the source, several types the functions use are not exported from the package entry: the tool data types (`ImpactData`, `ImpactedSection`, `SectionText`, `RunExampleData`), `RunRecord`, `DocsPatch`, `PullRequestInfo`, `PrRef`, `PrDiff`, `IngestedPr`, `IndexProgress`, `Facts`, `AppOptions`, `CheckOptions`, `AnthropicModelOptions`, `ScriptedTurn`, `QueryTrace`, `HostedEvent`, `WorkspaceInfo`, `TarballLimits`, `McpHttpOptions` and `McpResolver`. Derive them from the functions that use them, for example `Parameters<typeof recordPullRequest>[1]` or `Awaited<ReturnType<typeof buildDocsPatch>>`; `queries.NamedQuery` is reachable through the `queries` namespace.
 
 ## Limits
 
-- No type declarations are published, and the package is at version 0.1.0: exports may change between versions.
-- Some functions shell out: `checkoutRepo`, PR ingestion with git, and example runs need `git`; example runs need `uv` or `python3`; the managed scratch server and `staleproof db` run `bash` scripts.
+- No type declarations are published, and the package is at version 0.2.0: exports may change between versions.
+- Some functions shell out: `checkoutRepo`, PR ingestion with git, and example runs need `git` (`checkoutOrDownload` and `downloadRepo` do not); example runs need `uv` or `python3`; the managed scratch server and `staleproof db` run `bash` scripts.
 - State is per process: example runs are serialised process-wide, and the git and sandbox availability checks are cached for the life of the process.
-- A few internals read the environment directly rather than `Config`: `STALEPROOF_INGEST` (PR ingestion) and the Anthropic credential variables (`AnthropicModel`, `defaultModelFactory`).
+- A few internals read the environment directly rather than `Config`: `STALEPROOF_INGEST` (indexing and PR ingestion), `GITHUB_TOKEN` and `GH_TOKEN` for git clones, and the Anthropic credential variables (`AnthropicModel`, `defaultModelFactory`).
 - Nothing in the library authenticates callers. Anything you expose over HTTP or MCP can write verdicts and decisions to the graph.
 
 ## Related

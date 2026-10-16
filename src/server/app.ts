@@ -101,6 +101,7 @@ export function createApp(opts: AppOptions): Hono {
   const preloaded = opts.preloaded ?? DEFAULT_PRELOADED;
   const mutex = new Mutex();
   const limiter = new RateLimiter(opts.rateLimit ?? 30);
+  const mcpLimiter = new RateLimiter((opts.rateLimit ?? 30) * 10);
   let factsCache: { at: number; facts: Facts } | undefined;
   const app = new Hono();
 
@@ -351,7 +352,13 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   /** MCP over Streamable HTTP: the same tools for any MCP client, no install. */
-  app.all('/api/mcp', (c) => handleMcpRequest(c.req.raw, { store, config, graph, workspaces: hosted }));
+  app.all('/api/mcp', async (c) => {
+    // A client sends a few requests per question (initialize, list, call): a looser limit than checks.
+    if (c.req.method === 'POST' && !mcpLimiter.allow(`mcp:${clientKey(c)}`)) {
+      return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'rate limited: try again later' }, id: null }, { status: 429 });
+    }
+    return handleMcpRequest(c.req.raw, { store, config, graph, workspaces: hosted });
+  });
 
   app.get('/api/model', (c) =>
     c.json({

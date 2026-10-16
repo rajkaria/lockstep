@@ -1,13 +1,13 @@
 # Configuration
 
-`staleproof` is configured by environment variables and a few command-line flags; there is no configuration file, and it does not load `.env` files. This page lists every variable the code reads, with its default, its meaning and the commands that use it, then the global CLI options and their precedence, the files kept under `STALEPROOF_HOME`, and complete configurations for local development, FalkorDB Cloud with DeepSeek, CI and Vercel. It is for anyone setting up the CLI, the server, the GitHub Action or a deployment.
+`staleproof` is configured by environment variables and a few command-line flags; there is no configuration file, and it does not load `.env` files. Nothing has to be set: with no variables, the CLI starts a local FalkorDB and names each graph after the repository's owner. This page lists every variable the code reads, with its default, its meaning and the commands that use it, then the global CLI options and their precedence, the files kept under `STALEPROOF_HOME`, and complete configurations for local development, FalkorDB Cloud with DeepSeek, CI and Vercel. It is for anyone setting up the CLI, the server, the GitHub Action or a deployment.
 
 ## The variables you usually set
 
 ```bash
 export FALKORDB_URL='falkor://localhost:6379'    # the FalkorDB holding the org graph (this is the default)
-export STALEPROOF_ORG=falkordb                      # graph name, one per organisation (this is the default)
-export GITHUB_TOKEN=<token>                       # raises the GitHub API limit of 60 requests/hour
+export STALEPROOF_ORG=acme                          # graph name, one per organisation (default: the repository's owner)
+export GITHUB_TOKEN=<token>                       # private repositories; raises the GitHub API limit of 60 requests/hour
 export ANTHROPIC_API_KEY=<key>                    # agent mode; without it, use graph mode (--no-agent)
 ```
 
@@ -21,12 +21,14 @@ Staleproof was first published as Lockstep (npm `lockstep-docs`). Every `STALEPR
 
 | Variable | Default | Meaning | Used by |
 |---|---|---|---|
-| `FALKORDB_URL` | `falkor://localhost:6379` | The FalkorDB server holding the org graph | every command except `db`; Vercel function; `npm run snapshot` |
-| `STALEPROOF_ORG` | `falkordb` | Organisation, which names the graph | same |
-| `STALEPROOF_HOME` | `~/.staleproof`; `/tmp/staleproof` when `VERCEL` is set | Clones, GitHub cache, virtualenvs, local FalkorDB | `index`, `check`, `run`, `patch`, `mcp`, `serve`, `db` |
-| `GITHUB_TOKEN` | — | GitHub API token | pull request ingestion (`check`, `run --pr`, `serve`, `mcp`); required by `patch --open-pr` |
+| `FALKORDB_URL` | `falkor://localhost:6379` | The FalkorDB server holding the org graph. Unset (and no `--db`), the CLI starts a local server on that address when nothing answers there | every command except `db`; Vercel function; `npm run snapshot` |
+| `STALEPROOF_ORG` | the owner of the repository a command is about, else `falkordb` | Organisation, which names the graph. In a hosted server: the curated graph | same |
+| `STALEPROOF_HOME` | `~/.staleproof`; `/tmp/staleproof` when `VERCEL` is set | Clones, downloaded tarballs, GitHub cache, virtualenvs, local FalkorDB | `index`, `check`, `run`, `patch`, `mcp`, `serve`, `db` |
+| `GITHUB_TOKEN` | — | GitHub token for the API, git clones, tarball downloads and file reads, so private repositories work | indexing, pull request ingestion (`check`, `run --pr`, `serve`, `mcp`), the docs patch, hosted pull request reads (hosted downloads never send it, so a hosted server indexes public repositories only); required by `patch --open-pr` |
 | `GH_TOKEN` | — | Used when `GITHUB_TOKEN` is unset | same |
-| `STALEPROOF_INGEST` | — | `github`: ingest pull requests through the GitHub API even when git is installed | pull request ingestion |
+| `STALEPROOF_INGEST` | — | `github`: work as if git were missing even when it is installed: download repositories as tarballs and ingest pull requests through the GitHub API | indexing, pull request ingestion |
+| `STALEPROOF_HOSTED` | Vercel function: on; `serve`: off | Hosted mode: any public repository is indexed on demand into a workspace graph of its own. The Vercel function turns it off only for `off`; `serve` turns it on only for `on` (or `--hosted`) | Vercel function, `serve` |
+| `STALEPROOF_AGENT_CHECKS_PER_DAY` | `50` | Agent checks a hosted server starts per day (UTC), across all callers; over it, `POST /api/check` with `mode: "agent"` answers 429 | Vercel function and `serve --hosted` |
 | `ANTHROPIC_API_KEY` | — | Model API key (Claude API or an Anthropic-compatible provider) | `check` (agent mode), `serve`, Vercel function |
 | `ANTHROPIC_BASE_URL` | Claude API | Model endpoint; a host other than `api.anthropic.com` switches to compatible mode | same |
 | `STALEPROOF_MODEL` | `claude-sonnet-5-5` | Agent model | same; `check --model` overrides |
@@ -63,17 +65,30 @@ The user name and password are URL-decoded, so percent-encode any reserved chara
 
 **`STALEPROOF_ORG`** names the graph. It is slugged: trimmed, lowercased, every run of characters other than `a-z`, `0-9`, `_` and `-` replaced by `-`, leading and trailing `-` removed. `Acme Inc` becomes `acme-inc`. A name with nothing left fails with `invalid org name: "<name>"`. Each organisation is a separate graph on the same server; indexing, checks and memory never cross between graphs.
 
+**The default graph.** With neither `--org` nor `STALEPROOF_ORG`, a CLI command uses the graph of the owner of the repository it is about, slugged: the first repository of `index`, the pull request of `check` and `patch`, the example id of `run`, the first `--governs` id of `decide`. `check https://github.com/encode/httpx/pull/<n>` reads `encode`; FalkorDB's repositories still land in `falkordb`. Commands that name no repository (`mcp`, `serve`, `verdict`, `facts`) use `falkordb`. Set `STALEPROOF_ORG` when one graph holds repositories of several owners, so every command and the MCP server use the same one.
+
+**Without `FALKORDB_URL`**, a command that cannot reach `localhost:6379` starts a local FalkorDB there (the falkordblite server of `staleproof db start`, installed on first use) instead of failing. With `FALKORDB_URL` or `--db` set, an unreachable server is an error.
+
 **`STALEPROOF_HOME`** is where files are kept ([layout](#files-under-staleproof_home)). On Vercel the default is `/tmp/staleproof`, because a function's file system is read-only except `/tmp`. The Docker image sets it to `/data`.
 
 ### GitHub
 
-**`GITHUB_TOKEN`**, else **`GH_TOKEN`**, is sent as a bearer token to `api.github.com`. Without one, GitHub allows 60 requests per hour per IP address, and the error is `GitHub API rate limit reached (60/hour without a token). Set GITHUB_TOKEN to raise it.`
+**`GITHUB_TOKEN`**, else **`GH_TOKEN`**, is the one GitHub credential. With it set, private repositories the token can read work everywhere a public one does:
 
-- **What uses the API**: ingesting a pull request (once per pull request; later checks reuse the graph). With git, that is one request for the metadata, cached on disk for merged pull requests. Without git, or with `STALEPROOF_INGEST=github`, it is up to five (metadata, the commit range, the changed files and the file list at both commits); file contents come from `raw.githubusercontent.com`, which the code treats as outside the API limit. Indexing does not use the API: it clones over unauthenticated HTTPS.
+| Where | How the token is sent |
+|---|---|
+| `api.github.com` (pull request metadata and diffs, opening docs pull requests) | `Authorization: Bearer <token>` |
+| git clones and fetches (indexing, example installs) | Through git's environment configuration (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0`, `GIT_CONFIG_VALUE_0`), as an `http.https://github.com/.extraheader`, so only to `https://github.com/`, and never in the remote URL or on a command line. Not added when the environment already sets `GIT_CONFIG_COUNT` |
+| Tarball downloads (no git) | From the API's `repos/<owner>/<name>/tarball/<ref>` endpoint instead of `codeload.github.com` |
+| `raw.githubusercontent.com` (file contents without a clone) | `Authorization: token <token>` |
+
+Without a token, GitHub allows 60 API requests per hour per IP address, and the error is `GitHub API rate limit reached (60 requests/hour without a token; set GITHUB_TOKEN to raise it). It resets in <n> min.`; a 404 adds `(a private repository needs GITHUB_TOKEN with read access)`.
+
+- **What uses the API**: ingesting a pull request (once per pull request; later checks reuse the graph). With git, that is one request for the metadata, cached on disk for merged pull requests. Without git, or with `STALEPROOF_INGEST=github`, it is up to five (metadata, the commit range, the changed files and the file list at both commits); file contents come from `raw.githubusercontent.com`, which the code treats as outside the API limit. Indexing uses no API request with git (it clones over HTTPS) or without a token (the tarball comes from `codeload.github.com`); a tarball download with a token is one API request.
 - **`patch --open-pr`** refuses to run without a token (`opening a pull request needs GITHUB_TOKEN`). The token must be able to fork the docs repository, push a branch to the fork and open a pull request; for a classic token that is the `public_repo` scope.
-- Only public repositories work: a 404 is reported as `GitHub: <path> not found (private repositories are not supported)`.
+- **A hosted server** downloads with its token, so it can index any repository that token reads, for whoever asks. Give it a fine-grained token limited to public repositories, read-only ([Deploy](DEPLOY.md#hosted-mode)).
 
-**`STALEPROOF_INGEST=github`** makes pull request ingestion read commits through the GitHub API, the path serverless hosts take automatically because they have no git. It changes nothing else: example runs still need git.
+**`STALEPROOF_INGEST=github`** makes Staleproof work as it does where git is missing: `index` and indexing on first use download tarballs, and pull request ingestion reads commits through the GitHub API, the paths serverless hosts take automatically. Example runs still need git.
 
 ### Model (agent mode)
 
@@ -134,10 +149,12 @@ Everything else, including `FALKORDB_URL`, `ANTHROPIC_API_KEY` and `GITHUB_TOKEN
 |---|---|
 | `PORT`, `HOST` | Address of `staleproof serve`; `--port` and `--host` override them. The Docker image sets `HOST=0.0.0.0` and `PORT=8080`. Not used on Vercel |
 | `STALEPROOF_PRELOADED` | Comma-separated pull request URLs listed on the home page and by `GET /api/prs`; spaces around entries are trimmed and empty entries dropped. `serve --preload <url...>` overrides it. Unset: falkordb-py #262, #267 and #276. Every entry must be a pull request URL, or `GET /api/prs` answers 500 |
-| `STALEPROOF_CHECK_BUDGET_MS` | After this many milliseconds, an agent check in the server starts no new model turn and ends `incomplete`, listing the sections still open. Default 240000 on Vercel (whose function limit is 300 s in [vercel.json](../vercel.json)), none elsewhere. `staleproof check` ignores it. `0` ends every agent check before its first turn |
+| `STALEPROOF_CHECK_BUDGET_MS` | After this many milliseconds, an agent check in the server starts no new model turn and ends `incomplete`, listing the sections still open. Default 240000 on Vercel (whose function limit is 300 s in [vercel.json](../vercel.json)), none elsewhere. `staleproof check` ignores it. When a hosted server indexes first, indexing counts against it, but the agent always gets at least 45 seconds. `0` ends every agent check before its first turn |
+| `STALEPROOF_HOSTED` | Hosted mode ([Deploy](DEPLOY.md#hosted-mode)). In the Vercel function it is on unless the value is `off`; for `staleproof serve` it is off unless the value is `on` or `--hosted` is given |
+| `STALEPROOF_AGENT_CHECKS_PER_DAY` | In hosted mode (the Vercel function and `serve --hosted`): how many agent checks start per day (UTC) across the service, default 50 |
 | `VERCEL` | Any non-empty value. Vercel sets it, which moves `STALEPROOF_HOME` to `/tmp/staleproof` and sets the 240 s check budget |
 
-The HTTP rate limit (30 POST requests per client per hour) has no variable; see [HTTP API](http-api.md#rate-limits).
+The HTTP rate limit (30 POST requests per client per hour) has no variable; see [HTTP API](http-api.md#rate-limits). The hosted workspace limits have none either; they are `DEFAULT_HOSTED_LIMITS` in [src/hosted/workspaces.ts](../src/hosted/workspaces.ts).
 
 ### Scripts and helpers
 
@@ -149,24 +166,25 @@ The HTTP rate limit (30 POST requests per client per hour) has no variable; see 
 
 | Option | Overrides | Default |
 |---|---|---|
-| `--org <org>` | `STALEPROOF_ORG` | `falkordb` |
-| `--db <url>` | `FALKORDB_URL` | `falkor://localhost:6379` |
+| `--org <org>` | `STALEPROOF_ORG` | the owner of the repository the command is about, else `falkordb` |
+| `--db <url>` | `FALKORDB_URL` | `falkor://localhost:6379`, started locally when nothing answers |
 
 Both may come before or after the command (`staleproof --org acme index ...` and `staleproof index ... --org acme` are the same). The general rule is flag, then environment variable, then default:
 
 | Setting | Flag | Variable | Default |
 |---|---|---|---|
-| Graph name | `--org` | `STALEPROOF_ORG` | `falkordb` |
+| Graph name | `--org` | `STALEPROOF_ORG` | the repository's owner, else `falkordb` |
 | FalkorDB URL | `--db` | `FALKORDB_URL` | `falkor://localhost:6379` |
 | Agent model | `check --model` | `STALEPROOF_MODEL` | `claude-sonnet-5-5` |
 | Effort | `check --effort` | `STALEPROOF_EFFORT` | `medium` |
 | Server port | `serve --port` | `PORT` | `8080` |
 | Server interface | `serve --host` | `HOST` | `127.0.0.1` |
 | Preloaded pull requests | `serve --preload` | `STALEPROOF_PRELOADED` | falkordb-py #262, #267, #276 |
+| Hosted mode | `serve --hosted` | `STALEPROOF_HOSTED` | off for `serve`, on in the Vercel function |
 | Reviewer | `verdict --by` | `USER` | `maintainer` |
 | Local FalkorDB port | `db --port` | — | `6379` |
 
-The other limits are flags only: `check --max-steps` (40), `check --no-agent --max-hops` (3) and `--runs` (3). Every command and option is in [CLI](cli.md).
+The other limits are flags only: `check --max-steps` (40), `check --no-agent --max-hops` (3) and `--runs` (3). `check --with` and `--no-index` control indexing on first use. Every command and option is in [CLI](cli.md).
 
 ## Files under STALEPROOF_HOME
 
@@ -174,6 +192,8 @@ The other limits are flags only: `check --max-steps` (40), `check --no-agent --m
 ~/.staleproof/                                  STALEPROOF_HOME
   repos/<owner>/<name>/                       blob-less git clones: indexing, PR ingestion, example installs,
                                               the docs patch, clearance's text-match counts
+  tarballs/<owner>/<name>/<sha>/              files extracted from a downloaded tarball (no git); hosted mode
+                                              deletes them once the repository is indexed
   cache/github/<owner>/<repo>/pulls/<n>.json  pull request metadata (read back only for merged PRs)
   venvs/<key>/                                one virtualenv per set of repo@sha, marked done by .staleproof-ok
   src/<key>/<owner>__<name>/                  sources extracted while a virtualenv builds; removed after a successful build
@@ -184,6 +204,7 @@ The other limits are flags only: `check --max-steps` (40), `check --no-agent --m
 - **`falkordb/data-6379`** holds the org graph when you run `staleproof db start`, including every verdict, decision and run. Deleting it deletes the graph. `data-6390` is the scratch server, which is flushed before every run anyway.
 - **`venvs/` and `src/`** can be deleted at any time; virtualenvs are rebuilt on the next run that needs them.
 - **`repos/`** can be deleted; clones come back on the next index or check. Until then, `clearance` reports 0 raw text matches and the docs patch reads files from GitHub instead.
+- **`tarballs/`** can be deleted; it is only read while indexing.
 - **`cache/`** can be deleted; metadata is fetched again.
 - Each example run also uses a temporary directory, `$TMPDIR/staleproof-run-*`, removed when the run ends.
 
@@ -200,7 +221,7 @@ npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262 --no-ag
 npx -y staleproof serve
 ```
 
-No other variable is needed: `FALKORDB_URL` and `STALEPROOF_ORG` defaults match `db start`, and the scratch server for example runs starts by itself on port 6390. The host needs `git`, plus `uv` or `python3` (uv is recommended: it pins Python 3.12 for the sandbox; with `python3` the version is whatever the host has).
+No other variable is needed: the `FALKORDB_URL` default matches `db start` (and without `db start`, the first command starts the same server), the graph is named after the repositories' owner (`falkordb`), and the scratch server for example runs starts by itself on port 6390. The host needs `git`, plus `uv` or `python3` (uv is recommended: it pins Python 3.12 for the sandbox; with `python3` the version is whatever the host has).
 
 ### FalkorDB Cloud and DeepSeek
 
@@ -218,37 +239,36 @@ The live demo's agent mode uses this provider and model. Leave `STALEPROOF_SCRAT
 
 ### CI (GitHub Action)
 
-The [GitHub Action](github-action.md) sets the variables from its inputs: `falkordb-url` becomes `FALKORDB_URL`, `org` becomes `STALEPROOF_ORG`, `github-token` (default: the workflow's token) becomes `GITHUB_TOKEN`, and `anthropic-api-key` becomes `ANTHROPIC_API_KEY`. With an empty key the action runs `check --no-agent --format markdown`. It has no inputs for the model provider; set those as job environment variables, which the action's steps inherit:
+The [GitHub Action](github-action.md) needs no variables: it starts FalkorDB in the job and sets `FALKORDB_URL=falkor://localhost:6379` and `STALEPROOF_SCRATCH_URL=falkor://localhost:6390` for its own containers (or lets the CLI start falkordblite when the runner has no Docker). Its inputs set the rest: `github-token` (default: the workflow's token) becomes `GITHUB_TOKEN`, `anthropic-api-key` becomes `ANTHROPIC_API_KEY`, `base-url` becomes `ANTHROPIC_BASE_URL`, `model` becomes `STALEPROOF_MODEL`, and with `falkordb-url` set, `falkordb-url` becomes `FALKORDB_URL` and `org` becomes `STALEPROOF_ORG`. With an empty key the action runs `check --no-agent --format markdown`:
 
 ```yaml
 jobs:
   docs:
     runs-on: ubuntu-latest
-    env:
-      ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic   # only for an Anthropic-compatible provider
-      STALEPROOF_MODEL: deepseek-v4-pro
     steps:
-      - uses: rajkaria/staleproof/action@main
+      - uses: rajkaria/staleproof@v1
         with:
-          falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
-          org: falkordb
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base-url: https://api.deepseek.com/anthropic   # only for an Anthropic-compatible provider
+          model: deepseek-v4-pro
 ```
 
-The workflow also needs `permissions: pull-requests: write` to post the comment ([examples/staleproof.yml](../examples/staleproof.yml)). On the runner, `STALEPROOF_HOME` is the default `~/.staleproof`, which starts empty on every job. The action is written but has not been run on a live repository yet.
+The workflow also needs `permissions: pull-requests: write` to post the comment ([examples/staleproof.yml](../examples/staleproof.yml)). On the runner, `STALEPROOF_HOME` is the default `~/.staleproof`, which starts empty on every job.
 
 ### Vercel
 
 ```bash
 vercel env add FALKORDB_URL production          # required
-vercel env add GITHUB_TOKEN production          # recommended: ingestion there goes through the GitHub API
+vercel env add GITHUB_TOKEN production          # recommended: a fine-grained token, public repositories, read-only
 vercel env add ANTHROPIC_API_KEY production     # optional: agent mode
 vercel env add ANTHROPIC_BASE_URL production    # with STALEPROOF_MODEL, for an Anthropic-compatible provider
 vercel env add STALEPROOF_MODEL production
 vercel env add STALEPROOF_PRELOADED production    # optional
+vercel env add STALEPROOF_AGENT_CHECKS_PER_DAY production   # optional, default 50
+vercel env add STALEPROOF_HOSTED production       # optional: `off` serves the curated graph only
 ```
 
-Vercel sets `VERCEL`, so `STALEPROOF_HOME` is `/tmp/staleproof` and agent checks stop at 240 s. `PORT`, `HOST` and the scratch variables are not used: the function serves no static files and executes no examples. [Deploy](DEPLOY.md#vercel) has the full procedure.
+Vercel sets `VERCEL`, so `STALEPROOF_HOME` is `/tmp/staleproof` and agent checks stop at 240 s. Hosted mode is on unless `STALEPROOF_HOSTED=off`. `PORT`, `HOST` and the scratch variables are not used: the function serves no static files and executes no examples. [Deploy](DEPLOY.md#vercel) has the full procedure.
 
 ## Related
 

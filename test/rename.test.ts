@@ -11,6 +11,10 @@ describe('former name (Lockstep)', () => {
     expect(setting('ORG', { STALEPROOF_ORG: 'new', LOCKSTEP_ORG: 'old' })).toBe('new');
     expect(setting('ORG', { LOCKSTEP_ORG: 'old' })).toBe('old');
     expect(setting('ORG', {})).toBeUndefined();
+    // CI passes unset inputs as empty strings.
+    expect(setting('ORG', { STALEPROOF_ORG: '', LOCKSTEP_ORG: 'old' })).toBe('old');
+    expect(setting('ORG', { STALEPROOF_ORG: '' })).toBeUndefined();
+    expect(loadConfig({ STALEPROOF_ORG: '' }).org).toBe('falkordb');
   });
 
   it('loadConfig honours the former variable names', () => {

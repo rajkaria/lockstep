@@ -25,7 +25,7 @@ This page defines the vocabulary the rest of the documentation uses: the graph a
 
 ## The graph
 
-Everything lives in one FalkorDB graph per organisation. The graph name is the organisation slug (`--org` or `STALEPROOF_ORG`, default `falkordb`), lowercased with anything outside `a-z 0-9 _ -` turned into `-`. Several organisations can share one FalkorDB server; FalkorDB's graphs are the tenancy boundary.
+Everything lives in one FalkorDB graph per organisation. The graph name is the organisation slug (`--org` or `STALEPROOF_ORG`; the CLI defaults to the owner of the repository a command is about, else `falkordb`), lowercased with anything outside `a-z 0-9 _ -` turned into `-`. Several organisations can share one FalkorDB server; FalkorDB's graphs are the tenancy boundary. A hosted server adds a workspace graph per repository owner, `gh-<owner>`, indexed on demand ([Deploy](DEPLOY.md#hosted-mode)).
 
 The code and docs half of the graph, which the [impact](#impact) walk follows from right to left:
 
@@ -101,7 +101,7 @@ The anchor is the heading's slug (lowercase, punctuation removed, spaces turned 
 
 The first time any tool or check looks at a pull request, it is ingested: its metadata is read from the GitHub API, the two commits are compared, and the result is written to the graph. Re-checking a pull request never re-diffs it; ingestion happens once per pull request.
 
-- **Which repositories**: the pull request's repository must already be indexed in the graph. Otherwise the error is `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`
+- **Which repositories**: the pull request's repository must be indexed in the graph. `staleproof check`, the MCP tools `check_pull_request`, `impact` and `clearance` (stdio and hosted) and a hosted server's checks index it first when it is missing. Elsewhere (`check --no-index`, `run --pr`, `serve` without `--hosted`, the library) the error is `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`
 - **Which commits**: for a merged pull request, the merge commit's first parent (before) and the merge commit (after). For an open or closed-unmerged one, the merge base of base and head (before) and the head (after).
 - **Which files**: only files the indexer classifies as Python library code are diffed. Markdown files the pull request itself edits are recorded as `docs_touched` and shown as "This PR already edits: …".
 - **How**: with `git` in a local clone; on hosts without `git` (serverless), or with `STALEPROOF_INGEST=github`, through the GitHub API.
@@ -286,7 +286,7 @@ Both modes use the same tools over the same graph and are stored the same way. T
 | Model recorded on the Check | The model name, for example `deepseek-v4-pro` | `graph-only (no model)` |
 | Start it | `staleproof check <pr-url>`; `POST /api/check` with `mode: 'agent'` | `staleproof check <pr-url> --no-agent`; `POST /api/check` with `mode: 'graph'` (the server's default without credentials) |
 
-Agent mode fails loudly without credentials; it never falls back to graph mode silently. One more variant: `check --no-agent --format markdown`, which the GitHub Action runs without a model key, renders the PR comment from impact, clearance, ranking and any verdicts already recorded. It stores no Check node and runs no examples. See [The agent](agent.md) for both modes in detail.
+Agent mode fails loudly without credentials; it never falls back to graph mode silently. `check --no-agent --format markdown`, which the GitHub Action runs without a model key, and the MCP tool `check_pull_request` run graph mode and then render the report from the graph: the examples run before and after, impact, clearance, ranking and any verdicts already recorded. See [The agent](agent.md) for both modes in detail.
 
 ## The docs patch
 

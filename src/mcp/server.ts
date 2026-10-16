@@ -3,12 +3,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import type { OrgGraph } from '../graph/client.js';
+import type { GraphStore, OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
 import { buildDocsPatch } from '../patch.js';
 import { runGraphCheck } from '../agent/graph-check.js';
 import { checkReport } from '../format/report.js';
 import { ensureIndexed } from '../indexer/ensure.js';
+import { repoOfArgs } from './args.js';
 import { canonicalPrUrl } from '../pr/ingest.js';
 import { parsePrUrl } from '../pr/github.js';
 import { packageVersion } from '../pkg.js';
@@ -138,10 +139,13 @@ export function createMcpServer(
 }
 
 /** `staleproof mcp`: serve the tools over stdio until the client disconnects. */
-export async function serveMcp(graph: OrgGraph, config: Config): Promise<void> {
+export async function serveMcp(store: GraphStore, config: Config, opts: { org?: string } = {}): Promise<void> {
   // The first check of a repository indexes it: nothing to set up before asking about a pull request.
   const server = createMcpServer(async (tool, input) => {
     const prUrl = typeof input.pr_url === 'string' ? input.pr_url : undefined;
+    // Like the CLI: the graph named by --org/STALEPROOF_ORG, else the owner of the repository the call is about.
+    const owner = repoOfArgs(input)?.split('/')[0];
+    const graph = store.org(opts.org ?? owner ?? config.org);
     if (prUrl && ['check_pull_request', 'impact', 'clearance'].includes(tool.name)) {
       await ensureIndexed(graph, config, [parsePrUrl(prUrl).fullName], (p) => process.stderr.write(`staleproof: ${p.message}\n`));
     }

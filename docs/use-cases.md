@@ -15,7 +15,7 @@ npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/276 --no-agent
 ```
 
-To get a comment on every pull request in the client repository, add the [GitHub Action](github-action.md).
+To get a comment on every pull request in the client repository, add the [GitHub Action](github-action.md) with the other repositories in `also-index`, so the job indexes them together.
 
 **What you get.** On [falkordb-py#276](https://github.com/FalkorDB/falkordb-py/pull/276), 4 changed symbols reach 43 doc sections, 41 of them in the other two repositories, through paths such as:
 
@@ -71,15 +71,14 @@ For ranking, graph mode prints a pull request's sections in PageRank order, and 
 
 **The situation.** Contributors send pull requests that change behaviour. You want to know, during review, which docs pages a change can falsify, without paying for a model on every pull request.
 
-**What it does.** The [GitHub Action](github-action.md) runs on every pull request and posts one comment, updated in place on each run: the impacted sections with the change type, repository, evidence path and hops; the changed symbols no doc reaches, each with a `git grep` command to check the claim; and the verdicts already recorded for the pull request. Without a model key it renders the comment from the graph alone (graph mode); with one, the agent judges each section first and the comment adds its verdicts and summary.
+**What it does.** The [GitHub Action](github-action.md) runs on every pull request and posts one comment, updated in place on each run. It starts a FalkorDB in the job, indexes the repository, and runs up to 3 affected examples at the commit before the pull request and at the pull request. The comment leads with what broke: the examples run before and after, then the impacted sections with the change type, repository, evidence path and hops, the changed symbols no doc reaches (each with a `git grep` command to check the claim), and any verdicts. Without a model key it runs graph mode; with one, the agent judges each section and the comment adds its verdicts and summary.
 
-**Setup.** Index your repositories into a FalkorDB the GitHub runners can reach (FalkorDB Cloud works), store its URL as the secret `STALEPROOF_FALKORDB_URL`, and add the workflow as `.github/workflows/staleproof.yml`:
+**Setup.** Click **Add to owner/repo** on [staleproof.dev/#/install](https://staleproof.dev/#/install) and commit the file GitHub opens, or add the workflow as `.github/workflows/staleproof.yml` yourself. No secrets, no database:
 
 ```yaml
 name: Staleproof
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
 permissions:
   contents: read
   pull-requests: write
@@ -87,34 +86,42 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: rajkaria/staleproof/action@main
+      - uses: rajkaria/staleproof@v1
         with:
-          falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
-          org: falkordb
+          also-index: FalkorDB/docs   # docs in another repository (optional)
+          fail-on: breaks             # fail the check when an example passes before and fails after (optional)
 ```
 
-**What you get.** A comment that starts with the hidden marker `<!-- staleproof -->`, lists the docs the pull request can falsify with the path for each, and ends with the graph name and the commits compared. [GitHub Action](github-action.md#the-comment) shows the full format.
+**What you get.** A comment that starts with the hidden marker `<!-- staleproof -->`, titled with what broke (`this pull request breaks 1 docs example`, or how many sections it can make false), the examples table, the docs it can make false with the path for each, and the graph name and commits compared at the end. The same report goes to the job summary. [GitHub Action](github-action.md#the-comment) shows the full format.
 
 **Limits.**
 
-- The Action is written and its commands are tested, but it has not yet run on a live repository.
-- Without a key, the Action runs `check --no-agent --format markdown`, which renders the comment only: it runs no examples and stores no check.
-- A pull request is diffed once, the first time it is checked. Later pushes to the same pull request reuse that first diff, so the comment does not reflect new commits.
+- The action has run end to end on a private test repository with the one-click workflow (no inputs).
+- Graph mode samples: it runs at most 3 examples (the `runs` input), from exactly linked sections on the first impact page, and writes no verdicts.
+- With the default FalkorDB nothing carries over between runs: no decisions, verdict history or recorded runs. Set `falkordb-url` to keep them; a pull request is then diffed once, so later pushes reuse the first diff.
 - Some rows overstate the change: moving a file reports its definitions as removed, and a module that stops importing a name from its own package reports a removed export, both labelled breaking.
-- GitHub gives workflows triggered by pull requests from forks no access to repository secrets, so those runs cannot reach the graph.
-- The pull request's repository must already be indexed in the graph. Re-index on a schedule with every repository together; the Action's `reindex` input re-indexes one repository alone and drops its cross-repository edges.
+- Pull requests from forks get a read-only token and no secrets: the check runs in graph mode and its report goes to the job summary, but no comment is posted.
+- Both modes install and run code from the pull request on the runner (the examples), with a guarded environment; see the [security notes](github-action.md#security-notes).
 
 ## AI coding agents over MCP
 
 **The situation.** You change code with an AI coding agent such as Claude Code, and want the same session to find and fix the docs the change affects before a human reviews it.
 
-**What it does.** `staleproof mcp` gives the agent the ten tools over stdio: it can ask what a pull request reaches, read the sections, run the examples before and after, check maintainer decisions, record verdicts or propose edits, and get the docs patch as a diff to apply locally. Every result includes the Cypher queries it ran.
+**What it does.** The MCP server gives the agent the Staleproof tools: `check_pull_request` returns the whole report for a pull request in one call, and the graph tools let it read the sections, run the examples before and after, check maintainer decisions, record verdicts or propose edits, and get the docs patch as a diff to apply locally. Every result includes the Cypher queries it ran.
 
-**Setup.**
+**Setup.** With nothing installed, the hosted server (public repositories, no example runs):
 
 ```bash
-claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
+claude mcp add --transport http staleproof https://staleproof.dev/api/mcp
 ```
+
+Or the local server over stdio, which runs examples and reads private repositories with `GITHUB_TOKEN`; it starts a local FalkorDB and indexes each pull request's repository on first use:
+
+```bash
+claude mcp add staleproof -- npx -y staleproof mcp
+```
+
+Cursor, VS Code and Claude Desktop have one-click buttons or a URL to paste on [staleproof.dev/#/install](https://staleproof.dev/#/install).
 
 Prompts to try, after pushing your branch and opening the pull request:
 
@@ -130,25 +137,29 @@ Prompts to try, after pushing your branch and opening the pull request:
 
 **Limits.**
 
-- The tools take a GitHub pull request URL. Uncommitted or unpushed changes cannot be checked; the pull request's repository must be public and indexed.
+- The tools take a GitHub pull request URL. Uncommitted or unpushed changes cannot be checked.
+- The hosted server reads public repositories only and does not offer `run_example`.
+- First-use indexing indexes the pull request's repository alone; index a docs site that lives elsewhere together with it first (`staleproof index <code repo> <docs repo>`).
 - `propose_edit` and `record_verdict` need `pr_url` over MCP; there is no pull request "under check" to default to.
-- One MCP server serves one organisation's graph. Register a second server with another `STALEPROOF_ORG` for another graph.
-- `run_example` installs repositories and runs docs code on the machine running the MCP server. See the security notes in [MCP server](mcp.md).
+- One local MCP server serves one graph (`STALEPROOF_ORG`, else `falkordb`). Register a second server with another `STALEPROOF_ORG` for another graph.
+- `run_example` installs repositories and runs docs code on the machine running the local MCP server. See the security notes in [MCP server](mcp.md).
 
 ## Platform teams with many repositories or organisations
 
 **The situation.** You run docs tooling for several product lines or several organisations, and want one service rather than one setup per team.
 
-**What it does.** Each organisation gets its own graph on the same FalkorDB server; the graph name is the organisation slug. Every command, the MCP server and the HTTP server work on the graph named by `--org` or `STALEPROOF_ORG` (default `falkordb`). A second graph built from [encode/httpx](https://github.com/encode/httpx) sits next to `falkordb` on the same server: one repository, 544 symbols, 182 doc sections and 194 code examples ([its facts](FACTS-encode.md)).
+**What it does.** Each organisation gets its own graph on the same FalkorDB server; the graph name is the organisation slug. The CLI defaults to the graph of the repository's owner; `--org` or `STALEPROOF_ORG` names another, and the MCP server and the HTTP server use `STALEPROOF_ORG`, else `falkordb`. `serve --hosted` goes further and gives every repository owner a workspace graph of its own on demand, as staleproof.dev does. A second graph built from [encode/httpx](https://github.com/encode/httpx) sits next to `falkordb` on the same server: one repository, 544 symbols, 182 doc sections and 194 code examples ([its facts](FACTS-encode.md)).
 
 **Setup.**
 
 ```bash
-npx -y staleproof --org encode index encode/httpx
-npx -y staleproof --org encode check https://github.com/encode/httpx/pull/<n> --no-agent
+npx -y staleproof index encode/httpx
+npx -y staleproof check https://github.com/encode/httpx/pull/<n> --no-agent
 ```
 
-Serve the [HTTP API](http-api.md) once per organisation (the server answers for one graph), on separate ports:
+Both use the graph `encode`, the repository's owner.
+
+Serve the [HTTP API](http-api.md) once per organisation (without `--hosted` the server answers for one graph), on separate ports:
 
 ```bash
 STALEPROOF_ORG=falkordb npx -y staleproof serve --port 8080
@@ -177,9 +188,9 @@ try {
 **Limits.**
 
 - Graphs do not link to each other: a dependency between organisations is not followed.
-- One `serve` process answers for one organisation and runs one check at a time; further checks queue.
-- The HTTP API has no authentication. Its POST endpoints (checks, decisions, verdict reviews) are rate-limited per client, 30 an hour by default, and nothing more; put it behind your own access control.
-- Public GitHub repositories only.
+- One `serve` process answers for one organisation (or, with `--hosted`, for every owner from one FalkorDB server, within the [hosted limits](DEPLOY.md#limits)) and runs one check at a time; further checks queue.
+- The HTTP API has no authentication. Its POST endpoints (checks, indexing, decisions, verdict reviews) are rate-limited per client, 30 an hour by default, and nothing more; put it behind your own access control.
+- GitHub repositories only. Private ones need `GITHUB_TOKEN`; a hosted server indexes whatever its token can read, so give it a token limited to public repositories.
 
 ## Recording maintainer decisions so docs stop being re-flagged
 

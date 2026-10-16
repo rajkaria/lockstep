@@ -34,7 +34,8 @@ export const DEFAULT_MODEL = 'claude-sonnet-5-5';
  * product's former name, still read so existing deployments keep working).
  */
 export function setting(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return env[`STALEPROOF_${name}`] ?? env[`LOCKSTEP_${name}`];
+  // An empty value counts as unset: CI passes unset inputs as ''.
+  return env[`STALEPROOF_${name}`] || env[`LOCKSTEP_${name}`] || undefined;
 }
 
 /** `~/.staleproof`, or `~/.lockstep` when only the former home exists (its clones and venvs are kept). */

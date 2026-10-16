@@ -1,6 +1,6 @@
 # Example runner
 
-This page explains how a docs code example is executed before and after a pull request: which repositories are installed and at which commits, how fragments are stitched together, which examples are skipped and why, how runs are cached, the virtualenvs, the scratch FalkorDB and the sandbox, and how to read the result. It is for anyone who wants to trust (or question) a "passes before, fails after".
+This page explains how a docs code example is executed before and after a pull request: which repositories are installed and at which commits, how fragments are stitched together, how async examples run, which examples are skipped and why, how runs are cached, the virtualenvs, the scratch FalkorDB and the sandbox, and how to read the result. It is for anyone who wants to trust (or question) a "passes before, fails after".
 
 ## Run an example before and after a pull request
 
@@ -22,7 +22,7 @@ The README's "Asynchronous Example" failed before falkordb-py#262 with `TypeErro
 | `--fresh` | off | Re-run even if an identical run is recorded, and replace the recorded one |
 | `--json` | off | Print the tool result as JSON |
 
-The agent and MCP clients run examples with the [`run_example`](tools.md) tool; graph mode runs up to 3 of them per check.
+The agent and MCP clients run examples with the [`run_example`](tools.md) tool; graph mode, and so the GitHub Action, runs up to 3 of them per check. The hosted service runs none.
 
 ## How a run works
 
@@ -53,6 +53,32 @@ Docs pages often split one program across several blocks: the first creates `db`
 - An example with any `import` or `from` line runs as written.
 - An example with no import line is a fragment: every earlier Python example on the same page that is not itself skipped is prepended, in order, each marked `# --- stitched from <id>`. The run records their ids in `stitched`.
 - If the program then fails with `NameError: name 'x' is not defined` and nothing in it defines `x` (no `def x`, `class x`, `x =`, `import … x` or `as x`), the run is recorded as skipped (`fragment: … (the page never defines it)`), not as a failure.
+
+### Pull requests that edit the page
+
+A pull request that changes the code and updates the docs page in the same commit should not be reported as breaking the old example. So when the pull request edits the page an example is on (a Markdown file of the pull request's own repository), the after run uses the example as the page reads at the pull request:
+
+- The example is found on the edited page by its section and its position within that section, or, when the page has as many examples as before, by its position on the page. The earlier examples used for stitching come from the edited page too.
+- If the edited page no longer has the example, the after run is not executed: `run_example` reports it as skipped with the reason `this pull request removes the example from its page`.
+- If the page cannot be read at either commit, the indexed version is run, as for any other example.
+
+The summary then ends with `The after run uses the page as this pull request edits it.`, `run_example` sets `editedByPr`, and the report marks the example's result `(after: the page as this PR edits it)`. The before run always uses the page as indexed.
+
+### Async examples
+
+Docs for async libraries are often written for an async REPL (`python -m asyncio`, IPython, Jupyter), with `await`, `async with` or `async for` at the top level:
+
+```python
+from falkordb.asyncio import FalkorDB
+
+db = FalkorDB(host="localhost", port=6379)
+graph = db.select_graph("social")
+result = await graph.query("RETURN 1")
+```
+
+Run as a script, that is a `SyntaxError`, which would report the example as broken when it is not. The sandbox's entry point, [python/run_example.py](../python/run_example.py), compiles the program first. When compiling fails with a top-level `await`, `async with` or `async for` (`... outside async function` or `'await' outside function`), it compiles it again with top-level `await` allowed and runs the resulting coroutine on an event loop with `asyncio.run`, as those REPLs do. Every other program runs unchanged, with `__name__` set to `"__main__"`, so `if __name__ == "__main__":` blocks still run.
+
+A run recorded before this entry point existed (Staleproof 0.1.0) keeps its `SyntaxError`: the program and commits are the same, so it is answered from the graph. Re-run it with `staleproof run <example-id> --pr <url> --fresh`.
 
 ## Skip rules
 
@@ -127,14 +153,14 @@ Every example starts from an empty server. An example that assumes data the page
 
 ## The sandbox
 
-The program runs as `<venv>/bin/python -s example.py` in a fresh temporary directory (`staleproof-run-*` under the system temp directory, deleted afterwards), with empty standard input, in its own process group.
+The program is written to `example.py` and runs as `<venv>/bin/python -s _run_example.py` (the entry point [python/run_example.py](../python/run_example.py), which runs `example.py`; see [Async examples](#async-examples)) in a fresh temporary directory (`staleproof-run-*` under the system temp directory, deleted afterwards), with empty standard input, in its own process group.
 
 Two processes touch code from the pull request, and neither gets the server's environment:
 
 | Step | Runs | Environment |
 |---|---|---|
 | Install | `uv venv`, `uv pip install` (or `python3 -m venv`, `pip install`), which run the repositories' build code | The allow-list described under [Virtualenvs](#virtualenvs): paths, user, locale, `UV_*` and `PIP_*`, proxies, certificates. Network allowed |
-| Example | `python -s example.py` | Nothing inherited: only the variables listed below. Network refused except the scratch server |
+| Example | `python -s _run_example.py`, which runs `example.py` | Nothing inherited: only the variables listed below. Network refused except the scratch server |
 
 
 - **Environment**: nothing is inherited, not even the install step's allow-list, so no secrets reach the example. The environment is exactly `PATH=/usr/bin:/bin`, `HOME` and `TMPDIR` set to the temporary directory, `LANG=C.UTF-8`, `PYTHONPATH` pointing at the shim, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, and `STALEPROOF_SCRATCH_HOST` / `STALEPROOF_SCRATCH_PORT`.
@@ -204,7 +230,7 @@ Runs are serialised by a process-wide queue: the scratch server is shared and fl
 - **Python is pinned to 3.12 only with uv.** The `python3 -m venv` fallback uses the host's Python.
 - **Re-indexing moves commits.** The run key includes the indexed commit of every installed repository, so after a re-index the earlier runs no longer match and examples run again.
 - **Stitching prepends every earlier runnable Python block on the page**, related or not; a failing earlier block fails the fragment.
-- **Serverless hosts do not execute examples.** On Vercel, run results come only from runs recorded by a host with a sandbox (a local machine or a container).
+- **Serverless hosts do not execute examples.** On Vercel, run results come only from runs recorded by a host with a sandbox (a local machine, a container or the GitHub Action), and a hosted workspace has none.
 
 ## Related
 

@@ -34,7 +34,7 @@ inputs:
     description: Optional. A FalkorDB that keeps your graph between runs (decisions, verdicts and run history). Default is a throwaway FalkorDB in the job.
     default: ''
   org:
-    description: Graph name on falkordb-url (default falkordb). Ignored without falkordb-url.
+    description: Graph name on falkordb-url (default: the repository owner, lower case). Ignored without falkordb-url.
     default: ''
   reindex:
     description: With falkordb-url, re-index this repository (and `also-index`) at the default branch before checking.

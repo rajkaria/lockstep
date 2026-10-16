@@ -245,8 +245,9 @@ export class Workspaces {
       const checkouts: Checkout[] = [];
       for (const repo of repos) {
         onEvent({ type: 'index_progress', repo, phase: 'download', message: `downloading ${repo}`, at: Date.now() });
+        // No token: the hosted service indexes public repositories only, whatever its GITHUB_TOKEN can read.
         const c = await downloadRepo(this.config.home, repo, 'HEAD', {
-          token: this.config.githubToken,
+          token: undefined,
           limits: this.limits.tarball,
           fetchImpl: this.fetchImpl,
           skip: (path) => TRANSLATION_DIR.test(path),

@@ -5,11 +5,11 @@ make false, proves it by running their examples before and after the change, and
 behind each paragraph. It works over a [FalkorDB](https://www.falkordb.com) graph of your code, docs and maintainers'
 decisions, across every repository of the organisation.
 
-[Live demo](https://staleproof.dev) · [Documentation](docs/README.md) · [Quickstart](docs/getting-started.md) ·
-[npm: `staleproof`](https://www.npmjs.com/package/staleproof) · MIT
+[Live demo](https://staleproof.dev) · [Install](https://staleproof.dev/#/install) · [Documentation](docs/README.md) ·
+[Quickstart](docs/getting-started.md) · [npm: `staleproof`](https://www.npmjs.com/package/staleproof) · MIT
 
 ```bash
-npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262 --no-agent
 ```
 
 ## One pull request, end to end
@@ -80,8 +80,21 @@ Two ways to run a check:
 
 ## Quickstart
 
+Three ways to start:
+
+- **No install.** Paste a pull request URL of any public Python repository on [staleproof.dev](https://staleproof.dev).
+  It is indexed on the fly and checked in graph mode; examples are not run on the hosted service.
+- **One click.** On [staleproof.dev/#/install](https://staleproof.dev/#/install), type your repository and commit the
+  workflow GitHub opens (or copy [`examples/staleproof.yml`](examples/staleproof.yml)). Every pull request then gets
+  a comment with the docs it can make false and the examples run before and after it. No secrets, no database.
+- **One command.** `npx -y staleproof check <pr-url> --no-agent` starts a local FalkorDB if none is configured,
+  indexes the repository on first use (`--with owner/docs` for docs in another repository) and runs the check.
+  Private repositories work with `GITHUB_TOKEN`.
+
+The commands, step by step:
+
 ```bash
-# FalkorDB locally without Docker (falkordblite; uv or pip installs it once)
+# FalkorDB locally without Docker (falkordblite; uv or pip installs it once). Optional: any command starts it.
 npx -y staleproof db start
 
 # Index an organisation's repositories into one graph (index them together so cross-repo calls resolve)
@@ -110,9 +123,11 @@ The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
 
 | Integration | One line | Guide |
 |---|---|---|
+| Website | Paste a pull request URL on [staleproof.dev](https://staleproof.dev) — no install, any public repository | [docs/install.md](docs/install.md) |
 | CLI | `npx -y staleproof <command>` — index, check, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
-| GitHub Action | A comment on every PR with the docs it can falsify ([`examples/staleproof.yml`](examples/staleproof.yml)) | [docs/github-action.md](docs/github-action.md) |
-| Claude Code (MCP) | `claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y staleproof mcp` | [docs/mcp.md](docs/mcp.md) |
+| GitHub Action | `uses: rajkaria/staleproof@v1` — zero config: a comment on every PR with the docs it can make false and the examples run before and after ([`examples/staleproof.yml`](examples/staleproof.yml)) | [docs/github-action.md](docs/github-action.md) |
+| MCP, hosted | `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` — nothing to install | [docs/mcp.md](docs/mcp.md) |
+| MCP, local (Claude Code) | `claude mcp add staleproof -- npx -y staleproof mcp` — runs examples too | [docs/mcp.md](docs/mcp.md) |
 | HTTP API | `staleproof serve`: JSON API with checks streamed over server-sent events | [docs/http-api.md](docs/http-api.md) |
 | Node.js library | `import { runGraphCheck } from 'staleproof'` | [docs/library.md](docs/library.md) |
 | Self-host | Vercel + FalkorDB Cloud (the live demo), Docker Compose, or a plain VM | [docs/DEPLOY.md](docs/DEPLOY.md) |
@@ -127,7 +142,8 @@ release, maintainers reviewing pull requests, AI coding agents, and platform tea
 |---|---|---|---|---|
 | [Introduction](docs/README.md) | [CLI](docs/cli.md) | [Core concepts](docs/concepts.md) | [Tools](docs/tools.md) | [Deploy](docs/DEPLOY.md) |
 | [Quickstart](docs/getting-started.md) | [GitHub Action](docs/github-action.md) | [Indexing](docs/indexing.md) | [Configuration](docs/configuration.md) | [Troubleshooting and FAQ](docs/troubleshooting.md) |
-| [Use cases](docs/use-cases.md) | [MCP server](docs/mcp.md) | [Example runner](docs/example-runner.md) | [Graph model and Cypher](docs/GRAPH-MODEL.md) | |
+| [Install](docs/install.md) | [MCP server](docs/mcp.md) | [Example runner](docs/example-runner.md) | [Graph model and Cypher](docs/GRAPH-MODEL.md) | |
+| [Use cases](docs/use-cases.md) | | | | |
 | | [HTTP API](docs/http-api.md) | [Decisions and memory](docs/memory.md) | [Facts from the graph](docs/FACTS.md) | |
 | | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
 
@@ -170,10 +186,10 @@ RETURN d.id, length(p) AS hops, [n IN nodes(p) | coalesce(n.qualname, n.id)] AS 
 Take FalkorDB out and this is a grep over one repository.
 
 ```
-GitHub (public repos) ──index──▶ FalkorDB: one graph per organisation ◀──tools──▶ Agent (Claude or an Anthropic-compatible model)
+GitHub (repositories) ──index──▶ FalkorDB: one graph per organisation ◀──tools──▶ Agent (Claude or an Anthropic-compatible model)
                                     ▲                                              │ trace (SSE)
      Sandbox runner ── Run nodes ───┘                                              ▼
-     (virtualenv per repo@sha,                               CLI · MCP server · web demo · GitHub Action
+     (virtualenv per repo@sha,                         CLI · MCP (stdio, HTTP) · website · GitHub Action
       scratch FalkorDB, no network)
 ```
 
@@ -191,7 +207,8 @@ GitHub (public repos) ──index──▶ FalkorDB: one graph per organisation 
 | `record_verdict` | ok / governed / skipped, with the reason |
 
 `write_decision` (humans record decisions; future checks cite them) and `docs_patch` are available over MCP, the CLI
-and the web demo. Parameters, results and errors for each: [docs/tools.md](docs/tools.md).
+and the web demo. MCP clients also get `check_pull_request`, the whole report for a pull request in one call.
+Parameters, results and errors for each: [docs/tools.md](docs/tools.md).
 
 ## Status
 
@@ -199,10 +216,11 @@ and the web demo. Parameters, results and errors for each: [docs/tools.md](docs/
 |---|---|
 | **Built and run** (against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
 | **Agent mode, run with a real model** | `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API ([how](docs/agent.md)), on the CLI and the live site. Each PR got a different tool order: #262 impact → read_section → decisions_for → run_example → record_verdict (5 calls, 1 verdict); #267 15 calls, 3 verdicts, each citing its before/after runs; #276 38 calls paging through 43 sections, all with verdicts. The first #276 run stopped at 40 turns with 21 sections open: `impact` capped results at 40 and the model's invented paging arguments were dropped silently; `impact` now pages, unknown arguments are an error, and the loop tracks every impacted section itself. Every verdict on these four PRs is `ok` — they are fixes, and FalkorDB updates its docs in the same PR — so the live graph holds no proposed edit; edits and the docs patch are exercised on the test fixture organisation. |
-| **Live** | [staleproof.dev](https://staleproof.dev) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Published on npm as [`staleproof`](https://www.npmjs.com/package/staleproof). |
+| **Live** | [staleproof.dev](https://staleproof.dev) (same deployment: [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app)) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Hosted workspaces: any public repository is indexed on first use into a workspace graph of its own (`gh-<owner>`), with size limits and least-recently-used eviction; MCP over HTTP at `https://staleproof.dev/api/mcp`. Published on npm as [`staleproof`](https://www.npmjs.com/package/staleproof). |
 | **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
-| **Written, not exercised** | The GitHub Action and the Docker image (no Docker on the development machine). |
-| **Designed** | Issue/discussion → symbol links ("asked about but undocumented"); hosted multi-org service. See [VISION.md](VISION.md). |
+| **Run end to end** | The GitHub Action, exactly as the install page writes it (`uses: rajkaria/staleproof@v1`, no inputs), on a private test repository: a pull request that renamed a method the README's quickstart calls got one comment saying the pull request breaks that example (passes before, `AttributeError` after); when the same pull request then fixed the README, the comment updated in place to "passes before and after". A second pull request made an argument required and the comment named the README example that breaks with `TypeError`. |
+| **Written, not exercised** | The Docker image (no Docker on the development machine). |
+| **Designed** | Issue/discussion → symbol links ("asked about but undocumented"). See [VISION.md](VISION.md). |
 
 Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB), tracks 01 and 03.
 
@@ -213,26 +231,27 @@ Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeD
 - **Call resolution is static.** Dynamic dispatch the types don't reveal falls back to by-name edges inside repositories
   the module imports (labelled `by-name` everywhere they appear), or to no edge.
 - **Index an organisation's repositories together.** Calls between repositories resolve only among repositories passed
-  to the same `index` command; re-indexing one repository alone (as the Action's `reindex` does, at the default
-  branch's head) drops its cross-repository edges and the late links made when a PR was checked.
+  to the same `index` command (or `check --with`, or the Action's `also-index`); re-indexing one repository alone
+  drops its cross-repository edges and the late links made when a PR was checked.
 - **Change detection is per definition.** A moved file reads as every definition removed and added again;
   `export-removed` also fires when any module stops importing a name from its own package; a section longer than 8,000
   characters always shows as a conflict in the docs patch.
 - **Graph mode samples.** It ranks the first page of impact and runs at most three examples; the agent covers every
-  impacted section. `check --no-agent --format markdown` (what the Action runs without a key) renders the comment
-  only: no stored check, no example runs.
+  impacted section. Graph mode is what the Action runs without a key, and what the hosted site runs (without
+  examples).
 - **The sandbox is a guard, not a security boundary.** The example process refuses network connections and DNS at the
   Python socket level, gets no inherited secrets and a temp HOME, and is killed on timeout; the install step before it
   (which runs the repositories' build code at the PR's commits) gets only an allow-listed environment, so PR build
   code never sees the server's credentials. Run it inside a container for untrusted code.
 - **Runs use today's third-party dependencies.** Repositories are installed from source at the exact commits; their
   dependencies resolve at run time.
-- **On the live site, examples are not executed** (a Vercel Function has no sandbox): their before/after results come
-  from runs recorded on the graph by a local host. If the database is unreachable the page falls back to a labelled
-  snapshot.
+- **On the live site, examples are not executed** (a Vercel Function has no sandbox): for FalkorDB's repositories
+  their before/after results come from runs recorded on the graph by a local host; for other repositories, use the
+  Action or the CLI. If the database is unreachable the page falls back to a labelled snapshot.
 - **The agent was written for Claude** (`claude-sonnet-5-5`, adaptive thinking, refusal fallback); that path is tested
   against a local fake API only. The real runs above used `deepseek-v4-pro`.
-- **Public repositories only.** Nothing private, login-protected or personal is indexed.
+- **Private repositories need a token.** The CLI and the Action read private GitHub repositories with `GITHUB_TOKEN`
+  (the Action's default token covers its own repository); the hosted site indexes public repositories only.
 
 More, with workarounds: [docs/troubleshooting.md](docs/troubleshooting.md).
 

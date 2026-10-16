@@ -15,7 +15,7 @@ import { parseRepoName, type Checkout } from './indexer/repo.js';
 import { checkoutOrDownload } from './indexer/ensure.js';
 import { packageRoot, packageVersion } from './pkg.js';
 import { clearanceText, dim, impactText, runText, traceLine } from './format/text.js';
-import { AnthropicModel, type Effort } from './agent/anthropic.js';
+import { AnthropicModel, claudeCredentialsAvailable, type Effort } from './agent/anthropic.js';
 import { runAgentCheck } from './agent/loop.js';
 import { runGraphCheck } from './agent/graph-check.js';
 import type { TraceEvent } from './agent/trace.js';
@@ -169,6 +169,10 @@ program
         if (report) log(`indexed ${report.repos.map((r) => `${r.repo}@${r.sha.slice(0, 7)}`).join(', ')} into graph "${org}" in ${(report.ms / 1000).toFixed(1)}s`);
       }
       prUrl = await canonicalPrUrl(ctx.graph, prUrl);
+      if (opts.agent && !config.anthropicApiKey && !claudeCredentialsAvailable()) {
+        log('No model API key (ANTHROPIC_API_KEY): running graph mode. Set a key for agent mode, or pass --no-agent to skip this note.');
+        opts.agent = false;
+      }
       if (opts.agent) {
         const model = new AnthropicModel({
           model: opts.model ?? config.model,
@@ -310,9 +314,10 @@ program
   .command('mcp')
   .description('Serve the Staleproof tools over MCP (stdio). Claude Code: claude mcp add staleproof -- npx -y staleproof mcp')
   .action(async () => {
-    await withGraph(async (store, org) => {
-      log(`staleproof mcp: serving graph "${org}" from ${redact(settings().falkordbUrl)}`);
-      await serveMcp(store.org(org), settings());
+    await withGraph(async (store) => {
+      const org = program.opts<{ org?: string }>().org ?? setting('ORG');
+      log(`staleproof mcp: serving ${org ? `graph "${orgSlug(org)}"` : "each repository's owner graph"} from ${redact(settings().falkordbUrl)}`);
+      await serveMcp(store, settings(), { org: org ? orgSlug(org) : undefined });
     });
   });
 
@@ -330,7 +335,7 @@ program
     const model = defaultModelFactory(config);
     const hosted = opts.hosted || setting('HOSTED') === 'on';
     const workspaces = hosted ? new Workspaces(store, config, store.org(config.org)) : undefined;
-    const app = createApp({ store, config, model, preloaded, workspaces });
+    const app = createApp({ store, config, model, preloaded, workspaces, agentChecksPerDay: Number(setting('AGENT_CHECKS_PER_DAY') ?? 50) });
     serve({ fetch: app.fetch, port: Number(opts.port), hostname: opts.host }, (info) => {
       log(
         `staleproof serve: http://${opts.host}:${info.port} (graph "${config.org}"${hosted ? ', hosted: any public repository on demand' : ''}, ` +
