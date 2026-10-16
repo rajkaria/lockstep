@@ -44,7 +44,9 @@ install() {
     [ -d "$VENV" ] || uv venv -q --python 3.12 "$VENV"
     uv pip install -q --python "$VENV/bin/python" "falkordblite==$FALKORDBLITE_VERSION"
   else
-    command -v python3 >/dev/null 2>&1 || die "need uv or python3 to install falkordblite"
+    command -v python3 >/dev/null 2>&1 || die "need uv (https://docs.astral.sh/uv/) or Python 3.12+ to install falkordblite; or run FalkorDB in Docker: docker run -d -p 6379:6379 falkordb/falkordb"
+    python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' ||
+      die "falkordblite needs Python 3.12+ (python3 is $(python3 -V 2>&1 | cut -d' ' -f2)): install uv (https://docs.astral.sh/uv/), which fetches one, or run FalkorDB in Docker: docker run -d -p 6379:6379 falkordb/falkordb"
     [ -d "$VENV" ] || python3 -m venv "$VENV"
     "$VENV/bin/pip" install -q "falkordblite==$FALKORDBLITE_VERSION"
   fi

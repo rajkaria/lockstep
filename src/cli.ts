@@ -77,7 +77,13 @@ async function connect(config: ReturnType<typeof settings>, autoStart: boolean):
   } catch (err) {
     if (!autoStart || !defaultLocalDb()) throw err;
     log('No FalkorDB on localhost:6379: starting a local one (falkordblite; the first start installs it, which takes a minute).');
-    execFileSync('bash', [join(packageRoot(), 'scripts', 'falkordb-local.sh'), 'start', '6379'], { stdio: ['ignore', 2, 2] });
+    try {
+      execFileSync('bash', [join(packageRoot(), 'scripts', 'falkordb-local.sh'), 'start', '6379'], { stdio: ['ignore', 2, 2] });
+    } catch {
+      throw new Error(
+        'could not start a local FalkorDB (see above). Start one yourself, e.g. docker run -d -p 6379:6379 falkordb/falkordb, or set FALKORDB_URL to a FalkorDB you have.',
+      );
+    }
     return GraphStore.connect(config.falkordbUrl);
   }
 }
