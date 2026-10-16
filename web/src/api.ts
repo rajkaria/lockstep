@@ -54,10 +54,10 @@ async function live<T>(path: string, pick: (s: Snapshot) => T | undefined): Prom
     offline = true;
     return value;
   }
-  throw new Error('the Lockstep API is unreachable and no snapshot is bundled');
+  throw new Error('the Staleproof API is unreachable and no snapshot is bundled');
 }
 
-const SNAPSHOT_ONLY = 'Live checks need the Lockstep API connected to FalkorDB; this deployment is showing a snapshot. Run it locally: npx lockstep-docs serve';
+const SNAPSHOT_ONLY = 'Live checks need the Staleproof API connected to FalkorDB; this deployment is showing a snapshot. Run it locally: npx staleproof serve';
 
 export const api = {
   health: () => live<Health>('/api/health', (s) => ({ ...s.health, agent: { available: false, reason: 'snapshot mode' }, snapshot: { takenAt: s.takenAt } })),

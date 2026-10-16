@@ -1,5 +1,5 @@
-# .github/workflows/lockstep.yml — comment on every pull request with the docs it can falsify.
-name: Lockstep
+# .github/workflows/staleproof.yml — comment on every pull request with the docs it can falsify.
+name: Staleproof
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -12,8 +12,8 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: rajkaria/lockstep/action@main
+      - uses: rajkaria/staleproof/action@main
         with:
-          falkordb-url: ${{ secrets.LOCKSTEP_FALKORDB_URL }}
+          falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
           org: falkordb
           # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}   # optional: the agent judges and proposes edits

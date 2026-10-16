@@ -31,7 +31,7 @@ export class GraphStore {
     } catch (err) {
       throw new Error(
         `cannot reach FalkorDB at ${redact(url)}: ${(err as Error).message}\n` +
-          `Start one locally with \`npx lockstep-docs db start\` (or scripts/falkordb-local.sh start), ` +
+          `Start one locally with \`npx staleproof db start\` (or scripts/falkordb-local.sh start), ` +
           `or set FALKORDB_URL.`,
       );
     }

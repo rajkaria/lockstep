@@ -38,7 +38,7 @@ export async function openDocsPr(patch: DocsPatch, opts: OpenPrOptions): Promise
     await waitForRepo(gh, fork.full_name, opts.pollMs ?? 2000);
     // Bring the fork up to date so the base commit exists in it.
     await gh(`/repos/${fork.full_name}/merge-upstream`, { method: 'POST', body: JSON.stringify({ branch: fork.default_branch }) }).catch(() => undefined);
-    const branch = `lockstep/${patch.pr.repo.replace('/', '-')}-${patch.pr.number}`;
+    const branch = `staleproof/${patch.pr.repo.replace('/', '-')}-${patch.pr.number}`;
     const baseSha = files[0]!.sha;
     await gh(`/repos/${fork.full_name}/git/refs`, {
       method: 'POST',

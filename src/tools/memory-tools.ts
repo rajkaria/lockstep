@@ -30,7 +30,7 @@ export const decisionsForTool: ToolDef<{ target_id: string }, { decisions: Decis
   name: 'decisions_for',
   description:
     'Before judging a doc section, read the maintainers\' decisions that govern it (directly, or through any symbol it mentions or its examples use, within 2 call hops; superseded decisions resolve to the current one) ' +
-    'and the verdicts Lockstep gave this section on earlier pull requests (with whether maintainers accepted them). ' +
+    'and the verdicts Staleproof gave this section on earlier pull requests (with whether maintainers accepted them). ' +
     'A governing decision can mean the section is intentionally as it is: cite it instead of editing.',
   input: z.object({ target_id: z.string().describe('DocSection id (repo:path#anchor) or Symbol id (repo:qualname)') }),
   queries: [Q.decisionsForSection, Q.decisionsForSymbol, Q.priorVerdicts],
@@ -186,7 +186,7 @@ export const proposeEditTool: ToolDef<VerdictInput & { pr_url?: string; new_text
   name: 'propose_edit',
   description:
     'Propose replacement Markdown for a stale doc section (the whole section, heading line included, as read_section returned it). ' +
-    'Refused unless the graph has a path from this pull request\'s changes to the section: Lockstep never edits a paragraph without one. ' +
+    'Refused unless the graph has a path from this pull request\'s changes to the section: Staleproof never edits a paragraph without one. ' +
     'Keep everything that is still true; change only what the PR falsified, or what makes an already-broken example fail (fails before and after: say so). Cite the runs that prove it.',
   input: z.object({
     pr_url: z.string().optional().describe('The pull request; defaults to the one under check in agent mode, required over MCP'),
@@ -203,7 +203,7 @@ export const proposeEditTool: ToolDef<VerdictInput & { pr_url?: string; new_text
     const evidence = await sectionPath(tracer, pr, input.section_id);
     if (!evidence) {
       throw new Error(
-        `refused: no path in the graph from ${pr}'s changes to ${input.section_id}. Lockstep never edits a paragraph without a path; record_verdict instead if it needs no change.`,
+        `refused: no path in the graph from ${pr}'s changes to ${input.section_id}. Staleproof never edits a paragraph without a path; record_verdict instead if it needs no change.`,
       );
     }
     const old = (await tracer.run<{ body: string }>(Q.readSection, { id: input.section_id })).rows[0]?.body ?? '';

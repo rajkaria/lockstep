@@ -244,7 +244,7 @@ export function createApp(opts: AppOptions): Hono {
     app.get('/docs/:page{[a-z0-9-]+\\.md}', (c) => text(join('docs', c.req.param('page')), 'text/markdown')(c));
     app.get('*', async (c) => c.html(await readFile(join(webDir, 'index.html'), 'utf8')));
   } else {
-    app.get('/', (c) => c.text('Lockstep API is running. The web UI is not built (run `npm run build:web`).'));
+    app.get('/', (c) => c.text('Staleproof API is running. The web UI is not built (run `npm run build:web`).'));
   }
   return app;
 }

@@ -1,16 +1,16 @@
 # Indexing
 
-This page explains what `lockstep-docs index` reads from your repositories and how it turns them into the graph: which files count, how Python is parsed, how calls are resolved across repositories, how Markdown sections, inline code and code examples are linked to the code, how repository dependencies are found, and what a re-index keeps and replaces. Read it if you maintain the repositories being indexed, or want to know why an edge exists (or does not).
+This page explains what `staleproof index` reads from your repositories and how it turns them into the graph: which files count, how Python is parsed, how calls are resolved across repositories, how Markdown sections, inline code and code examples are linked to the code, how repository dependencies are found, and what a re-index keeps and replaces. Read it if you maintain the repositories being indexed, or want to know why an edge exists (or does not).
 
 ## Index your organisation
 
 Index every repository that shares code or docs in one command. Cross-repository edges only exist between repositories indexed together.
 
 ```bash
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
-Each argument is `owner/name`, `https://github.com/owner/name` (with or without `.git`) or `git@github.com:owner/name.git`. The graph is the one named by `--org` or `LOCKSTEP_ORG` (default `falkordb`) on the server named by `--db` or `FALKORDB_URL`; see [Configuration](configuration.md). Add `--json` to print the full [index report](#the-index-report) instead of the summary.
+Each argument is `owner/name`, `https://github.com/owner/name` (with or without `.git`) or `git@github.com:owner/name.git`. The graph is the one named by `--org` or `STALEPROOF_ORG` (default `falkordb`) on the server named by `--db` or `FALKORDB_URL`; see [Configuration](configuration.md). Add `--json` to print the full [index report](#the-index-report) instead of the summary.
 
 Progress goes to stderr, one line per phase: `checkout`, `parse`, `write`, `resolve`, `docs` and `done`.
 
@@ -27,14 +27,14 @@ Every run first creates the exact-match indexes the queries rely on (already-exi
 
 ## Checkouts
 
-- **Where**: `<LOCKSTEP_HOME>/repos/<owner>/<name>` (`~/.lockstep` by default).
+- **Where**: `<STALEPROOF_HOME>/repos/<owner>/<name>` (`~/.staleproof` by default).
 - **First time**: `git clone --filter=blob:none` over unauthenticated HTTPS, so only public repositories work. Blobs are fetched when needed.
 - **Later**: `git fetch --prune origin`.
 - **Which commit**: the remote's default branch head (`origin/HEAD`, falling back to `origin/main`), checked out detached. Its SHA becomes `Repo.sha`, the indexed commit that doc URLs, example runs and the docs patch are pinned to.
 - **A specific ref**: `--ref <repo>=<ref>`, repeatable, is passed to `git checkout --detach`. Use `origin/<branch>`, a tag or a commit SHA: a bare branch name refers to the clone's local branch, which later fetches do not move.
 
 ```bash
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/docs --ref FalkorDB/falkordb-py=origin/main
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/docs --ref FalkorDB/falkordb-py=origin/main
 ```
 
 Indexing always needs `git`; there is no GitHub API fallback for it (pull request ingestion has one). Files are listed with `git ls-files`, so untracked build output never enters the graph.

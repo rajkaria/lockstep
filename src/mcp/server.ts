@@ -64,11 +64,11 @@ export function formatResult(r: ToolResult): CallToolResult {
 
 export function createMcpServer(graph: OrgGraph, config: Config): Server {
   const server = new Server(
-    { name: 'lockstep', version: packageVersion() },
+    { name: 'staleproof', version: packageVersion() },
     {
       capabilities: { tools: {} },
       instructions:
-        'Lockstep keeps docs true to code over a FalkorDB graph of an organisation\'s repositories. For a pull request: call impact first, ' +
+        'Staleproof keeps docs true to code over a FalkorDB graph of an organisation\'s repositories. For a pull request: call impact first, ' +
         'read_section and run_example to judge each impacted section, decisions_for before editing, then propose_edit or record_verdict for every impacted section, ' +
         'and docs_patch to get the diff. Every result lists the Cypher it ran.',
     },
@@ -97,7 +97,7 @@ export function createMcpServer(graph: OrgGraph, config: Config): Server {
   return server;
 }
 
-/** `lockstep-docs mcp`: serve the tools over stdio until the client disconnects. */
+/** `staleproof mcp`: serve the tools over stdio until the client disconnects. */
 export async function serveMcp(graph: OrgGraph, config: Config): Promise<void> {
   const server = createMcpServer(graph, config);
   const transport = new StdioServerTransport();

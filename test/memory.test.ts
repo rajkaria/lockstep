@@ -139,7 +139,7 @@ describe('decisions, verdicts and memory (FalkorDB)', () => {
       return new Response(JSON.stringify(body), { status: 200 });
     }) as typeof fetch;
     const opened = await openDocsPr(patch, { token: 't', target: 'fork', fetchImpl, pollMs: 1 });
-    expect(opened).toEqual([{ repo: 'me/mini-docs', url: 'https://github.com/me/mini-docs/pull/1', target: 'fork', branch: 'lockstep/acme-mini-client-7' }]);
+    expect(opened).toEqual([{ repo: 'me/mini-docs', url: 'https://github.com/me/mini-docs/pull/1', target: 'fork', branch: 'staleproof/acme-mini-client-7' }]);
     expect(calls).toContain('POST /repos/me/mini-docs/pulls');
     expect(calls).not.toContain('POST /repos/acme/mini-docs/pulls');
     expect(calls).toContain('PUT /repos/me/mini-docs/contents/docs/getting-started.mdx');

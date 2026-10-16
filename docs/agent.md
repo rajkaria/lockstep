@@ -6,15 +6,15 @@ This page explains how a check runs: the agent loop in [src/agent/loop.ts](../sr
 
 ```bash
 export ANTHROPIC_API_KEY=<your Claude API key>
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262
 ```
 
-The CLI streams the trace as it happens: the check id and model, the "since the last check" summary, the model's reasoning (dimmed), each tool call (`→ impact(pr_url=…)`) and its result (`← <summary>` with the Cypher queries it ran and the time it took), any reminder, and a final line with the status, turns, tool calls, tool order, verdicts and tokens, followed by the model's summary. It ends with `Patch: lockstep-docs patch <pr>   Trace: stored on <check-id>`. The exit code is 1 when the check ends `error` or `refused`.
+The CLI streams the trace as it happens: the check id and model, the "since the last check" summary, the model's reasoning (dimmed), each tool call (`→ impact(pr_url=…)`) and its result (`← <summary>` with the Cypher queries it ran and the time it took), any reminder, and a final line with the status, turns, tool calls, tool order, verdicts and tokens, followed by the model's summary. It ends with `Patch: staleproof patch <pr>   Trace: stored on <check-id>`. The exit code is 1 when the check ends `error` or `refused`.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--model <id>` | `LOCKSTEP_MODEL`, else `claude-sonnet-5-5` | The model |
-| `--effort <level>` | `LOCKSTEP_EFFORT`, else `medium` | `low`, `medium`, `high`, `xhigh` or `max` |
+| `--model <id>` | `STALEPROOF_MODEL`, else `claude-sonnet-5-5` | The model |
+| `--effort <level>` | `STALEPROOF_EFFORT`, else `medium` | `low`, `medium`, `high`, `xhigh` or `max` |
 | `--max-steps <n>` | `40` | Model turns before the loop stops |
 | `--json` | off | Print the whole result (events included) as JSON instead of the trace |
 | `--format markdown` | `text` | Also render the PR comment, with the agent's summary |
@@ -85,7 +85,7 @@ The loop stops after `maxSteps` model turns: 40 by default, `--max-steps` on the
 
 ### Time budget
 
-A serverless function has a hard time limit, so the HTTP server can give each agent check a budget: `LOCKSTEP_CHECK_BUDGET_MS`, which defaults to 240,000 (240 s) when `VERCEL` is set and is unset elsewhere. The budget is checked before each turn; a turn in progress finishes. Past it, the check ends `incomplete`:
+A serverless function has a hard time limit, so the HTTP server can give each agent check a budget: `STALEPROOF_CHECK_BUDGET_MS`, which defaults to 240,000 (240 s) when `VERCEL` is set and is unset elsewhere. The budget is checked before each turn; a turn in progress finishes. Past it, the check ends `incomplete`:
 
 ```text
 Stopped at this server's 240 s time limit after <n> model turns with <m> impacted section(s) still open; the CLI has no time limit.
@@ -145,9 +145,9 @@ The agent was written for Claude and runs on any API that speaks Anthropic's Mes
 
 | Option | Default | Meaning |
 |---|---|---|
-| `model` | required | The model name (`LOCKSTEP_MODEL` or `--model` on the CLI) |
+| `model` | required | The model name (`STALEPROOF_MODEL` or `--model` on the CLI) |
 | `effort` | `medium` | `low`, `medium`, `high`, `xhigh` or `max` |
-| `fallbacks` | `true` | Server-side refusal fallback (Claude API only); `LOCKSTEP_FALLBACKS=off` disables it |
+| `fallbacks` | `true` | Server-side refusal fallback (Claude API only); `STALEPROOF_FALLBACKS=off` disables it |
 | `apiKey` | none | Otherwise the SDK finds credentials itself |
 | `maxTokens` | `32000` | Output limit per turn; set only through the library |
 | `baseURL` | none | The API endpoint (`ANTHROPIC_BASE_URL`) |
@@ -161,7 +161,7 @@ Claude is the default (`claude-sonnet-5-5`). Each turn is a streamed request wit
 - the effort level set explicitly;
 - the system prompt marked for prompt caching;
 - tool inputs streamed as they are generated (the loop validates every input before running it);
-- the server-side refusal fallback, unless `LOCKSTEP_FALLBACKS=off`.
+- the server-side refusal fallback, unless `STALEPROOF_FALLBACKS=off`.
 
 The Claude path is tested against a local fake API only: [test/anthropic-model.test.ts](../test/anthropic-model.test.ts) checks the request it sends and that it reads a streamed answer, without paid calls. The agent runs with a real model have used DeepSeek.
 
@@ -172,10 +172,10 @@ Set `ANTHROPIC_BASE_URL` to a provider's Anthropic-compatible endpoint. Any host
 A Claude model name is refused in compatible mode, because the provider would answer with its own model under that name and every trace would record the wrong model:
 
 ```text
-"claude-sonnet-5-5" is a Claude model name, but the model endpoint is an Anthropic-compatible provider, which would answer with its own model under that name; set LOCKSTEP_MODEL to the provider's model (e.g. deepseek-v4-pro)
+"claude-sonnet-5-5" is a Claude model name, but the model endpoint is an Anthropic-compatible provider, which would answer with its own model under that name; set STALEPROOF_MODEL to the provider's model (e.g. deepseek-v4-pro)
 ```
 
-The default model is `claude-sonnet-5-5`, so setting `ANTHROPIC_BASE_URL` without `LOCKSTEP_MODEL` hits this error.
+The default model is `claude-sonnet-5-5`, so setting `ANTHROPIC_BASE_URL` without `STALEPROOF_MODEL` hits this error.
 
 ### The live demo's DeepSeek setup
 
@@ -184,8 +184,8 @@ The live demo runs `deepseek-v4-pro` through DeepSeek's Anthropic-compatible end
 ```bash
 export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 export ANTHROPIC_API_KEY=<your DeepSeek API key>
-export LOCKSTEP_MODEL=deepseek-v4-pro
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267
+export STALEPROOF_MODEL=deepseek-v4-pro
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267
 ```
 
 For a server, set the same three variables in its environment (see [Deploy](DEPLOY.md)). `GET /api/health` then reports the agent as available, with the model, the effort and the provider's host (`api.deepseek.com`).
@@ -195,7 +195,7 @@ For a server, set the same three variables in its environment (see [Deploy](DEPL
 The agent needs credentials: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, a selected `ANTHROPIC_PROFILE`, a federation rule with an identity token, or an `ant auth login` profile on disk. Without any, agent mode fails before the check starts, instead of falling back to graph mode:
 
 ```text
-the agent needs model API credentials: set ANTHROPIC_API_KEY (or run `ant auth login`) for the Claude API, or ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY and LOCKSTEP_MODEL for an Anthropic-compatible provider such as DeepSeek. Use `check --no-agent` to run the graph tools without a model.
+the agent needs model API credentials: set ANTHROPIC_API_KEY (or run `ant auth login`) for the Claude API, or ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY and STALEPROOF_MODEL for an Anthropic-compatible provider such as DeepSeek. Use `check --no-agent` to run the graph tools without a model.
 ```
 
 An authentication failure during a turn is reported the same way, with the provider's message appended. The HTTP server without credentials offers graph mode only: `POST /api/check` with `mode: 'agent'` answers 409.
@@ -205,7 +205,7 @@ An authentication failure during a turn is reported the same way, with the provi
 Graph mode runs the same tools in a fixed order with no model. It needs no credentials, and it is labelled as graph mode everywhere it is shown (the `Check`'s model is `graph-only (no model)`).
 
 ```bash
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
 ```
 
 The order:
@@ -231,7 +231,7 @@ The summary is the impact and clearance summaries, then `Ran <n> example(s) befo
 `ScriptedModel` is a deterministic stand-in for a model, exported by the library. You give it a function from the conversation so far and the turn number to the turn's content: `thinking`, tool `calls`, or final `text`. A turn with calls ends with `tool_use`, one without with `end_turn`; usage is zero. It records every request it receives in `requests`, so a test can check what the model was shown.
 
 ```ts
-import { GraphStore, loadConfig, runAgentCheck, ScriptedModel } from 'lockstep-docs';
+import { GraphStore, loadConfig, runAgentCheck, ScriptedModel } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -287,7 +287,7 @@ What changed: `impact` pages (40 sections per call, `offset`, and a summary that
 - **Model choices vary between runs**: the same pull request can get a different tool order and different verdicts.
 - **The time budget applies to the HTTP server only**; on Vercel a large check ends incomplete at 240 s.
 - **`max_tokens` is set only through the library**, though the cut-off error says to raise it.
-- **`--effort` on the CLI is passed through unchecked**; only `LOCKSTEP_EFFORT` is validated.
+- **`--effort` on the CLI is passed through unchecked**; only `STALEPROOF_EFFORT` is validated.
 - **The HTTP server has no step, run or hop options**; it uses the defaults.
 
 ## Related

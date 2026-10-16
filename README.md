@@ -1,15 +1,15 @@
-# Lockstep
+# Staleproof
 
-**Every merge can make a tutorial lie — usually in another repository.** Lockstep finds the docs a pull request can
+**Every merge can make a tutorial lie — usually in another repository.** Staleproof finds the docs a pull request can
 make false, proves it by running their examples before and after the change, and proposes the fix with the evidence
 behind each paragraph. It works over a [FalkorDB](https://www.falkordb.com) graph of your code, docs and maintainers'
 decisions, across every repository of the organisation.
 
-[Live demo](https://lockstep-rho.vercel.app) · [Documentation](docs/README.md) · [Quickstart](docs/getting-started.md) ·
-[npm: `lockstep-docs`](https://www.npmjs.com/package/lockstep-docs) · MIT
+[Live demo](https://staleproof.dev) · [Documentation](docs/README.md) · [Quickstart](docs/getting-started.md) ·
+[npm: `staleproof`](https://www.npmjs.com/package/staleproof) · MIT
 
 ```bash
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262
 ```
 
 ## One pull request, end to end
@@ -22,7 +22,7 @@ README's async example constructs `FalkorDB`, whose constructor calls the change
 Is_Cluster  ← called by ─  FalkorDB.__init__  ← used in ─  README.md › "Asynchronous Example"   (falkordb-py)
 ```
 
-Lockstep then ran that example against falkordb-py installed from source at both commits:
+Staleproof then ran that example against falkordb-py installed from source at both commits:
 
 | Commit | Result |
 |---|---|
@@ -82,26 +82,26 @@ Two ways to run a check:
 
 ```bash
 # FalkorDB locally without Docker (falkordblite; uv or pip installs it once)
-npx -y lockstep-docs db start
+npx -y staleproof db start
 
 # Index an organisation's repositories into one graph (index them together so cross-repo calls resolve)
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 
 # Check a pull request: graph mode, or the agent with ANTHROPIC_API_KEY set
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267
 
 # Run one docs example before and after a PR
-npx -y lockstep-docs run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267
+npx -y staleproof run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267
 
 # Record a maintainer decision; the next check cites it instead of re-flagging
-npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__"
+npx -y staleproof decide "The async client keeps positional kwargs until 2.0" --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__"
 
 # The docs fix as a patch (and, with GITHUB_TOKEN, a PR in your fork)
-npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/267 [--open-pr]
+npx -y staleproof patch https://github.com/FalkorDB/falkordb-py/pull/267 [--open-pr]
 
 # The web demo and its API
-npx -y lockstep-docs serve
+npx -y staleproof serve
 ```
 
 The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
@@ -110,11 +110,11 @@ The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
 
 | Integration | One line | Guide |
 |---|---|---|
-| CLI | `npx -y lockstep-docs <command>` — index, check, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
-| GitHub Action | A comment on every PR with the docs it can falsify ([`examples/lockstep.yml`](examples/lockstep.yml)) | [docs/github-action.md](docs/github-action.md) |
-| Claude Code (MCP) | `claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y lockstep-docs mcp` | [docs/mcp.md](docs/mcp.md) |
-| HTTP API | `lockstep-docs serve`: JSON API with checks streamed over server-sent events | [docs/http-api.md](docs/http-api.md) |
-| Node.js library | `import { runGraphCheck } from 'lockstep-docs'` | [docs/library.md](docs/library.md) |
+| CLI | `npx -y staleproof <command>` — index, check, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
+| GitHub Action | A comment on every PR with the docs it can falsify ([`examples/staleproof.yml`](examples/staleproof.yml)) | [docs/github-action.md](docs/github-action.md) |
+| Claude Code (MCP) | `claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y staleproof mcp` | [docs/mcp.md](docs/mcp.md) |
+| HTTP API | `staleproof serve`: JSON API with checks streamed over server-sent events | [docs/http-api.md](docs/http-api.md) |
+| Node.js library | `import { runGraphCheck } from 'staleproof'` | [docs/library.md](docs/library.md) |
 | Self-host | Vercel + FalkorDB Cloud (the live demo), Docker Compose, or a plain VM | [docs/DEPLOY.md](docs/DEPLOY.md) |
 
 Who it is for: SDK and client-library teams whose docs live in another repository, DevRel and docs teams after a
@@ -132,8 +132,8 @@ release, maintainers reviewing pull requests, AI coding agents, and platform tea
 | | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
 
 **For LLMs and coding assistants:** [`llms.txt`](llms.txt) indexes every page. The live site serves the same docs as
-plain text — [`/llms.txt`](https://lockstep-rho.vercel.app/llms.txt),
-[`/llms-full.txt`](https://lockstep-rho.vercel.app/llms-full.txt) (everything in one file) and `/docs/<page>.md` — and
+plain text — [`/llms.txt`](https://staleproof.dev/llms.txt),
+[`/llms-full.txt`](https://staleproof.dev/llms-full.txt) (everything in one file) and `/docs/<page>.md` — and
 every page on the site has a "Copy as Markdown" button.
 
 ## Why the graph is the product
@@ -199,7 +199,7 @@ and the web demo. Parameters, results and errors for each: [docs/tools.md](docs/
 |---|---|
 | **Built and run** (against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
 | **Agent mode, run with a real model** | `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API ([how](docs/agent.md)), on the CLI and the live site. Each PR got a different tool order: #262 impact → read_section → decisions_for → run_example → record_verdict (5 calls, 1 verdict); #267 15 calls, 3 verdicts, each citing its before/after runs; #276 38 calls paging through 43 sections, all with verdicts. The first #276 run stopped at 40 turns with 21 sections open: `impact` capped results at 40 and the model's invented paging arguments were dropped silently; `impact` now pages, unknown arguments are an error, and the loop tracks every impacted section itself. Every verdict on these four PRs is `ok` — they are fixes, and FalkorDB updates its docs in the same PR — so the live graph holds no proposed edit; edits and the docs patch are exercised on the test fixture organisation. |
-| **Live** | [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Published on npm as [`lockstep-docs`](https://www.npmjs.com/package/lockstep-docs). |
+| **Live** | [staleproof.dev](https://staleproof.dev) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Published on npm as [`staleproof`](https://www.npmjs.com/package/staleproof). |
 | **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
 | **Written, not exercised** | The GitHub Action and the Docker image (no Docker on the development machine). |
 | **Designed** | Issue/discussion → symbol links ("asked about but undocumented"); hosted multi-org service. See [VISION.md](VISION.md). |
@@ -426,7 +426,7 @@ MATCH (pr:PullRequest {url: $pr})
 MERGE (r)-[:AT]->(pr)
 ```
 
-**`priorVerdicts`** — What Lockstep concluded about this section on earlier pull requests, and what maintainers did with it.
+**`priorVerdicts`** — What Staleproof concluded about this section on earlier pull requests, and what maintainers did with it.
 
 ```cypher
 MATCH (v:Verdict)-[:ABOUT]->(:DocSection {id: $id})
@@ -583,7 +583,7 @@ Architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## AI assistance
 
-Lockstep was written with Claude Code (Anthropic) as the coding assistant: implementation, tests and docs, under the
+Staleproof was written with Claude Code (Anthropic) as the coding assistant: implementation, tests and docs, under the
 author's direction and review. The graph model, the queries and the design decisions are documented in this
 repository so that every one of them can be explained and checked.
 

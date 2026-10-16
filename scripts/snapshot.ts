@@ -6,7 +6,7 @@
  */
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, setting } from '../src/config.js';
 import { GraphStore } from '../src/graph/client.js';
 import { createApp, DEFAULT_PRELOADED } from '../src/server/app.js';
 
@@ -14,7 +14,7 @@ const root = join(import.meta.dirname, '..');
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
 try {
-  const preloaded = process.env.LOCKSTEP_PRELOADED?.split(',').map((s) => s.trim()).filter(Boolean) ?? DEFAULT_PRELOADED;
+  const preloaded = setting('PRELOADED')?.split(',').map((s) => s.trim()).filter(Boolean) ?? DEFAULT_PRELOADED;
   const app = createApp({ store, config, preloaded, webDir: '/nonexistent' });
   const get = async (path: string) => {
     const res = await app.request(path);

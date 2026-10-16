@@ -9,10 +9,10 @@
  */
 
 /** The product name, written once for the web app (the name may change). */
-export const PRODUCT = 'Lockstep';
-export const SITE_URL = 'https://lockstep-rho.vercel.app';
-export const REPO_URL = 'https://github.com/rajkaria/lockstep';
-export const PACKAGE = 'lockstep-docs';
+export const PRODUCT = 'Staleproof';
+export const SITE_URL = 'https://staleproof.dev';
+export const REPO_URL = 'https://github.com/rajkaria/staleproof';
+export const PACKAGE = 'staleproof';
 
 export type DocGroup = 'Start here' | 'Integrate' | 'How it works' | 'Reference' | 'Operate';
 
@@ -36,7 +36,7 @@ export const DOCS: DocEntry[] = [
     slug: 'introduction',
     file: 'README.md',
     title: 'Introduction',
-    summary: 'What Lockstep is, the problem it solves, and a map of the documentation.',
+    summary: 'What Staleproof is, the problem it solves, and a map of the documentation.',
     group: 'Start here',
   },
   {
@@ -50,14 +50,14 @@ export const DOCS: DocEntry[] = [
     slug: 'use-cases',
     file: 'use-cases.md',
     title: 'Use cases',
-    summary: 'Who uses Lockstep and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, AI coding agents, multi-repo platforms.',
+    summary: 'Who uses Staleproof and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, AI coding agents, multi-repo platforms.',
     group: 'Start here',
   },
   {
     slug: 'cli',
     file: 'cli.md',
     title: 'CLI',
-    summary: 'Every lockstep-docs command and option, with examples and what each prints.',
+    summary: 'Every staleproof command and option, with examples and what each prints.',
     group: 'Integrate',
   },
   {
@@ -71,21 +71,21 @@ export const DOCS: DocEntry[] = [
     slug: 'mcp',
     file: 'mcp.md',
     title: 'MCP server',
-    summary: 'Give Claude Code, Claude Desktop, Cursor or any MCP client the Lockstep tools over stdio.',
+    summary: 'Give Claude Code, Claude Desktop, Cursor or any MCP client the Staleproof tools over stdio.',
     group: 'Integrate',
   },
   {
     slug: 'http-api',
     file: 'http-api.md',
     title: 'HTTP API',
-    summary: 'Every endpoint of lockstep-docs serve: health, stats, streaming checks over SSE, traces, patches, decisions, verdict review.',
+    summary: 'Every endpoint of staleproof serve: health, stats, streaming checks over SSE, traces, patches, decisions, verdict review.',
     group: 'Integrate',
   },
   {
     slug: 'library',
     file: 'library.md',
     title: 'Node.js library',
-    summary: 'Use Lockstep from TypeScript: index, check with or without a model, build patches, embed the API or the MCP server.',
+    summary: 'Use Staleproof from TypeScript: index, check with or without a model, build patches, embed the API or the MCP server.',
     group: 'Integrate',
   },
   {
@@ -141,7 +141,7 @@ export const DOCS: DocEntry[] = [
     slug: 'graph-model',
     file: 'GRAPH-MODEL.md',
     title: 'Graph model and Cypher',
-    summary: 'Every Cypher statement Lockstep sends to FalkorDB, named and explained, generated from the code.',
+    summary: 'Every Cypher statement Staleproof sends to FalkorDB, named and explained, generated from the code.',
     group: 'Reference',
     generated: true,
   },
@@ -149,7 +149,7 @@ export const DOCS: DocEntry[] = [
     slug: 'facts',
     file: 'FACTS.md',
     title: 'Facts from the graph',
-    summary: 'Every number Lockstep quotes about FalkorDB’s repositories, computed from the graph.',
+    summary: 'Every number Staleproof quotes about FalkorDB’s repositories, computed from the graph.',
     group: 'Reference',
     generated: true,
   },
@@ -164,7 +164,7 @@ export const DOCS: DocEntry[] = [
     slug: 'deploy',
     file: 'DEPLOY.md',
     title: 'Deploy',
-    summary: 'Run Lockstep on Vercel with FalkorDB Cloud, on a VM with Docker Compose, or without Docker.',
+    summary: 'Run Staleproof on Vercel with FalkorDB Cloud, on a VM with Docker Compose, or without Docker.',
     group: 'Operate',
   },
   {
@@ -201,7 +201,7 @@ const PITCH =
   `Open source (MIT), published on npm as \`${PACKAGE}\`.`;
 
 /**
- * llms.txt (https://llmstxt.org): what Lockstep is in a paragraph, then one
+ * llms.txt (https://llmstxt.org): what Staleproof is in a paragraph, then one
  * link per page. `link` turns an entry into the URL to put in the list.
  */
 export function llmsTxt(link: (d: DocEntry) => string, extra: { title: string; url: string; summary: string }[] = []): string {
@@ -213,7 +213,7 @@ export function llmsTxt(link: (d: DocEntry) => string, extra: { title: string; u
     'Quick facts for assistants:',
     '',
     `- Run: \`npx -y ${PACKAGE} <command>\` (Node 20+). Commands: \`db start|stop|status\`, \`index <owner/repo...>\`, \`check <pr-url> [--no-agent]\`, \`run <example-id> --pr <url>\`, \`decide <text> --governs <id...>\`, \`verdict accept|reject <id>\`, \`patch <pr-url> [--open-pr]\`, \`mcp\`, \`serve\`, \`facts\`.`,
-    `- MCP (Claude Code): \`claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y ${PACKAGE} mcp\`. Tools: impact, clearance, read_section, run_example, decisions_for, rank_sections, propose_edit, record_verdict, write_decision, docs_patch.`,
+    `- MCP (Claude Code): \`claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y ${PACKAGE} mcp\`. Tools: impact, clearance, read_section, run_example, decisions_for, rank_sections, propose_edit, record_verdict, write_decision, docs_patch.`,
     '- Needs a FalkorDB server (`FALKORDB_URL`, default `falkor://localhost:6379`). Agent mode needs `ANTHROPIC_API_KEY` (Claude, or an Anthropic-compatible provider via `ANTHROPIC_BASE_URL`); without it, graph mode runs the same tools in a fixed order with no model.',
     '- Ids: Symbol `owner/repo:qualname`; DocSection `owner/repo:path#anchor`; CodeExample `owner/repo:path:index`.',
     '- Limits: code repositories are parsed as Python; docs can be any Markdown/MDX; public GitHub repositories only.',

@@ -100,7 +100,7 @@ export async function runExample(graph: OrgGraph, config: Config, example: Examp
       id: `run-${key}-unavailable`,
       ...base,
       status: 'skipped',
-      reason: 'this deployment cannot execute examples (no git/uv sandbox runtime); runs recorded by other Lockstep hosts are answered from the graph',
+      reason: 'this deployment cannot execute examples (no git/uv sandbox runtime); runs recorded by other Staleproof hosts are answered from the graph',
       stdout: '',
       durationMs: 0,
     };

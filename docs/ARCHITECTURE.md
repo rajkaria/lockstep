@@ -60,7 +60,7 @@ scripts/                 falkordb-local.sh (FalkorDB without Docker), seed.sh (i
                          prerender.ts (the home page into web/dist/index.html)
 api/[...route].js        the Vercel Function wrapping server/app.ts
 action/action.yml        composite GitHub Action
-examples/lockstep.yml    workflow using the Action
+examples/staleproof.yml    workflow using the Action
 test/                    vitest suite and the fixture organisation (test/fixtures/org)
 ```
 
@@ -99,9 +99,9 @@ The documentation is the Markdown in `docs/` plus the repository README. One lis
 | `robots.txt`, `sitemap.xml` | `web/llms.ts` | the site root |
 | `llms.txt` in the repository | `npm run docs`, linking to `docs/<file>` | GitHub |
 
-`web/llms.ts` produces the plain-text files; the Vite build emits them into `web/dist`, the Vite dev server serves them, and `lockstep-docs serve` serves them from the built web directory. On Vercel they are static files.
+`web/llms.ts` produces the plain-text files; the Vite build emits them into `web/dist`, the Vite dev server serves them, and `staleproof serve` serves them from the built web directory. On Vercel they are static files.
 
-Some parts are generated from the code and never edited by hand. `npm run docs` ([scripts/gen-docs.ts](../scripts/gen-docs.ts)) rewrites the README's Cypher section, [docs/GRAPH-MODEL.md](GRAPH-MODEL.md), the parameter reference between the generated markers in [docs/tools.md](tools.md), and the repository `llms.txt`. `lockstep-docs facts` writes [docs/FACTS.md](FACTS.md) from the graph. Tests keep them in sync: [test/docs.test.ts](../test/docs.test.ts) fails if the README's Cypher section or GRAPH-MODEL.md drift from `src/graph/queries.ts`, and [test/docs-site.test.ts](../test/docs-site.test.ts) fails if the tools reference or `llms.txt` drift, if a page in `docs/` is missing from the manifest (or the reverse), if a page lacks its single H1 and opening paragraph, or if any relative link or heading anchor in `docs/*.md` or the README is broken.
+Some parts are generated from the code and never edited by hand. `npm run docs` ([scripts/gen-docs.ts](../scripts/gen-docs.ts)) rewrites the README's Cypher section, [docs/GRAPH-MODEL.md](GRAPH-MODEL.md), the parameter reference between the generated markers in [docs/tools.md](tools.md), and the repository `llms.txt`. `staleproof facts` writes [docs/FACTS.md](FACTS.md) from the graph. Tests keep them in sync: [test/docs.test.ts](../test/docs.test.ts) fails if the README's Cypher section or GRAPH-MODEL.md drift from `src/graph/queries.ts`, and [test/docs-site.test.ts](../test/docs-site.test.ts) fails if the tools reference or `llms.txt` drift, if a page in `docs/` is missing from the manifest (or the reverse), if a page lacks its single H1 and opening paragraph, or if any relative link or heading anchor in `docs/*.md` or the README is broken.
 
 To add a page: write `docs/<file>.md` with one H1 and a summary paragraph, add an entry to `DOCS`, then run `npm run docs` and `npm run verify`.
 

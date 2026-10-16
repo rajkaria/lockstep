@@ -5,7 +5,7 @@ This page explains how a docs code example is executed before and after a pull r
 ## Run an example before and after a pull request
 
 ```bash
-npx -y lockstep-docs run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com/FalkorDB/falkordb-py/pull/262
 ```
 
 The argument is a [CodeExample id](concepts.md#ids) (`owner/repo:path:index`); `impact` and `read_section` return them. With `--pr`, the pull request is ingested first if needed, then the example runs at the commit before the pull request and at the pull request. The CLI prints each run (status, side, the `repo@sha` list installed, any stitched fragments, the skip reason or the traceback), then a one-line summary. For this example the summary reads:
@@ -60,7 +60,7 @@ An example is recorded as skipped, with the reason, when it cannot be run honest
 
 1. **Not Python**: the block's language is not Python: `not Python (bash)`, or `not Python (no language tag)`.
 2. **Empty**: `empty example`.
-3. **Needs an LLM provider**: it mentions a provider key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI`, `GROQ_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`), sets `model = "…"` to an OpenAI, Anthropic, GPT, Claude, Gemini, Azure, Groq, Ollama, Bedrock, Vertex, Mistral or Cohere model, or constructs `LiteLLM(`, `LiteLLMEmbedder(`, `OpenAI(`, `AsyncOpenAI(`, `Anthropic(`, `ChatOpenAI(` or `OpenAIEmbeddings(`. Reason: `needs an LLM provider (<what matched>); Lockstep does not hold provider keys`.
+3. **Needs an LLM provider**: it mentions a provider key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI`, `GROQ_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`), sets `model = "…"` to an OpenAI, Anthropic, GPT, Claude, Gemini, Azure, Groq, Ollama, Bedrock, Vertex, Mistral or Cohere model, or constructs `LiteLLM(`, `LiteLLMEmbedder(`, `OpenAI(`, `AsyncOpenAI(`, `Anthropic(`, `ChatOpenAI(` or `OpenAIEmbeddings(`. Reason: `needs an LLM provider (<what matched>); Staleproof does not hold provider keys`.
 4. **Reads a local file**: a quoted file name ending in `.pdf`, `.csv`, `.txt`, `.json`, `.jsonl`, `.doc`, `.docx`, `.htm`, `.html`, `.xls`, `.xlsx`, `.parquet` or `.md`, unless the code also writes one (`.write`, `.dump`, `.to_csv`, `.to_json`). Reason: `reads a local file the docs do not provide (employees.csv)`.
 5. **Placeholders**: a quoted string containing `<your…>` or `<insert…>` (either case), or a quoted `your-…` / `your_…` name ending in `key`, `password`, `token` or `host`. Reason: `contains placeholders to fill in (e.g. "<your-host>")`.
 6. **User input**: it calls `input(`. Reason: `waits for user input`.
@@ -69,7 +69,7 @@ An example is recorded as skipped, with the reason, when it cannot be run honest
 Two more cases come later:
 
 - **Nothing to install** (checked after the next one): `uses no symbol from an indexed repository`.
-- **No sandbox on this host**: a host without `git`, or without both `uv` and `python3` (a serverless function), cannot execute examples. Such a run comes back skipped with `this deployment cannot execute examples (no git/uv sandbox runtime); runs recorded by other Lockstep hosts are answered from the graph`, and is not recorded, so a host that can run it still will.
+- **No sandbox on this host**: a host without `git`, or without both `uv` and `python3` (a serverless function), cannot execute examples. Such a run comes back skipped with `this deployment cannot execute examples (no git/uv sandbox runtime); runs recorded by other Staleproof hosts are answered from the graph`, and is not recorded, so a host that can run it still will.
 
 Skipped runs prove nothing about the docs either way. Of #276's examples, one was skipped for a placeholder and one for not being Python.
 
@@ -89,14 +89,14 @@ Each distinct set of `repo@sha` gets its own virtualenv, built once and reused.
 1. Each repository's source at its commit is extracted from the local clone with `git archive <sha> | tar -x` (missing blobs are fetched from the blob-less clone).
 2. The project directory is the shallowest one containing `pyproject.toml` or `setup.py`, outside `test/`, `tests/`, `docs/`, `example/`, `examples/`, `benchmark/` and `benchmarks/`; the repository root otherwise.
 3. With [uv](https://docs.astral.sh/uv/) on `PATH`: `uv venv --python 3.12`, then `uv pip install` of every project directory into it (uv fetches Python 3.12 if needed). Without uv: `python3 -m venv`, then `pip install`. Creating the venv may take up to 300 s and installing up to 600 s.
-4. A marker file, `.lockstep-ok`, records the finished build; a venv without it is rebuilt.
+4. A marker file, `.staleproof-ok`, records the finished build; a venv without it is rebuilt.
 
 The repositories are installed from source at exact commits; their third-party dependencies resolve from the package index at install time. The cache key includes Python version `3.12`, but only uv pins it: the `python3` fallback uses whatever `python3` is installed. Install uv.
 
-Everything lives under `LOCKSTEP_HOME` (default `~/.lockstep`, `/tmp/lockstep` on Vercel):
+Everything lives under `STALEPROOF_HOME` (default `~/.staleproof`, `/tmp/staleproof` on Vercel):
 
 ```text
-~/.lockstep/
+~/.staleproof/
   repos/<owner>/<name>/               blob-less clones, shared with indexing and pull request ingestion
   cache/github/<owner>/<repo>/pulls/  pull request metadata from the GitHub API
   venvs/<key>/                        one virtualenv per (Python 3.12, sorted repo@sha list)
@@ -112,22 +112,22 @@ Installing a repository from source runs its build code (setup scripts, build ba
 
 Docs examples connect to FalkorDB on `localhost:6379`. Inside the sandbox that address goes to a scratch FalkorDB, never to the server that holds your graph.
 
-- **Managed (default)**: the runner starts a local server on `127.0.0.1:6390` (`LOCKSTEP_SCRATCH_PORT` changes the port) with the same falkordblite binaries as `lockstep-docs db start`. Starting is idempotent.
-- **Your own**: set `LOCKSTEP_SCRATCH_URL` to a separate server (for example the `scratch` service in the Docker Compose file). Only the host and port are used (default port 6379); the scheme and TLS are ignored, and the server must not require a password. A URL with credentials is refused when the configuration loads: `LOCKSTEP_SCRATCH_URL must not carry credentials: docs examples connect to the scratch server without a password`.
+- **Managed (default)**: the runner starts a local server on `127.0.0.1:6390` (`STALEPROOF_SCRATCH_PORT` changes the port) with the same falkordblite binaries as `staleproof db start`. Starting is idempotent.
+- **Your own**: set `STALEPROOF_SCRATCH_URL` to a separate server (for example the `scratch` service in the Docker Compose file). Only the host and port are used (default port 6379); the scheme and TLS are ignored, and the server must not require a password. A URL with credentials is refused when the configuration loads: `STALEPROOF_SCRATCH_URL must not carry credentials: docs examples connect to the scratch server without a password`.
 
 Before every run the scratch server is wiped with `FLUSHALL`, then `GRAPH.UDF FLUSH`. The second clears user-defined function libraries, which `FLUSHALL` keeps: without it, the docs' UDF example passes once and then fails with "already registered", which would read as a pull request breaking it. Servers without UDF support are fine.
 
 The runner refuses to flush the server that holds the org graph. If the scratch host and port match `FALKORDB_URL` (with `localhost` treated as `127.0.0.1`), the run fails with:
 
 ```text
-refusing to flush 127.0.0.1:6379: it is the server holding the org graph (FALKORDB_URL). Point LOCKSTEP_SCRATCH_URL / LOCKSTEP_SCRATCH_PORT at a separate server.
+refusing to flush 127.0.0.1:6379: it is the server holding the org graph (FALKORDB_URL). Point STALEPROOF_SCRATCH_URL / STALEPROOF_SCRATCH_PORT at a separate server.
 ```
 
 Every example starts from an empty server. An example that assumes data the page never creates fails, and that is a finding: the docs site's `GRAPH.EXPLAIN` example explains a query on a graph it never creates, and fails with `Invalid graph operation on empty key` before and after falkordb-py#267.
 
 ## The sandbox
 
-The program runs as `<venv>/bin/python -s example.py` in a fresh temporary directory (`lockstep-run-*` under the system temp directory, deleted afterwards), with empty standard input, in its own process group.
+The program runs as `<venv>/bin/python -s example.py` in a fresh temporary directory (`staleproof-run-*` under the system temp directory, deleted afterwards), with empty standard input, in its own process group.
 
 Two processes touch code from the pull request, and neither gets the server's environment:
 
@@ -137,10 +137,10 @@ Two processes touch code from the pull request, and neither gets the server's en
 | Example | `python -s example.py` | Nothing inherited: only the variables listed below. Network refused except the scratch server |
 
 
-- **Environment**: nothing is inherited, not even the install step's allow-list, so no secrets reach the example. The environment is exactly `PATH=/usr/bin:/bin`, `HOME` and `TMPDIR` set to the temporary directory, `LANG=C.UTF-8`, `PYTHONPATH` pointing at the shim, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, and `LOCKSTEP_SCRATCH_HOST` / `LOCKSTEP_SCRATCH_PORT`.
-- **Network shim**: a `sitecustomize.py` ([python/sitecustomize.py](../python/sitecustomize.py)) loads automatically and patches Python's sockets. A connection to `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `host.docker.internal` or `falkordb` on port 6379 is sent to the scratch server. A connection to the scratch server itself is allowed. Anything else fails with `OSError(ECONNREFUSED)`: `Lockstep sandbox: outbound network is disabled (tried <host>:<port>); only FalkorDB on localhost:6379 is available`.
-- **DNS**: local names resolve to `127.0.0.1`; any other lookup fails with `Lockstep sandbox: DNS is disabled (<host>)`.
-- **Timeout**: `LOCKSTEP_RUN_TIMEOUT_MS` (default 30000). On timeout the whole process group is killed and the run is recorded as `timeout` (`no exit after 30s`).
+- **Environment**: nothing is inherited, not even the install step's allow-list, so no secrets reach the example. The environment is exactly `PATH=/usr/bin:/bin`, `HOME` and `TMPDIR` set to the temporary directory, `LANG=C.UTF-8`, `PYTHONPATH` pointing at the shim, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, and `STALEPROOF_SCRATCH_HOST` / `STALEPROOF_SCRATCH_PORT`.
+- **Network shim**: a `sitecustomize.py` ([python/sitecustomize.py](../python/sitecustomize.py)) loads automatically and patches Python's sockets. A connection to `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `host.docker.internal` or `falkordb` on port 6379 is sent to the scratch server. A connection to the scratch server itself is allowed. Anything else fails with `OSError(ECONNREFUSED)`: `Staleproof sandbox: outbound network is disabled (tried <host>:<port>); only FalkorDB on localhost:6379 is available`.
+- **DNS**: local names resolve to `127.0.0.1`; any other lookup fails with `Staleproof sandbox: DNS is disabled (<host>)`.
+- **Timeout**: `STALEPROOF_RUN_TIMEOUT_MS` (default 30000). On timeout the whole process group is killed and the run is recorded as `timeout` (`no exit after 30s`).
 - **Output**: up to 64 KiB per stream is captured; the stored stdout and traceback keep the last 4000 characters.
 
 ## Statuses and outcomes
@@ -194,7 +194,7 @@ Edges: `(Run)-[:OF]->(CodeExample)`, and `(Run)-[:AT]->(PullRequest)` for every 
 
 ## One run at a time
 
-Runs are serialised by a process-wide queue: the scratch server is shared and flushed before each run, so two runs never overlap in one process. The HTTP server also runs one check at a time. Do not point two Lockstep processes at the same scratch server.
+Runs are serialised by a process-wide queue: the scratch server is shared and flushed before each run, so two runs never overlap in one process. The HTTP server also runs one check at a time. Do not point two Staleproof processes at the same scratch server.
 
 ## Limits
 

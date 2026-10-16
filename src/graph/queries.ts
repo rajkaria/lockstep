@@ -1,5 +1,5 @@
 /**
- * Every Cypher statement Lockstep sends to FalkorDB lives in this file, named.
+ * Every Cypher statement Staleproof sends to FalkorDB lives in this file, named.
  * The README's query section is generated from it, and a test keeps them in sync,
  * so what the docs claim is exactly what runs.
  *
@@ -345,7 +345,7 @@ export const decisionsForSymbol = q('tool', 'decisionsForSymbol', 'Active decisi
          current.created_at AS createdAt, matched.id AS matched, via
 `);
 
-export const priorVerdicts = q('memory', 'priorVerdicts', 'What Lockstep concluded about this section on earlier pull requests, and what maintainers did with it.', `
+export const priorVerdicts = q('memory', 'priorVerdicts', 'What Staleproof concluded about this section on earlier pull requests, and what maintainers did with it.', `
   MATCH (v:Verdict)-[:ABOUT]->(:DocSection {id: $id})
   MATCH (v)-[:FOR]->(pr:PullRequest)
   RETURN v.id AS id, v.verdict AS verdict, v.status AS status, v.reason AS reason, pr.url AS pr, pr.title AS title, v.created_at AS createdAt

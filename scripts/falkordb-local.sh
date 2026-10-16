@@ -2,19 +2,28 @@
 # Run a local FalkorDB without Docker.
 #
 # Uses the redis-server + FalkorDB module binaries shipped in the `falkordblite`
-# Python wheel (needs Python >= 3.12; uv fetches one). Installed once into $LOCKSTEP_HOME/falkordb.
+# Python wheel (needs Python >= 3.12; uv fetches one). Installed once into $STALEPROOF_HOME/falkordb.
 #
 #   scripts/falkordb-local.sh start [port]   # default port 6379
 #   scripts/falkordb-local.sh stop  [port]
 #   scripts/falkordb-local.sh status [port]
 #   scripts/falkordb-local.sh bin            # print the binaries directory
 #
-# Data lives in $LOCKSTEP_HOME/falkordb/data-<port> (RDB snapshots), so the
+# Data lives in $STALEPROOF_HOME/falkordb/data-<port> (RDB snapshots), so the
 # graph — including verdicts and decisions — survives restarts.
 set -euo pipefail
 
-LOCKSTEP_HOME="${LOCKSTEP_HOME:-$HOME/.lockstep}"
-BASE="$LOCKSTEP_HOME/falkordb"
+# STALEPROOF_HOME, else LOCKSTEP_HOME (the former name), else ~/.staleproof (or ~/.lockstep if only it exists).
+if [ -z "${STALEPROOF_HOME:-}" ]; then
+  if [ -n "${LOCKSTEP_HOME:-}" ]; then
+    STALEPROOF_HOME="$LOCKSTEP_HOME"
+  elif [ ! -d "$HOME/.staleproof" ] && [ -d "$HOME/.lockstep" ]; then
+    STALEPROOF_HOME="$HOME/.lockstep"
+  else
+    STALEPROOF_HOME="$HOME/.staleproof"
+  fi
+fi
+BASE="$STALEPROOF_HOME/falkordb"
 VENV="$BASE/venv"
 FALKORDBLITE_VERSION="${FALKORDBLITE_VERSION:-0.10.0}"
 

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Command } from 'commander';
-import { loadConfig, orgSlug } from './config.js';
+import { loadConfig, orgSlug, setting } from './config.js';
 import { collectFacts, factsMarkdown } from './facts.js';
 import { GraphStore, redact } from './graph/client.js';
 import { serveMcp } from './mcp/server.js';
@@ -31,12 +31,12 @@ import type { ToolContext } from './tools/types.js';
 const program = new Command();
 
 program
-  .name('lockstep-docs')
+  .name('staleproof')
   .description(
     'Keep docs true to code: a FalkorDB graph of code, docs and decisions across repositories, and an agent that checks every pull request against it.',
   )
   .version(packageVersion())
-  .option('--org <org>', 'organisation (one graph per org); env LOCKSTEP_ORG')
+  .option('--org <org>', 'organisation (one graph per org); env STALEPROOF_ORG')
   .option('--db <url>', 'FalkorDB URL; env FALKORDB_URL (default falkor://localhost:6379)');
 
 function settings() {
@@ -105,8 +105,8 @@ program
   .description('Check a pull request against the org graph: impacted docs with evidence paths, clearance, ranking')
   .argument('<pr-url>', 'https://github.com/<owner>/<repo>/pull/<n>')
   .option('--no-agent', 'run the graph tools in a fixed order instead of the agent')
-  .option('--model <id>', 'Claude model for the agent (env LOCKSTEP_MODEL)')
-  .option('--effort <level>', 'low | medium | high | xhigh | max (env LOCKSTEP_EFFORT)')
+  .option('--model <id>', 'Claude model for the agent (env STALEPROOF_MODEL)')
+  .option('--effort <level>', 'low | medium | high | xhigh | max (env STALEPROOF_EFFORT)')
   .option('--max-steps <n>', 'model turns before the agent stops', '40')
   .option('--max-hops <n>', 'maximum call hops between a changed symbol and a doc (--no-agent)', '3')
   .option('--runs <n>', 'with --no-agent: run up to n impacted examples before and after the PR', '3')
@@ -136,7 +136,7 @@ program
           },
         });
         if (opts.json) console.log(JSON.stringify(r, null, 2));
-        else console.log(dim(`\nPatch: lockstep-docs patch ${r.pr}   Trace: stored on ${r.checkId}`));
+        else console.log(dim(`\nPatch: staleproof patch ${r.pr}   Trace: stored on ${r.checkId}`));
         if (opts.format === 'markdown') await emitMarkdown(ctx, org, r.pr, opts.out, r.summary);
         if (r.status === 'error' || r.status === 'refused') process.exitCode = 1;
         return;
@@ -249,10 +249,10 @@ program
 
 program
   .command('mcp')
-  .description('Serve the Lockstep tools over MCP (stdio). Claude Code: claude mcp add lockstep -- npx -y lockstep-docs mcp')
+  .description('Serve the Staleproof tools over MCP (stdio). Claude Code: claude mcp add staleproof -- npx -y staleproof mcp')
   .action(async () => {
     await withGraph(async (store, org) => {
-      log(`lockstep mcp: serving graph "${org}" from ${redact(settings().falkordbUrl)}`);
+      log(`staleproof mcp: serving graph "${org}" from ${redact(settings().falkordbUrl)}`);
       await serveMcp(store.org(org), settings());
     });
   });
@@ -262,21 +262,21 @@ program
   .description('Serve the web demo and its API (paste a PR, watch the trace)')
   .option('--port <port>', 'port (env PORT)', process.env.PORT ?? '8080')
   .option('--host <host>', 'interface to bind', process.env.HOST ?? '127.0.0.1')
-  .option('--preload <urls...>', 'pull requests listed on the home page (env LOCKSTEP_PRELOADED, comma-separated)')
+  .option('--preload <urls...>', 'pull requests listed on the home page (env STALEPROOF_PRELOADED, comma-separated)')
   .action(async (opts: { port: string; host: string; preload?: string[] }) => {
     const config = settings();
     const store = await GraphStore.connect(config.falkordbUrl);
-    const preloaded = opts.preload ?? process.env.LOCKSTEP_PRELOADED?.split(',').map((s) => s.trim()).filter(Boolean);
+    const preloaded = opts.preload ?? setting('PRELOADED')?.split(',').map((s) => s.trim()).filter(Boolean);
     const model = defaultModelFactory(config);
     const app = createApp({ store, config, model, preloaded });
     serve({ fetch: app.fetch, port: Number(opts.port), hostname: opts.host }, (info) => {
-      log(`lockstep serve: http://${opts.host}:${info.port} (graph "${config.org}", agent ${model ? `on, ${config.model}` : 'off: no Claude credentials, graph mode only'})`);
+      log(`staleproof serve: http://${opts.host}:${info.port} (graph "${config.org}", agent ${model ? `on, ${config.model}` : 'off: no Claude credentials, graph mode only'})`);
     });
   });
 
 program
   .command('facts')
-  .description('Write FACTS.md: every number Lockstep quotes, computed from the graph')
+  .description('Write FACTS.md: every number Staleproof quotes, computed from the graph')
   .option('--out <file>', 'output file', 'docs/FACTS.md')
   .option('--json', 'print JSON instead of writing Markdown')
   .action(async (opts: { out: string; json?: boolean }) => {
@@ -320,6 +320,6 @@ function log(msg: string): void {
 }
 
 program.parseAsync(process.argv).catch((err: Error) => {
-  console.error(`lockstep-docs: ${err.message}`);
+  console.error(`staleproof: ${err.message}`);
   process.exit(1);
 });

@@ -25,7 +25,7 @@ This page defines the vocabulary the rest of the documentation uses: the graph a
 
 ## The graph
 
-Everything lives in one FalkorDB graph per organisation. The graph name is the organisation slug (`--org` or `LOCKSTEP_ORG`, default `falkordb`), lowercased with anything outside `a-z 0-9 _ -` turned into `-`. Several organisations can share one FalkorDB server; FalkorDB's graphs are the tenancy boundary.
+Everything lives in one FalkorDB graph per organisation. The graph name is the organisation slug (`--org` or `STALEPROOF_ORG`, default `falkordb`), lowercased with anything outside `a-z 0-9 _ -` turned into `-`. Several organisations can share one FalkorDB server; FalkorDB's graphs are the tenancy boundary.
 
 The code and docs half of the graph, which the [impact](#impact) walk follows from right to left:
 
@@ -101,10 +101,10 @@ The anchor is the heading's slug (lowercase, punctuation removed, spaces turned 
 
 The first time any tool or check looks at a pull request, it is ingested: its metadata is read from the GitHub API, the two commits are compared, and the result is written to the graph. Re-checking a pull request never re-diffs it; ingestion happens once per pull request.
 
-- **Which repositories**: the pull request's repository must already be indexed in the graph. Otherwise the error is `<owner/repo> is not indexed in the "<graph>" graph. Run: lockstep-docs index <owner/repo> (plus the repositories that document it).`
+- **Which repositories**: the pull request's repository must already be indexed in the graph. Otherwise the error is `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`
 - **Which commits**: for a merged pull request, the merge commit's first parent (before) and the merge commit (after). For an open or closed-unmerged one, the merge base of base and head (before) and the head (after).
 - **Which files**: only files the indexer classifies as Python library code are diffed. Markdown files the pull request itself edits are recorded as `docs_touched` and shown as "This PR already edits: …".
-- **How**: with `git` in a local clone; on hosts without `git` (serverless), or with `LOCKSTEP_INGEST=github`, through the GitHub API.
+- **How**: with `git` in a local clone; on hosts without `git` (serverless), or with `STALEPROOF_INGEST=github`, through the GitHub API.
 
 Each changed definition is attached to the `PullRequest` node with a `CHANGED_IN` edge that records the [change kind](#change-kinds) and the signatures before and after.
 
@@ -237,7 +237,7 @@ A verdict is the conclusion about one doc section for one pull request. It is a 
 | `governed` | `record_verdict` | A maintainer decision says it stays as it is; must cite the decision |
 | `skipped` | `record_verdict` | It could not be judged; the reason says why |
 
-Every verdict starts with status `proposed`. A maintainer can set it to `accepted` or `rejected` (`lockstep-docs verdict accept|reject <id>`, or the HTTP API). Rejected edits are left out of the docs patch, and later checks see the review when they read the section's history. The evidence path is stored on the verdict; `confidence` is `path`, or `none` when `record_verdict` closed a section with no path. Only doc sections get verdicts, never individual examples. See [Decisions and memory](memory.md).
+Every verdict starts with status `proposed`. A maintainer can set it to `accepted` or `rejected` (`staleproof verdict accept|reject <id>`, or the HTTP API). Rejected edits are left out of the docs patch, and later checks see the review when they read the section's history. The evidence path is stored on the verdict; `confidence` is `path`, or `none` when `record_verdict` closed a section with no path. Only doc sections get verdicts, never individual examples. See [Decisions and memory](memory.md).
 
 ## Decisions
 
@@ -284,7 +284,7 @@ Both modes use the same tools over the same graph and are stored the same way. T
 | "Since the last check" summary | In the first message to the model | Not computed |
 | Statuses | `done`, `incomplete`, `refused`, `error` | `done`, `error` |
 | Model recorded on the Check | The model name, for example `deepseek-v4-pro` | `graph-only (no model)` |
-| Start it | `lockstep-docs check <pr-url>`; `POST /api/check` with `mode: 'agent'` | `lockstep-docs check <pr-url> --no-agent`; `POST /api/check` with `mode: 'graph'` (the server's default without credentials) |
+| Start it | `staleproof check <pr-url>`; `POST /api/check` with `mode: 'agent'` | `staleproof check <pr-url> --no-agent`; `POST /api/check` with `mode: 'graph'` (the server's default without credentials) |
 
 Agent mode fails loudly without credentials; it never falls back to graph mode silently. One more variant: `check --no-agent --format markdown`, which the GitHub Action runs without a model key, renders the PR comment from impact, clearance, ranking and any verdicts already recorded. It stores no Check node and runs no examples. See [The agent](agent.md) for both modes in detail.
 
@@ -292,7 +292,7 @@ Agent mode fails loudly without credentials; it never falls back to graph mode s
 
 The docs patch turns the proposed edits for a pull request into a unified diff and a pull request description. It takes the latest verdict per section across all checks of that pull request and applies the `stale` ones that have replacement text and were not rejected. Each file is read at its indexed commit: from the local clone when there is one (`git show <sha>:<path>`), otherwise from `raw.githubusercontent.com` (serverless hosts). An edit whose section text no longer matches what was indexed, or whose file is missing at that commit, is reported as a conflict instead of applied.
 
-The description lists, per edited section, the reason, the evidence path, the before/after runs and the decisions cited, then the sections checked and left unchanged. Get it with `lockstep-docs patch <pr-url>` (`--out` writes the diff and the description to files), MCP `docs_patch`, or `GET /api/patch`. `patch --open-pr` opens it as a pull request in your fork of each docs repository, and in the upstream repository only with `--upstream`. It needs `GITHUB_TOKEN`.
+The description lists, per edited section, the reason, the evidence path, the before/after runs and the decisions cited, then the sections checked and left unchanged. Get it with `staleproof patch <pr-url>` (`--out` writes the diff and the description to files), MCP `docs_patch`, or `GET /api/patch`. `patch --open-pr` opens it as a pull request in your fork of each docs repository, and in the upstream repository only with `--upstream`. It needs `GITHUB_TOKEN`.
 
 The checks of falkordb-py #262, #267 and #276 ended with `ok` verdicts only: these pull requests are fixes, and no example they reach broke because of them. So no edit has been proposed on that graph, and their patches are empty. Proposing an edit and building the patch from it are exercised on the test suite's fixture organisation.
 

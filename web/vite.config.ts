@@ -7,7 +7,7 @@ import { contentType, llmsFiles } from './llms';
 /** Publishes the docs as plain text (/llms.txt, /llms-full.txt, /docs/<slug>.md) in builds and in the dev server. */
 function llmsPlugin(): Plugin {
   return {
-    name: 'lockstep-llms',
+    name: 'staleproof-llms',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = (req.url ?? '').split('?')[0]!.replace(/^\//, '');

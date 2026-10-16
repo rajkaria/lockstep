@@ -1,8 +1,8 @@
 /**
- * Lockstep as a library: index an organisation into FalkorDB, check pull
+ * Staleproof as a library: index an organisation into FalkorDB, check pull
  * requests with the graph tools or the agent, and serve MCP or the web demo.
  */
-export { loadConfig, orgSlug, DEFAULT_MODEL, type Config } from './config.js';
+export { loadConfig, orgSlug, setting, DEFAULT_MODEL, type Config } from './config.js';
 export { GraphStore, OrgGraph, type QueryResult } from './graph/client.js';
 export * as queries from './graph/queries.js';
 export { indexOrg, type IndexReport } from './indexer/index.js';

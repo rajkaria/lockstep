@@ -1,4 +1,4 @@
-# Lockstep: web demo + API + MCP, with the example runner (uv venvs) inside.
+# Staleproof: web demo + API + MCP, with the example runner (uv venvs) inside.
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -20,7 +20,7 @@ COPY --from=build /app/grammars ./grammars
 COPY --from=build /app/python ./python
 COPY --from=build /app/scripts ./scripts
 ENV NODE_ENV=production \
-    LOCKSTEP_HOME=/data \
+    STALEPROOF_HOME=/data \
     UV_PYTHON_INSTALL_DIR=/data/python \
     UV_CACHE_DIR=/data/uv-cache \
     HOST=0.0.0.0 \

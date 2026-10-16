@@ -1,7 +1,7 @@
 import type { VerdictRow } from '../patch.js';
 import type { ClearedSymbol, ImpactData, RankedSection } from '../tools/graph-tools.js';
 
-export const COMMENT_MARKER = '<!-- lockstep-docs -->';
+export const COMMENT_MARKER = '<!-- staleproof -->';
 
 const SEV = { breaking: '**breaking**', api: '**signature**', behavior: 'behavior' } as const;
 
@@ -20,7 +20,7 @@ export function checkMarkdown(opts: {
   org: string;
 }): string {
   const { impact } = opts;
-  const out: string[] = [COMMENT_MARKER, `### Lockstep: docs this pull request can falsify`, '', opts.summary, ''];
+  const out: string[] = [COMMENT_MARKER, `### Staleproof: docs this pull request can falsify`, '', opts.summary, ''];
   if (impact.sections.length) {
     const order = opts.ranked ? new Map(opts.ranked.map((r, i) => [r.id, i])) : undefined;
     const sections = order ? [...impact.sections].sort((a, b) => (order.get(a.section) ?? 1e9) - (order.get(b.section) ?? 1e9)) : impact.sections;
@@ -42,9 +42,9 @@ export function checkMarkdown(opts: {
     out.push('#### Verdicts', '', '| Verdict | Section | Reason |', '|---|---|---|');
     for (const v of opts.verdicts) out.push(`| ${v.verdict} | [${esc(v.heading)}](${v.url}) | ${esc(v.reason)} |`);
     out.push('');
-    if (opts.verdicts.some((v) => v.verdict === 'stale')) out.push('Proposed edits: `npx lockstep-docs patch ' + impact.pr.url + '`', '');
+    if (opts.verdicts.some((v) => v.verdict === 'stale')) out.push('Proposed edits: `npx staleproof patch ' + impact.pr.url + '`', '');
   }
   if (opts.agentSummary) out.push(opts.agentSummary, '');
-  out.push(`<sub>Lockstep · FalkorDB graph \`${opts.org}\` · ${impact.pr.before.slice(0, 7)}..${impact.pr.after.slice(0, 7)}</sub>`);
+  out.push(`<sub>Staleproof · FalkorDB graph \`${opts.org}\` · ${impact.pr.before.slice(0, 7)}..${impact.pr.after.slice(0, 7)}</sub>`);
   return out.join('\n');
 }

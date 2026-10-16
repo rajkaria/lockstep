@@ -1,16 +1,16 @@
 # CLI
 
-Every `lockstep-docs` command and option, with defaults taken from the code, examples, what each command prints or writes, and its exit status. It is for anyone running Lockstep from a terminal, a script or CI. For the environment variables behind the defaults, see [Configuration](configuration.md).
+Every `staleproof` command and option, with defaults taken from the code, examples, what each command prints or writes, and its exit status. It is for anyone running Staleproof from a terminal, a script or CI. For the environment variables behind the defaults, see [Configuration](configuration.md).
 
 ## Common tasks
 
 ```bash
-npx -y lockstep-docs db start
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262 --no-agent
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
-npx -y lockstep-docs run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com/FalkorDB/falkordb-py/pull/262
-npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof db start
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262 --no-agent
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof patch https://github.com/FalkorDB/falkordb-py/pull/262
 ```
 
 The first line starts a local FalkorDB, the second indexes three repositories into one graph, the third checks a pull request without a model ([graph mode](#check)), the fourth checks it with the agent (needs model credentials), the fifth runs one docs example before and after the pull request, and the last prints the docs patch.
@@ -19,29 +19,29 @@ The first line starts a local FalkorDB, the second indexes three repositories in
 
 | How | Command | Notes |
 |---|---|---|
-| No install | `npx -y lockstep-docs <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y lockstep-docs@0.1.0 <command>`. |
-| Global install | `npm install -g lockstep-docs`, then `lockstep-docs <command>` | Puts `lockstep-docs` on your `PATH`. |
+| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.1.0 <command>`. |
+| Global install | `npm install -g staleproof`, then `staleproof <command>` | Puts `staleproof` on your `PATH`. |
 | From a clone | `npm install && npm run build`, then `node dist/cli.js <command>` | Or `npm run dev -- <command>` to run the TypeScript source. |
 
-All three need Node.js 20 or newer. The package carries the built web UI, the tree-sitter Python grammar, the sandbox shim and `scripts/falkordb-local.sh`. Examples on this page use `npx -y lockstep-docs`; with a global install, drop `npx -y`.
+All three need Node.js 20 or newer. The package carries the built web UI, the tree-sitter Python grammar, the sandbox shim and `scripts/falkordb-local.sh`. Examples on this page use `npx -y staleproof`; with a global install, drop `npx -y`.
 
 ## Global options
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--org <org>` | `LOCKSTEP_ORG`, else `falkordb` | The organisation, which names the graph (one graph per organisation). The value is turned into a slug: trimmed, lowercased, every run of characters other than `a-z`, `0-9`, `_` and `-` replaced by `-`. An empty result fails with `invalid org name`. |
+| `--org <org>` | `STALEPROOF_ORG`, else `falkordb` | The organisation, which names the graph (one graph per organisation). The value is turned into a slug: trimmed, lowercased, every run of characters other than `a-z`, `0-9`, `_` and `-` replaced by `-`. An empty result fails with `invalid org name`. |
 | `--db <url>` | `FALKORDB_URL`, else `falkor://localhost:6379` | The FalkorDB server holding the graph. `falkor://` and `redis://` connect in plain TCP, `falkors://` and `rediss://` with TLS; credentials go in as `user:password@`. |
 | `-V`, `--version` | | Print the package version. |
-| `-h`, `--help` | | Print help. `lockstep-docs <command> --help` or `lockstep-docs help <command>` shows one command. |
+| `-h`, `--help` | | Print help. `staleproof <command> --help` or `staleproof help <command>` shows one command. |
 
-Global options work before or after the command: `lockstep-docs --org encode check …` and `lockstep-docs check … --org encode` are the same. Results go to stdout; progress and log lines go to stderr, so you can pipe `--json` output safely.
+Global options work before or after the command: `staleproof --org encode check …` and `staleproof check … --org encode` are the same. Results go to stdout; progress and log lines go to stderr, so you can pipe `--json` output safely.
 
 ## Exit status
 
 | Status | When |
 |---|---|
 | `0` | The command finished. |
-| `1` | Any error. The message is printed to stderr as `lockstep-docs: <message>`. Typical causes: an invalid pull request URL, a repository not indexed in the graph, FalkorDB unreachable (`cannot reach FalkorDB at <url>: …`), missing model credentials, the GitHub API rate limit, an invalid `LOCKSTEP_EFFORT`. |
+| `1` | Any error. The message is printed to stderr as `staleproof: <message>`. Typical causes: an invalid pull request URL, a repository not indexed in the graph, FalkorDB unreachable (`cannot reach FalkorDB at <url>: …`), missing model credentials, the GitHub API rate limit, an invalid `STALEPROOF_EFFORT`. |
 | `1` | `check` in agent mode, when the check ends with status `error` or `refused`. The output is printed and the check is stored first. `done` and `incomplete` exit `0`. |
 | `1` | `db status`, when no server answers on the port. |
 
@@ -65,14 +65,14 @@ Commands and tools refer to graph nodes by id:
 List the impacted sections and their examples for a pull request, without running any example:
 
 ```bash
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent --runs 0 --json \
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent --runs 0 --json \
   | jq -r '.events[] | select(.type == "tool_result" and .name == "impact" and (.isError | not)) | .data.sections[] | "\(.section)\t\(.examples | join(" "))"'
 ```
 
 This lists the first impact page (up to 40 sections). List the verdicts an agent check recorded:
 
 ```bash
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --json \
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --json \
   | jq -r '.events[] | select(.type == "tool_result" and (.name == "propose_edit" or .name == "record_verdict") and (.isError | not)) | .data | (.id // .ids[])'
 ```
 
@@ -92,7 +92,7 @@ ORDER BY v.created_at DESC
 Clone or update public GitHub repositories and index their code and docs into the organisation's graph.
 
 ```text
-lockstep-docs index [--ref <repo=ref>]... [--json] <repos...>
+staleproof index [--ref <repo=ref>]... [--json] <repos...>
 ```
 
 **Arguments.** `<repos...>`: one or more repositories as `owner/name`, `https://github.com/owner/name` (with or without `.git`) or `git@github.com:owner/name.git`.
@@ -105,12 +105,12 @@ lockstep-docs index [--ref <repo=ref>]... [--json] <repos...>
 **Examples.**
 
 ```bash
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
-npx -y lockstep-docs --org encode index https://github.com/encode/httpx
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs --ref FalkorDB/docs=origin/main --json > index-report.json
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx -y staleproof --org encode index https://github.com/encode/httpx
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs --ref FalkorDB/docs=origin/main --json > index-report.json
 ```
 
-**What it does.** Each repository is cloned blob-less over HTTPS into `<LOCKSTEP_HOME>/repos/<owner>/<name>` the first time and fetched afterwards, then checked out at the ref. Python files are parsed with tree-sitter, calls are resolved across every repository in the command, Markdown/MDX pages become doc sections and code examples linked to the code they mention or call, and dependencies between the repositories are read from `pyproject.toml` and `requirements*.txt` files and from the docs' imports. [Indexing](indexing.md) has the rules.
+**What it does.** Each repository is cloned blob-less over HTTPS into `<STALEPROOF_HOME>/repos/<owner>/<name>` the first time and fetched afterwards, then checked out at the ref. Python files are parsed with tree-sitter, calls are resolved across every repository in the command, Markdown/MDX pages become doc sections and code examples linked to the code they mention or call, and dependencies between the repositories are read from `pyproject.toml` and `requirements*.txt` files and from the docs' imports. [Indexing](indexing.md) has the rules.
 
 **Prints.** On stderr, `checkout  <repo>` per repository, then one line per phase (`parse`, `write`, `resolve`, `docs`, `done`). On stdout, `Indexed <n> repositories into graph "<org>" in <s>s`, then one line per repository (commit, symbols, calls and how many cross repositories, parse errors if any), one line per repository with docs (sections, examples, uses, mentions, links) and one line per dependency, for example `FalkorDB/GraphRAG-SDK → FalkorDB/falkordb-py (declares falkordb)`.
 
@@ -127,7 +127,7 @@ With `--json`: `{org, run, repos: [{repo, sha, files, symbols, calls: {exact, by
 Check a pull request against the graph: with the agent (default) or in graph mode (`--no-agent`), as terminal text, JSON or a pull request comment.
 
 ```text
-lockstep-docs check [options] <pr-url>
+staleproof check [options] <pr-url>
 ```
 
 **Arguments.** `<pr-url>`: `https://github.com/<owner>/<repo>/pull/<n>` (a trailing `/files`, query or fragment is accepted) or `<owner>/<repo>#<n>`. The repository must be indexed in the graph.
@@ -135,8 +135,8 @@ lockstep-docs check [options] <pr-url>
 | Option | Default | Meaning |
 |---|---|---|
 | `--no-agent` | agent mode | Graph mode: run the tools in a fixed order with no model. |
-| `--model <id>` | `LOCKSTEP_MODEL`, else `claude-sonnet-5-5` | Agent mode only. The model to call. With an Anthropic-compatible provider, a `claude-*` name is refused. |
-| `--effort <level>` | `LOCKSTEP_EFFORT`, else `medium` | Agent mode only. `low`, `medium`, `high`, `xhigh` or `max`. The flag is passed to the model as given; only the environment variable is validated. |
+| `--model <id>` | `STALEPROOF_MODEL`, else `claude-sonnet-5-5` | Agent mode only. The model to call. With an Anthropic-compatible provider, a `claude-*` name is refused. |
+| `--effort <level>` | `STALEPROOF_EFFORT`, else `medium` | Agent mode only. `low`, `medium`, `high`, `xhigh` or `max`. The flag is passed to the model as given; only the environment variable is validated. |
 | `--max-steps <n>` | `40` | Agent mode only. Model turns before the loop stops; the check is then `incomplete`. |
 | `--max-hops <n>` | `3` | Graph mode only (not with `--format markdown`). Maximum call hops from a changed symbol to a doc. Clearance always uses 3. |
 | `--runs <n>` | `3` | Graph mode only (not with `--format markdown`). At most this many examples are run before and after the pull request; `0` runs none. |
@@ -156,10 +156,10 @@ lockstep-docs check [options] <pr-url>
 **Examples.**
 
 ```bash
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262 --no-agent
-npx -y lockstep-docs check FalkorDB/falkordb-py#276 --no-agent --runs 0
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --max-steps 60
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent --format markdown --out comment.md
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262 --no-agent
+npx -y staleproof check FalkorDB/falkordb-py#276 --no-agent --runs 0
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --max-steps 60
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent --format markdown --out comment.md
 ```
 
 **Prints, graph mode.** The shape of the output, with placeholders in angle brackets:
@@ -196,7 +196,7 @@ Sections are ordered by the PageRank of their page in the docs' link graph. Only
 **Prints, agent mode.** The trace, one or more lines per event:
 
 ```text
-Lockstep checking <pr> (<model>, chk-<id>)
+Staleproof checking <pr> (<model>, chk-<id>)
 since the last check: <what the graph learned since the previous check>
   <the model's summarised reasoning>
 → impact(pr_url=<pr>)
@@ -207,7 +207,7 @@ since the last check: <what the graph learned since the previous check>
 Done <turns> turns, <calls> tool calls (impact → read_section → …), <v> verdicts, <tokens> tokens
 <the model's closing summary>
 
-Patch: lockstep-docs patch <pr>   Trace: stored on chk-<id>
+Patch: staleproof patch <pr>   Trace: stored on chk-<id>
 ```
 
 The final status is `Done`, `Incomplete`, `refused` or `error`. The check is `Done` only when every impacted section, on every impact page, has a verdict or an edit. When the model stops with sections still open it is reminded up to twice; after that, or after `--max-steps` turns, the check is `Incomplete` and lists the open sections.
@@ -217,7 +217,7 @@ The final status is `Done`, `Incomplete`, `refused` or `error`. The check is `Do
 **Notes.**
 
 - The first check of a pull request reads its metadata from GitHub and diffs it into symbol-level changes. For a merged pull request the commits compared are the merge commit's first parent and the merge commit; for an open one, the merge base and the head. The diff is never redone: re-checking an open pull request after new pushes reuses the first diff.
-- Agent mode needs model credentials: `ANTHROPIC_API_KEY` (or another credential the Anthropic SDK finds) for Claude, or `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` and `LOCKSTEP_MODEL` for an Anthropic-compatible provider. Without them it stops with an error naming those variables. See [The agent](agent.md).
+- Agent mode needs model credentials: `ANTHROPIC_API_KEY` (or another credential the Anthropic SDK finds) for Claude, or `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` and `STALEPROOF_MODEL` for an Anthropic-compatible provider. Without them it stops with an error naming those variables. See [The agent](agent.md).
 - The CLI puts no time limit on an agent check. A large pull request takes minutes: a 43-section check takes about 6 minutes.
 - Graph mode samples: it ranks the first impact page and runs at most `--runs` examples. It never judges sections or writes verdicts.
 - Two kinds of change are reported more broadly than they happened. A moved or renamed file reports every definition in it as removed and added. A module that stops importing a name from its own package reports that name as a removed export (`BREAKING`), even when the import was not a public re-export.
@@ -227,7 +227,7 @@ The final status is `Done`, `Incomplete`, `refused` or `error`. The check is `Do
 Run one docs code example in the sandbox, once at the indexed commits or before and after a pull request.
 
 ```text
-lockstep-docs run [--pr <url>] [--fresh] [--json] <example-id>
+staleproof run [--pr <url>] [--fresh] [--json] <example-id>
 ```
 
 **Arguments.** `<example-id>`: a CodeExample id, `<owner>/<repo>:<path>:<index>`.
@@ -241,9 +241,9 @@ lockstep-docs run [--pr <url>] [--fresh] [--json] <example-id>
 **Examples.**
 
 ```bash
-npx -y lockstep-docs run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com/FalkorDB/falkordb-py/pull/262
-npx -y lockstep-docs run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267 --fresh
-npx -y lockstep-docs run "FalkorDB/docs:commands/graph.profile.mdx:0" --json
+npx -y staleproof run "FalkorDB/falkordb-py:README.md:4" --pr https://github.com/FalkorDB/falkordb-py/pull/262
+npx -y staleproof run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267 --fresh
+npx -y staleproof run "FalkorDB/docs:commands/graph.profile.mdx:0" --json
 ```
 
 **Prints.** The example id and URL; per run, a status line (`PASS`, `FAIL`, `TIMEOUT`, `SKIPPED` or `ERROR`, then `before` or `after`, the `repo@sha` list installed, and `(recorded)` when answered from the graph), the examples stitched in front of it, the reason for a skip or error, and the traceback of a failure; then a one-line summary. The verdict is one of:
@@ -262,7 +262,7 @@ npx -y lockstep-docs run "FalkorDB/docs:commands/graph.profile.mdx:0" --json
 **Notes.**
 
 - Examples are skipped, with the reason recorded, when they are not Python, need an LLM provider key, read a local file the docs do not provide, contain placeholders to fill in, wait for input, or call an external service. A fragment that uses names an earlier block on the page defines is run with those blocks stitched in front of it. See [Example runner](example-runner.md).
-- Each run gets a fresh virtualenv per set of commits (cached), a scratch FalkorDB that is flushed first, no network other than that server, and a timeout (`LOCKSTEP_RUN_TIMEOUT_MS`, default 30 seconds). Runs execute one at a time.
+- Each run gets a fresh virtualenv per set of commits (cached), a scratch FalkorDB that is flushed first, no network other than that server, and a timeout (`STALEPROOF_RUN_TIMEOUT_MS`, default 30 seconds). Runs execute one at a time.
 - Needs `git`, `tar`, and uv or `python3`. On a host without them, runs are reported as skipped and not recorded; runs recorded by other hosts are still answered from the graph.
 
 ### `decide`
@@ -270,7 +270,7 @@ npx -y lockstep-docs run "FalkorDB/docs:commands/graph.profile.mdx:0" --json
 Record a maintainer decision. Future agent checks cite it instead of re-flagging the sections it governs.
 
 ```text
-lockstep-docs decide <text> --governs <id...> [--source <url>] [--author <name>] [--supersedes <decision-id>]
+staleproof decide <text> --governs <id...> [--source <url>] [--author <name>] [--supersedes <decision-id>]
 ```
 
 **Arguments.** `<text>`: the decision, in one sentence.
@@ -285,10 +285,10 @@ lockstep-docs decide <text> --governs <id...> [--source <url>] [--author <name>]
 **Examples.**
 
 ```bash
-npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" \
+npx -y staleproof decide "The async client keeps positional kwargs until 2.0" \
   --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__" \
   --source https://github.com/FalkorDB/falkordb-py/issues/<n> --author "<maintainer>"
-npx -y lockstep-docs decide "The async client drops positional kwargs in 2.0" \
+npx -y staleproof decide "The async client drops positional kwargs in 2.0" \
   --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__" --supersedes dec-<id>
 ```
 
@@ -301,7 +301,7 @@ npx -y lockstep-docs decide "The async client drops positional kwargs in 2.0" \
 Accept or reject a verdict. Rejected edits are left out of the patch, and later checks see the review.
 
 ```text
-lockstep-docs verdict [--by <name>] <accept|reject> <verdict-id>
+staleproof verdict [--by <name>] <accept|reject> <verdict-id>
 ```
 
 | Option | Default | Meaning |
@@ -311,7 +311,7 @@ lockstep-docs verdict [--by <name>] <accept|reject> <verdict-id>
 **Example.**
 
 ```bash
-npx -y lockstep-docs verdict accept ver-<id> --by "<maintainer>"
+npx -y staleproof verdict accept ver-<id> --by "<maintainer>"
 ```
 
 **Prints.** `<verdict-id> accepted` or `<verdict-id> rejected`. Sets the verdict's `status`, `reviewed_by` and `reviewed_at`. Fails with `action must be accept or reject` or `no verdict <id>`.
@@ -321,7 +321,7 @@ npx -y lockstep-docs verdict accept ver-<id> --by "<maintainer>"
 Print the docs patch for a checked pull request: a unified diff and a pull request description with the evidence behind each edit. Optionally open it as a pull request.
 
 ```text
-lockstep-docs patch [--out <file>] [--open-pr [--upstream]] <pr-url>
+staleproof patch [--out <file>] [--open-pr [--upstream]] <pr-url>
 ```
 
 | Option | Default | Meaning |
@@ -333,9 +333,9 @@ lockstep-docs patch [--out <file>] [--open-pr [--upstream]] <pr-url>
 **Examples.**
 
 ```bash
-npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/267
-npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/267 --out docs-267.diff
-npx -y lockstep-docs patch <pr-url> --open-pr
+npx -y staleproof patch https://github.com/FalkorDB/falkordb-py/pull/267
+npx -y staleproof patch https://github.com/FalkorDB/falkordb-py/pull/267 --out docs-267.diff
+npx -y staleproof patch <pr-url> --open-pr
 ```
 
 **Prints.** The diff, or `(no proposed edits)`, then `# docs: update for <repo>#<number> (<pull request title>)` and the description: per edited section, the reason, the evidence path, the example runs and the cited decisions; then the sections checked and left unchanged with their verdicts; then any edit that could not be applied. With `--out`, it writes the two files and logs `wrote <file> and <file>.md (<n> files)` on stderr. With `--open-pr`, it prints `opened <url> (fork)` or `opened <url> (upstream)` per docs repository.
@@ -345,7 +345,7 @@ npx -y lockstep-docs patch <pr-url> --open-pr
 - The patch uses the latest verdict on each section from any check, MCP client or API call. An edit is a `stale` verdict with replacement text that a maintainer has not rejected. Graph mode writes no verdicts, so a graph-mode check alone gives an empty patch.
 - Each file is read at the commit the graph indexed, from the local clone when there is one, otherwise from `raw.githubusercontent.com`. An edit whose section changed since indexing, or whose file is missing at that commit, is not applied and is listed instead. Sections longer than 8,000 characters always conflict, because the graph stores only their first 8,000 characters.
 - Diff paths are relative to each docs repository. When the patch spans several repositories, apply each file's part in its own repository with `git apply`, or use `--open-pr`.
-- `--open-pr` forks each docs repository into your account (always, even with `--upstream`), syncs the fork, creates or resets the branch `lockstep/<owner>-<repo>-<number>` (named after the code pull request) at the indexed commit, commits each edited file, and opens the pull request. It fails with `opening a pull request needs GITHUB_TOKEN` without a token and with `the patch is empty: no proposed edits to open a pull request for` when there is nothing to open.
+- `--open-pr` forks each docs repository into your account (always, even with `--upstream`), syncs the fork, creates or resets the branch `staleproof/<owner>-<repo>-<number>` (named after the code pull request) at the indexed commit, commits each edited file, and opens the pull request. It fails with `opening a pull request needs GITHUB_TOKEN` without a token and with `the patch is empty: no proposed edits to open a pull request for` when there is nothing to open.
 - Fails with `<url> has not been checked` for a pull request the graph has never read.
 
 ### `mcp`
@@ -353,47 +353,47 @@ npx -y lockstep-docs patch <pr-url> --open-pr
 Serve the tools over the Model Context Protocol on stdio.
 
 ```text
-lockstep-docs mcp
+staleproof mcp
 ```
 
 **Example.**
 
 ```bash
-claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -e LOCKSTEP_ORG=falkordb -- npx -y lockstep-docs mcp
+claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
 ```
 
-**Prints.** On stderr, `lockstep mcp: serving graph "<org>" from <url>` with any password masked. Stdout carries the protocol. It connects to FalkorDB at start and exits with an error if the server cannot be reached. [MCP server](mcp.md) covers clients, tools and security.
+**Prints.** On stderr, `staleproof mcp: serving graph "<org>" from <url>` with any password masked. Stdout carries the protocol. It connects to FalkorDB at start and exits with an error if the server cannot be reached. [MCP server](mcp.md) covers clients, tools and security.
 
 ### `serve`
 
 Serve the web UI and the HTTP API.
 
 ```text
-lockstep-docs serve [--port <port>] [--host <host>] [--preload <urls...>]
+staleproof serve [--port <port>] [--host <host>] [--preload <urls...>]
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `--port <port>` | `PORT`, else `8080` | Port to listen on. |
 | `--host <host>` | `HOST`, else `127.0.0.1` | Interface to bind. `0.0.0.0` accepts connections from other machines. |
-| `--preload <urls...>` | `LOCKSTEP_PRELOADED` (comma-separated), else falkordb-py #262, #267 and #276 | Pull requests listed on the home page. |
+| `--preload <urls...>` | `STALEPROOF_PRELOADED` (comma-separated), else falkordb-py #262, #267 and #276 | Pull requests listed on the home page. |
 
 **Example.**
 
 ```bash
-npx -y lockstep-docs serve --host 0.0.0.0 --port 8080
+npx -y staleproof serve --host 0.0.0.0 --port 8080
 ```
 
-**Prints.** On stderr, `lockstep serve: http://<host>:<port> (graph "<org>", agent on, <model>)`, or `agent off: no Claude credentials, graph mode only` when no model credentials are found. Agent mode is on when `ANTHROPIC_API_KEY` or another credential the Anthropic SDK finds is present.
+**Prints.** On stderr, `staleproof serve: http://<host>:<port> (graph "<org>", agent on, <model>)`, or `agent off: no Claude credentials, graph mode only` when no model credentials are found. Agent mode is on when `ANTHROPIC_API_KEY` or another credential the Anthropic SDK finds is present.
 
-**Notes.** The server runs one check at a time and queues the rest. Its POST endpoints are rate-limited per client (30 an hour) and it has no authentication. An agent check in the server has no time limit unless `LOCKSTEP_CHECK_BUDGET_MS` is set (it defaults to 240 seconds on Vercel). See [HTTP API](http-api.md) and [Deploy](DEPLOY.md).
+**Notes.** The server runs one check at a time and queues the rest. Its POST endpoints are rate-limited per client (30 an hour) and it has no authentication. An agent check in the server has no time limit unless `STALEPROOF_CHECK_BUDGET_MS` is set (it defaults to 240 seconds on Vercel). See [HTTP API](http-api.md) and [Deploy](DEPLOY.md).
 
 ### `facts`
 
-Compute every number Lockstep quotes from the graph and write it as Markdown.
+Compute every number Staleproof quotes from the graph and write it as Markdown.
 
 ```text
-lockstep-docs facts [--out <file>] [--json]
+staleproof facts [--out <file>] [--json]
 ```
 
 | Option | Default | Meaning |
@@ -404,7 +404,7 @@ lockstep-docs facts [--out <file>] [--json]
 **Example.**
 
 ```bash
-npx -y lockstep-docs facts --out FACTS.md
+npx -y staleproof facts --out FACTS.md
 ```
 
 **Prints.** `wrote <file>` on stderr. The file lists the repositories, node and edge counts, resolution quality, dependencies between repositories, sample cross-repository paths, the pull requests checked, the grep baseline per pull request, the example runs (the latest attempt of each) and the impact query's server-side timing. [Facts from the graph](FACTS.md) is this file for FalkorDB's repositories.
@@ -414,7 +414,7 @@ npx -y lockstep-docs facts --out FACTS.md
 Run a local FalkorDB without Docker, from the redis-server and FalkorDB module binaries in the `falkordblite` Python wheel.
 
 ```text
-lockstep-docs db [--port <port>] <start|stop|status>
+staleproof db [--port <port>] <start|stop|status>
 ```
 
 | Option | Default | Meaning |
@@ -424,16 +424,16 @@ lockstep-docs db [--port <port>] <start|stop|status>
 **Examples.**
 
 ```bash
-npx -y lockstep-docs db start
-npx -y lockstep-docs db status
-npx -y lockstep-docs db stop --port 6390
+npx -y staleproof db start
+npx -y staleproof db status
+npx -y staleproof db stop --port 6390
 ```
 
-**What it does.** Runs `bash scripts/falkordb-local.sh <action> <port>` from the package. The first use installs `falkordblite==0.10.0` (override with `FALKORDBLITE_VERSION`) into `$LOCKSTEP_HOME/falkordb/venv` with uv, or with `python3 -m venv` and pip when uv is missing; the wheel needs Python 3.12 or newer. `start` launches a daemonised server bound to `127.0.0.1`, keeping RDB snapshots in `$LOCKSTEP_HOME/falkordb/data-<port>` (saved every 60 seconds after a change, and on `stop`).
+**What it does.** Runs `bash scripts/falkordb-local.sh <action> <port>` from the package. The first use installs `falkordblite==0.10.0` (override with `FALKORDBLITE_VERSION`) into `$STALEPROOF_HOME/falkordb/venv` with uv, or with `python3 -m venv` and pip when uv is missing; the wheel needs Python 3.12 or newer. `start` launches a daemonised server bound to `127.0.0.1`, keeping RDB snapshots in `$STALEPROOF_HOME/falkordb/data-<port>` (saved every 60 seconds after a change, and on `stop`).
 
-**Prints.** `falkordb-local: running on port <port> (data: <dir>)`, `falkordb-local: already running on port <port>`, `falkordb-local: stopped port <port>`, `falkordb-local: nothing running on port <port>`, or for `status`, `running on port <port>` or `not running on port <port>` (exit status 1). When the script fails, the CLI prints `lockstep-docs: Command failed: bash …` and exits with 1. The undocumented action `bin` prints the directory holding `redis-server` and `redis-cli`.
+**Prints.** `falkordb-local: running on port <port> (data: <dir>)`, `falkordb-local: already running on port <port>`, `falkordb-local: stopped port <port>`, `falkordb-local: nothing running on port <port>`, or for `status`, `running on port <port>` or `not running on port <port>` (exit status 1). When the script fails, the CLI prints `staleproof: Command failed: bash …` and exits with 1. The undocumented action `bin` prints the directory holding `redis-server` and `redis-cli`.
 
-**Notes.** The scratch server that examples run against is started with the same script on port 6390, unless `LOCKSTEP_SCRATCH_URL` names another server.
+**Notes.** The scratch server that examples run against is started with the same script on port 6390, unless `STALEPROOF_SCRATCH_URL` names another server.
 
 ## Environment variables
 
@@ -442,12 +442,12 @@ The variables most commands read. [Configuration](configuration.md) lists all of
 | Variable | Default | Used for |
 |---|---|---|
 | `FALKORDB_URL` | `falkor://localhost:6379` | The graph's server (`--db`). |
-| `LOCKSTEP_ORG` | `falkordb` | The graph name (`--org`). |
-| `LOCKSTEP_HOME` | `~/.lockstep` | Clones, the GitHub response cache, virtualenvs, the local FalkorDB. |
+| `STALEPROOF_ORG` | `falkordb` | The graph name (`--org`). |
+| `STALEPROOF_HOME` | `~/.staleproof` | Clones, the GitHub response cache, virtualenvs, the local FalkorDB. |
 | `GITHUB_TOKEN`, else `GH_TOKEN` | none | GitHub API requests (60 an hour without a token); required by `patch --open-pr`. |
-| `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `LOCKSTEP_MODEL`, `LOCKSTEP_EFFORT` | none, none, `claude-sonnet-5-5`, `medium` | Agent mode. |
-| `LOCKSTEP_SCRATCH_URL`, `LOCKSTEP_SCRATCH_PORT` | none, `6390` | The disposable FalkorDB examples run against. A URL with credentials is refused. |
-| `LOCKSTEP_RUN_TIMEOUT_MS` | `30000` | Timeout for each example run. |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `STALEPROOF_MODEL`, `STALEPROOF_EFFORT` | none, none, `claude-sonnet-5-5`, `medium` | Agent mode. |
+| `STALEPROOF_SCRATCH_URL`, `STALEPROOF_SCRATCH_PORT` | none, `6390` | The disposable FalkorDB examples run against. A URL with credentials is refused. |
+| `STALEPROOF_RUN_TIMEOUT_MS` | `30000` | Timeout for each example run. |
 
 ## Related
 

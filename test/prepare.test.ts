@@ -58,7 +58,7 @@ describe('installEnv', () => {
     const { installEnv } = await import('../src/runner/sandbox.js');
     const env = installEnv({
       PATH: '/usr/bin', HOME: '/home/x', LANG: 'C.UTF-8', UV_CACHE_DIR: '/c', PIP_INDEX_URL: 'https://pypi.org/simple', HTTPS_PROXY: 'http://p:3128', SSL_CERT_FILE: '/etc/ssl/cert.pem',
-      FALKORDB_URL: 'falkor://user:secret@host:6379', ANTHROPIC_API_KEY: 'sk-x', ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic', GITHUB_TOKEN: 'ghp_x', LOCKSTEP_MODEL: 'm', VIRTUAL_ENV: '/v', AWS_SECRET_ACCESS_KEY: 'a', NODE_OPTIONS: '--x',
+      FALKORDB_URL: 'falkor://user:secret@host:6379', ANTHROPIC_API_KEY: 'sk-x', ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic', GITHUB_TOKEN: 'ghp_x', STALEPROOF_MODEL: 'm', VIRTUAL_ENV: '/v', AWS_SECRET_ACCESS_KEY: 'a', NODE_OPTIONS: '--x',
     });
     expect(Object.keys(env).sort()).toEqual(['HOME', 'HTTPS_PROXY', 'LANG', 'PATH', 'PIP_INDEX_URL', 'SSL_CERT_FILE', 'UV_CACHE_DIR']);
   });
@@ -89,14 +89,14 @@ describe('scratch guard', () => {
     const { scratchIsOrgServer } = await import('../src/runner/scratch.js');
     const { loadConfig } = await import('../src/config.js');
     expect(scratchIsOrgServer(loadConfig({ FALKORDB_URL: 'falkor://localhost:6390' }))).toBe(true);
-    expect(scratchIsOrgServer(loadConfig({ FALKORDB_URL: 'falkor://user:pw@127.0.0.1:6379', LOCKSTEP_SCRATCH_PORT: '6379' }))).toBe(true);
+    expect(scratchIsOrgServer(loadConfig({ FALKORDB_URL: 'falkor://user:pw@127.0.0.1:6379', STALEPROOF_SCRATCH_PORT: '6379' }))).toBe(true);
     expect(scratchIsOrgServer(loadConfig({}))).toBe(false);
   });
 
   it('reads a scratch URL without credentials and refuses one with them', async () => {
     const { loadConfig } = await import('../src/config.js');
-    expect(loadConfig({ LOCKSTEP_SCRATCH_URL: 'redis://scratch.internal:6400' }).scratch).toEqual({ host: 'scratch.internal', port: 6400, managed: false });
-    expect(() => loadConfig({ LOCKSTEP_SCRATCH_URL: 'redis://user:pw@scratch.internal:6400' })).toThrow(/must not carry credentials/);
+    expect(loadConfig({ STALEPROOF_SCRATCH_URL: 'redis://scratch.internal:6400' }).scratch).toEqual({ host: 'scratch.internal', port: 6400, managed: false });
+    expect(() => loadConfig({ STALEPROOF_SCRATCH_URL: 'redis://user:pw@scratch.internal:6400' })).toThrow(/must not carry credentials/);
   });
 
   it('removes UDF libraries between runs (FLUSHALL keeps them)', async () => {
@@ -104,7 +104,7 @@ describe('scratch guard', () => {
     const { loadConfig } = await import('../src/config.js');
     const { FalkorDB } = await import('falkordb');
     // Its own server: flushing the shared test server would wipe other tests' graphs.
-    const base = loadConfig({ LOCKSTEP_SCRATCH_PORT: '6392' });
+    const base = loadConfig({ STALEPROOF_SCRATCH_PORT: '6392' });
     const config = { ...base, scratch: { ...base.scratch, managed: true } };
     await ensureScratchDb(config);
     const db = await FalkorDB.connect({ socket: { host: config.scratch.host, port: config.scratch.port } });

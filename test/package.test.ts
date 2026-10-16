@@ -11,7 +11,7 @@ describe('package', () => {
   it('ships every runtime asset the code loads from the package root', async () => {
     const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { files: string[]; bin: Record<string, string>; dependencies: Record<string, string> };
     for (const f of ['dist', 'web/dist', 'grammars', 'python', 'scripts/falkordb-local.sh']) expect(pkg.files).toContain(f);
-    expect(pkg.bin['lockstep-docs']).toBe('dist/cli.js');
+    expect(pkg.bin['staleproof']).toBe('dist/cli.js');
     // Runtime imports must be dependencies, not devDependencies.
     for (const dep of ['falkordb', 'web-tree-sitter', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'hono', '@hono/node-server', 'zod', 'commander', 'diff', 'smol-toml']) {
       expect(pkg.dependencies[dep], dep).toBeDefined();
@@ -20,7 +20,7 @@ describe('package', () => {
   });
 
   it('serves the built web UI for any non-API route', async () => {
-    const web = await mkdtemp(join(tmpdir(), 'lockstep-web-'));
+    const web = await mkdtemp(join(tmpdir(), 'staleproof-web-'));
     await writeFile(join(web, 'index.html'), '<div id="root"></div>');
     const { store, done } = await testGraph('pkg');
     try {
@@ -33,7 +33,7 @@ describe('package', () => {
   });
 
   it('serves the docs as plain text for LLMs from the built web UI', async () => {
-    const web = await mkdtemp(join(tmpdir(), 'lockstep-web-'));
+    const web = await mkdtemp(join(tmpdir(), 'staleproof-web-'));
     await writeFile(join(web, 'index.html'), '<div id="root"></div>');
     await writeFile(join(web, 'llms.txt'), '# Docs\n\n> one line’s summary\n');
     await writeFile(join(web, 'llms-full.txt'), '# Everything\n');

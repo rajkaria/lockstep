@@ -1,4 +1,4 @@
-"""Lockstep sandbox shim, loaded automatically through PYTHONPATH.
+"""Staleproof sandbox shim, loaded automatically through PYTHONPATH.
 
 Docs examples connect to FalkorDB on localhost:6379. Inside the sandbox that
 address is remapped to a scratch FalkorDB, and every other outbound connection
@@ -9,9 +9,13 @@ import errno
 import os
 import socket
 
-_SCRATCH_HOST = os.environ.get("LOCKSTEP_SCRATCH_HOST", "127.0.0.1")
-_SCRATCH_PORT = int(os.environ.get("LOCKSTEP_SCRATCH_PORT", "6390"))
-_DB_PORTS = {int(p) for p in os.environ.get("LOCKSTEP_DB_PORTS", "6379").split(",") if p}
+def _setting(name, default):
+    return os.environ.get("STALEPROOF_" + name, os.environ.get("LOCKSTEP_" + name, default))
+
+
+_SCRATCH_HOST = _setting("SCRATCH_HOST", "127.0.0.1")
+_SCRATCH_PORT = int(_setting("SCRATCH_PORT", "6390"))
+_DB_PORTS = {int(p) for p in _setting("DB_PORTS", "6379").split(",") if p}
 _LOCAL = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal", "falkordb", ""}
 
 _real_connect = socket.socket.connect
@@ -28,7 +32,7 @@ def _remap(address):
         return (_SCRATCH_HOST, _SCRATCH_PORT)
     raise OSError(
         errno.ECONNREFUSED,
-        "Lockstep sandbox: outbound network is disabled (tried %s:%s); only FalkorDB on localhost:6379 is available" % (host, port),
+        "Staleproof sandbox: outbound network is disabled (tried %s:%s); only FalkorDB on localhost:6379 is available" % (host, port),
     )
 
 
@@ -58,7 +62,7 @@ def _getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     # Resolve every name to IPv4 loopback so nothing tries IPv6 or real DNS.
     if host in _LOCAL or host is None:
         return _real_getaddrinfo("127.0.0.1", port, socket.AF_INET, type, proto, flags)
-    raise socket.gaierror(socket.EAI_NONAME, "Lockstep sandbox: DNS is disabled (%s)" % host)
+    raise socket.gaierror(socket.EAI_NONAME, "Staleproof sandbox: DNS is disabled (%s)" % host)
 
 
 socket.getaddrinfo = _getaddrinfo

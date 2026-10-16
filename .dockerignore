@@ -6,4 +6,4 @@ web/dist
 .claude
 scratch
 *.tgz
-test/.lockstep-test-home
+test/.staleproof-test-home

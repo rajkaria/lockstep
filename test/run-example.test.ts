@@ -24,7 +24,7 @@ describe('run_example (sandbox, FalkorDB)', () => {
 
   beforeAll(async () => {
     ({ graph, done } = await testGraph('run'));
-    root = await mkdtemp(join(tmpdir(), 'lockstep-org-'));
+    root = await mkdtemp(join(tmpdir(), 'staleproof-org-'));
     const checkouts: Checkout[] = [];
     for (const name of ['mini-client', 'mini-sdk', 'mini-docs']) {
       const dir = join(root, name);

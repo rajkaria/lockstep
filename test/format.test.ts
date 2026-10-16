@@ -31,8 +31,8 @@ describe('checkMarkdown', () => {
     });
     expect(md).toBe(
       [
-        '<!-- lockstep-docs -->',
-        '### Lockstep: docs this pull request can falsify',
+        '<!-- staleproof -->',
+        '### Staleproof: docs this pull request can falsify',
         '',
         '1 changed symbols reach 1 doc sections.',
         '',
@@ -52,9 +52,9 @@ describe('checkMarkdown', () => {
         '|---|---|---|',
         '| stale | [Guide > Reads \\| queries](https://github.com/acme/docs/blob/s/a.mdx#L3) | ro_query was renamed. |',
         '',
-        'Proposed edits: `npx lockstep-docs patch https://github.com/acme/c/pull/1`',
+        'Proposed edits: `npx staleproof patch https://github.com/acme/c/pull/1`',
         '',
-        '<sub>Lockstep · FalkorDB graph `acme` · aaaaaaa..bbbbbbb</sub>',
+        '<sub>Staleproof · FalkorDB graph `acme` · aaaaaaa..bbbbbbb</sub>',
       ].join('\n'),
     );
   });

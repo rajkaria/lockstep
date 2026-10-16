@@ -26,7 +26,7 @@ describe('sandbox shim', () => {
       '        socket.create_connection(target, timeout=5)',
       '        print("connected", target)',
       '    except OSError as e:',
-      '        print("refused", target[1], "Lockstep sandbox" in str(e))',
+      '        print("refused", target[1], "Staleproof sandbox" in str(e))',
       'try:',
       '    socket.getaddrinfo("example.com", 443)',
       'except OSError as e:',
@@ -37,8 +37,8 @@ describe('sandbox shim', () => {
   });
 
   it('enforces the timeout and inherits no secrets', async () => {
-    process.env.LOCKSTEP_TEST_SECRET = 'nope';
-    const env = await runInSandbox(python, 'import os; print(os.environ.get("LOCKSTEP_TEST_SECRET"))', { scratchPort: SCRATCH, timeoutMs: 20_000 });
+    process.env.STALEPROOF_TEST_SECRET = 'nope';
+    const env = await runInSandbox(python, 'import os; print(os.environ.get("STALEPROOF_TEST_SECRET"))', { scratchPort: SCRATCH, timeoutMs: 20_000 });
     expect(env.stdout.trim()).toBe('None');
     const slow = await runInSandbox(python, 'import time; time.sleep(30)', { scratchPort: SCRATCH, timeoutMs: 1500 });
     expect(slow.timedOut).toBe(true);

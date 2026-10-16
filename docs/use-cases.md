@@ -1,6 +1,6 @@
 # Use cases
 
-Six ways teams use `lockstep-docs`, each with the situation it fits, what it does there, the setup, what you get and its limits. Read the one closest to your team; every setup links to the reference page with the full options. The running examples are FalkorDB's client library (`FalkorDB/falkordb-py`), the SDK built on it (`FalkorDB/GraphRAG-SDK`) and its docs site (`FalkorDB/docs`).
+Six ways teams use `staleproof`, each with the situation it fits, what it does there, the setup, what you get and its limits. Read the one closest to your team; every setup links to the reference page with the full options. The running examples are FalkorDB's client library (`FalkorDB/falkordb-py`), the SDK built on it (`FalkorDB/GraphRAG-SDK`) and its docs site (`FalkorDB/docs`).
 
 ## SDK and client-library teams with a separate docs site
 
@@ -11,8 +11,8 @@ Six ways teams use `lockstep-docs`, each with the situation it fits, what it doe
 **Setup.** Index the repositories together, then check pull requests from any of them:
 
 ```bash
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/276 --no-agent
+npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/276 --no-agent
 ```
 
 To get a comment on every pull request in the client repository, add the [GitHub Action](github-action.md).
@@ -36,23 +36,23 @@ A whole-word grep for the changed names finds none of those 43 sections and matc
 
 **The situation.** A release merged dozens of pull requests across your repositories. You need to know which pages are now wrong, fix the most-read ones first, and send the fixes as reviewable pull requests.
 
-**What it does.** Lockstep checks each merged pull request. In agent mode a model judges every impacted section and proposes replacement text for the ones that are wrong; each proposal is refused unless the graph has a path from the change to the section. [rank_sections](tools.md#rank_sections) orders sections by the PageRank of their page in your docs' own link graph, so the most central page comes first. `patch` turns a pull request's proposed edits into one diff across every docs repository it touches, with the evidence path, the example runs and any cited decisions for each edit, and `--open-pr` opens it as a pull request in your fork.
+**What it does.** Staleproof checks each merged pull request. In agent mode a model judges every impacted section and proposes replacement text for the ones that are wrong; each proposal is refused unless the graph has a path from the change to the section. [rank_sections](tools.md#rank_sections) orders sections by the PageRank of their page in your docs' own link graph, so the most central page comes first. `patch` turns a pull request's proposed edits into one diff across every docs repository it touches, with the evidence path, the example runs and any cited decisions for each edit, and `--open-pr` opens it as a pull request in your fork.
 
 **Setup.** List the release's merged pull requests (here with the GitHub CLI), check each one with the agent, then build and open the patches:
 
 ```bash
 prs=$(gh pr list --repo FalkorDB/falkordb-py --state merged --search "merged:>=2026-10-01" --json url --jq '.[].url')
-for pr in $prs; do npx -y lockstep-docs check "$pr"; done
-for pr in $prs; do npx -y lockstep-docs patch "$pr" --out "docs-$(basename "$pr").diff"; done
+for pr in $prs; do npx -y staleproof check "$pr"; done
+for pr in $prs; do npx -y staleproof patch "$pr" --out "docs-$(basename "$pr").diff"; done
 ```
 
 Review the diffs, then open the ones you want (needs `GITHUB_TOKEN`):
 
 ```bash
-npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/<n> --open-pr
+npx -y staleproof patch https://github.com/FalkorDB/falkordb-py/pull/<n> --open-pr
 ```
 
-`--open-pr` forks each docs repository into your account, creates a branch named after the code pull request (for example `lockstep/FalkorDB-falkordb-py-276`) at the commit the graph indexed, commits the edited files and opens the pull request inside your fork. Add `--upstream` to open it against the original repository instead.
+`--open-pr` forks each docs repository into your account, creates a branch named after the code pull request (for example `staleproof/FalkorDB-falkordb-py-276`) at the commit the graph indexed, commits the edited files and opens the pull request inside your fork. Add `--upstream` to open it against the original repository instead.
 
 For ranking, graph mode prints a pull request's sections in PageRank order, and the GitHub Action comment uses the same order. To rank a whole release at once, pass the section ids from several checks to `rank_sections` through an [MCP client](mcp.md) or the [library](library.md).
 
@@ -73,10 +73,10 @@ For ranking, graph mode prints a pull request's sections in PageRank order, and 
 
 **What it does.** The [GitHub Action](github-action.md) runs on every pull request and posts one comment, updated in place on each run: the impacted sections with the change type, repository, evidence path and hops; the changed symbols no doc reaches, each with a `git grep` command to check the claim; and the verdicts already recorded for the pull request. Without a model key it renders the comment from the graph alone (graph mode); with one, the agent judges each section first and the comment adds its verdicts and summary.
 
-**Setup.** Index your repositories into a FalkorDB the GitHub runners can reach (FalkorDB Cloud works), store its URL as the secret `LOCKSTEP_FALKORDB_URL`, and add the workflow as `.github/workflows/lockstep.yml`:
+**Setup.** Index your repositories into a FalkorDB the GitHub runners can reach (FalkorDB Cloud works), store its URL as the secret `STALEPROOF_FALKORDB_URL`, and add the workflow as `.github/workflows/staleproof.yml`:
 
 ```yaml
-name: Lockstep
+name: Staleproof
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -87,13 +87,13 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: rajkaria/lockstep/action@main
+      - uses: rajkaria/staleproof/action@main
         with:
-          falkordb-url: ${{ secrets.LOCKSTEP_FALKORDB_URL }}
+          falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
           org: falkordb
 ```
 
-**What you get.** A comment that starts with the hidden marker `<!-- lockstep-docs -->`, lists the docs the pull request can falsify with the path for each, and ends with the graph name and the commits compared. [GitHub Action](github-action.md#the-comment) shows the full format.
+**What you get.** A comment that starts with the hidden marker `<!-- staleproof -->`, lists the docs the pull request can falsify with the path for each, and ends with the graph name and the commits compared. [GitHub Action](github-action.md#the-comment) shows the full format.
 
 **Limits.**
 
@@ -108,12 +108,12 @@ jobs:
 
 **The situation.** You change code with an AI coding agent such as Claude Code, and want the same session to find and fix the docs the change affects before a human reviews it.
 
-**What it does.** `lockstep-docs mcp` gives the agent the ten tools over stdio: it can ask what a pull request reaches, read the sections, run the examples before and after, check maintainer decisions, record verdicts or propose edits, and get the docs patch as a diff to apply locally. Every result includes the Cypher queries it ran.
+**What it does.** `staleproof mcp` gives the agent the ten tools over stdio: it can ask what a pull request reaches, read the sections, run the examples before and after, check maintainer decisions, record verdicts or propose edits, and get the docs patch as a diff to apply locally. Every result includes the Cypher queries it ran.
 
 **Setup.**
 
 ```bash
-claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -e LOCKSTEP_ORG=falkordb -- npx -y lockstep-docs mcp
+claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
 ```
 
 Prompts to try, after pushing your branch and opening the pull request:
@@ -132,33 +132,33 @@ Prompts to try, after pushing your branch and opening the pull request:
 
 - The tools take a GitHub pull request URL. Uncommitted or unpushed changes cannot be checked; the pull request's repository must be public and indexed.
 - `propose_edit` and `record_verdict` need `pr_url` over MCP; there is no pull request "under check" to default to.
-- One MCP server serves one organisation's graph. Register a second server with another `LOCKSTEP_ORG` for another graph.
+- One MCP server serves one organisation's graph. Register a second server with another `STALEPROOF_ORG` for another graph.
 - `run_example` installs repositories and runs docs code on the machine running the MCP server. See the security notes in [MCP server](mcp.md).
 
 ## Platform teams with many repositories or organisations
 
 **The situation.** You run docs tooling for several product lines or several organisations, and want one service rather than one setup per team.
 
-**What it does.** Each organisation gets its own graph on the same FalkorDB server; the graph name is the organisation slug. Every command, the MCP server and the HTTP server work on the graph named by `--org` or `LOCKSTEP_ORG` (default `falkordb`). A second graph built from [encode/httpx](https://github.com/encode/httpx) sits next to `falkordb` on the same server: one repository, 544 symbols, 182 doc sections and 194 code examples ([its facts](FACTS-encode.md)).
+**What it does.** Each organisation gets its own graph on the same FalkorDB server; the graph name is the organisation slug. Every command, the MCP server and the HTTP server work on the graph named by `--org` or `STALEPROOF_ORG` (default `falkordb`). A second graph built from [encode/httpx](https://github.com/encode/httpx) sits next to `falkordb` on the same server: one repository, 544 symbols, 182 doc sections and 194 code examples ([its facts](FACTS-encode.md)).
 
 **Setup.**
 
 ```bash
-npx -y lockstep-docs --org encode index encode/httpx
-npx -y lockstep-docs --org encode check https://github.com/encode/httpx/pull/<n> --no-agent
+npx -y staleproof --org encode index encode/httpx
+npx -y staleproof --org encode check https://github.com/encode/httpx/pull/<n> --no-agent
 ```
 
 Serve the [HTTP API](http-api.md) once per organisation (the server answers for one graph), on separate ports:
 
 ```bash
-LOCKSTEP_ORG=falkordb npx -y lockstep-docs serve --port 8080
-LOCKSTEP_ORG=encode npx -y lockstep-docs serve --port 8081
+STALEPROOF_ORG=falkordb npx -y staleproof serve --port 8080
+STALEPROOF_ORG=encode npx -y staleproof serve --port 8081
 ```
 
 Or embed the [library](library.md), which can open any graph on the server from one process:
 
 ```ts
-import { GraphStore, loadConfig, runGraphCheck } from 'lockstep-docs';
+import { GraphStore, loadConfig, runGraphCheck } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -190,7 +190,7 @@ try {
 **Setup.** Find the ids to govern: section ids come from impact (`check --json`), and a symbol id is `<owner>/<repo>:<qualname>`, the qualified name shown in evidence paths. Then record the decision:
 
 ```bash
-npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" \
+npx -y staleproof decide "The async client keeps positional kwargs until 2.0" \
   --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__" \
   --source https://github.com/FalkorDB/falkordb-py/issues/<n> --author "<maintainer>"
 ```
@@ -198,7 +198,7 @@ npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0"
 It prints `Recorded decision dec-… governing 1 node(s).` To replace it later:
 
 ```bash
-npx -y lockstep-docs decide "The async client drops positional kwargs in 2.0" \
+npx -y staleproof decide "The async client drops positional kwargs in 2.0" \
   --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__" \
   --supersedes dec-<id>
 ```
@@ -206,7 +206,7 @@ npx -y lockstep-docs decide "The async client drops positional kwargs in 2.0" \
 Accept or reject a verdict the agent wrote (rejected edits are left out of the patch):
 
 ```bash
-npx -y lockstep-docs verdict reject ver-<id> --by "<maintainer>"
+npx -y staleproof verdict reject ver-<id> --by "<maintainer>"
 ```
 
 **What you get.** Fewer repeat flags in agent mode, a `governed` verdict that names the decision, and a record of who decided what and where.

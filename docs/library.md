@@ -1,26 +1,26 @@
 # Node.js library
 
-The `lockstep-docs` package exports the engine the CLI is built on: configuration, the FalkorDB graph client, the indexer, pull request ingestion, the tools, the agent loop and graph mode, the docs patch, the HTTP app and the MCP server. This page lists every export with its signature and gives complete recipes, each type-checked against the source. It is for TypeScript and JavaScript developers who want to embed indexing or checks in their own tools, tests or servers instead of shelling out to the CLI.
+The `staleproof` package exports the engine the CLI is built on: configuration, the FalkorDB graph client, the indexer, pull request ingestion, the tools, the agent loop and graph mode, the docs patch, the HTTP app and the MCP server. This page lists every export with its signature and gives complete recipes, each type-checked against the source. It is for TypeScript and JavaScript developers who want to embed indexing or checks in their own tools, tests or servers instead of shelling out to the CLI.
 
 ## Install
 
 ```bash
-npm i lockstep-docs
+npm i staleproof
 ```
 
 - **Node.js 20 or later** (`engines` in [package.json](../package.json)).
-- **ESM only**. The package is `"type": "module"` and ships no CommonJS build: use `import`. From CommonJS, load it with `const lockstep = await import('lockstep-docs')`.
-- **No type declarations yet.** The build compiles JavaScript only (`dts: false` in [tsup.config.ts](../tsup.config.ts)), so TypeScript sees the module as untyped. The signatures on this page come from the source. To run the recipes as written, use `npx tsx recipe.ts` (tsx strips types without checking them). In a type-checked project, add a declaration file with `declare module 'lockstep-docs';`; every import is then `any`, so annotate callback parameters yourself.
+- **ESM only**. The package is `"type": "module"` and ships no CommonJS build: use `import`. From CommonJS, load it with `const staleproof = await import('staleproof')`.
+- **No type declarations yet.** The build compiles JavaScript only (`dts: false` in [tsup.config.ts](../tsup.config.ts)), so TypeScript sees the module as untyped. The signatures on this page come from the source. To run the recipes as written, use `npx tsx recipe.ts` (tsx strips types without checking them). In a type-checked project, add a declaration file with `declare module 'staleproof';`; every import is then `any`, so annotate callback parameters yourself.
 - **What it needs at run time** is the same as the CLI: a FalkorDB server, `git` to index and to ingest pull requests, `uv` or `python3` to run examples, and model credentials for agent mode. [Configuration](configuration.md) lists every variable.
 
 ## A first script
 
-Check a pull request in graph mode (no model) against a graph you have already indexed with `lockstep-docs index`, and print what it reaches:
+Check a pull request in graph mode (no model) against a graph you have already indexed with `staleproof index`, and print what it reaches:
 
 ```ts
-import { GraphStore, loadConfig, runGraphCheck } from 'lockstep-docs';
+import { GraphStore, loadConfig, runGraphCheck } from 'staleproof';
 
-const config = loadConfig(); // FALKORDB_URL, LOCKSTEP_ORG, LOCKSTEP_HOME, ...
+const config = loadConfig(); // FALKORDB_URL, STALEPROOF_ORG, STALEPROOF_HOME, ...
 const store = await GraphStore.connect(config.falkordbUrl);
 try {
   const result = await runGraphCheck({ graph: store.org(config.org), config }, 'https://github.com/FalkorDB/falkordb-py/pull/262');
@@ -41,9 +41,9 @@ Every export of [src/index.ts](../src/index.ts), grouped by purpose.
 
 | Export | Signature | What it does |
 |---|---|---|
-| `loadConfig` | `(env?: NodeJS.ProcessEnv) => Config` | Builds a `Config` from environment variables (default `process.env`). Pass `{}` for the defaults alone. Throws on an invalid `LOCKSTEP_EFFORT`, an empty org name, or a `LOCKSTEP_SCRATCH_URL` that carries credentials or does not parse |
+| `loadConfig` | `(env?: NodeJS.ProcessEnv) => Config` | Builds a `Config` from environment variables (default `process.env`). Pass `{}` for the defaults alone. Throws on an invalid `STALEPROOF_EFFORT`, an empty org name, or a `STALEPROOF_SCRATCH_URL` that carries credentials or does not parse |
 | `orgSlug` | `(raw: string) => string` | The graph name for an organisation: trimmed, lowercased, every run of characters outside `a-z`, `0-9`, `_` and `-` turned into `-`, leading and trailing `-` removed. Throws `invalid org name: "<raw>"` when nothing is left |
-| `DEFAULT_MODEL` | `'claude-sonnet-5-5'` | The agent model when `LOCKSTEP_MODEL` is unset |
+| `DEFAULT_MODEL` | `'claude-sonnet-5-5'` | The agent model when `STALEPROOF_MODEL` is unset |
 | `Config` | type | See below |
 
 `Config` fields:
@@ -51,18 +51,18 @@ Every export of [src/index.ts](../src/index.ts), grouped by purpose.
 | Field | Type | From |
 |---|---|---|
 | `falkordbUrl` | `string` | `FALKORDB_URL` |
-| `org` | `string` | `LOCKSTEP_ORG`, slugged |
-| `home` | `string` | `LOCKSTEP_HOME` |
+| `org` | `string` | `STALEPROOF_ORG`, slugged |
+| `home` | `string` | `STALEPROOF_HOME` |
 | `githubToken` | `string \| undefined` | `GITHUB_TOKEN`, else `GH_TOKEN` |
 | `anthropicApiKey` | `string \| undefined` | `ANTHROPIC_API_KEY` |
 | `modelBaseUrl` | `string \| undefined` | `ANTHROPIC_BASE_URL` |
 | `modelCompatible` | `boolean` | `true` when `ANTHROPIC_BASE_URL` names a host other than `api.anthropic.com` |
-| `model` | `string` | `LOCKSTEP_MODEL` |
-| `effort` | `'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max'` | `LOCKSTEP_EFFORT` |
-| `fallbacks` | `boolean` | `LOCKSTEP_FALLBACKS` is not `off` |
-| `scratch` | `{ host: string; port: number; managed: boolean }` | `LOCKSTEP_SCRATCH_URL`, else `127.0.0.1` and `LOCKSTEP_SCRATCH_PORT` |
-| `runTimeoutMs` | `number` | `LOCKSTEP_RUN_TIMEOUT_MS` |
-| `checkBudgetMs` | `number \| undefined` | `LOCKSTEP_CHECK_BUDGET_MS` |
+| `model` | `string` | `STALEPROOF_MODEL` |
+| `effort` | `'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max'` | `STALEPROOF_EFFORT` |
+| `fallbacks` | `boolean` | `STALEPROOF_FALLBACKS` is not `off` |
+| `scratch` | `{ host: string; port: number; managed: boolean }` | `STALEPROOF_SCRATCH_URL`, else `127.0.0.1` and `STALEPROOF_SCRATCH_PORT` |
+| `runTimeoutMs` | `number` | `STALEPROOF_RUN_TIMEOUT_MS` |
+| `checkBudgetMs` | `number \| undefined` | `STALEPROOF_CHECK_BUDGET_MS` |
 
 `Config` is a plain object: build one with `loadConfig()` and override fields (`{ ...loadConfig(), org: 'acme' }`).
 
@@ -103,7 +103,7 @@ Cross-repository calls resolve only between repositories passed to the same `ind
 | `diffPullRequest` | `(dir: string, repo: string, pr: PullRequestInfo) => Promise<PrDiff>` | The symbol-level diff of a PR in a local clone: first parent to merge commit when merged, merge base to head otherwise |
 | `diffRange` | `(dir: string, repo: string, before: string, after: string) => Promise<PrDiff>` | The same diff between any two commits |
 | `ChangedSymbol` | type | `{ repo, qualname, name, kind, change, before?, after?, renamedTo?, exportTarget?, path, lineno, endLineno, doc? }`; `change` is `removed`, `renamed`, `signature`, `modified`, `added` or `export-removed` (see [Change kinds](concepts.md#change-kinds)) |
-| `ingestPullRequest` | `(graph: OrgGraph, config: Config, prUrl: string) => Promise<IngestedPr>` | Fetches the PR, diffs it (local git, or the GitHub API when git is missing or `LOCKSTEP_INGEST=github`) and records it. Always re-ingests: the tools skip PRs the graph already ingested, this function does not. Throws `<owner/repo> is not indexed in the "<graph>" graph. ...` when the repository is not in the graph |
+| `ingestPullRequest` | `(graph: OrgGraph, config: Config, prUrl: string) => Promise<IngestedPr>` | Fetches the PR, diffs it (local git, or the GitHub API when git is missing or `STALEPROOF_INGEST=github`) and records it. Always re-ingests: the tools skip PRs the graph already ingested, this function does not. Throws `<owner/repo> is not indexed in the "<graph>" graph. ...` when the repository is not in the graph |
 | `recordPullRequest` | `(graph: OrgGraph, pr: PullRequestInfo, diff: PrDiff) => Promise<IngestedPr>` | Writes a PR you diffed yourself: the `PullRequest` node, `CHANGED_IN` edges, recreated removed symbols and their late links. Returns `{ pr, diff, changed: { id, change }[], recreated: string[], lateLinks: number }` |
 
 `PrDiff` is `{ before: string; after: string; files: { status, path, oldPath? }[]; symbols: ChangedSymbol[]; docsTouched: string[] }`.
@@ -160,10 +160,10 @@ Cross-repository calls resolve only between repositories passed to the same `ind
 
 | Export | Signature | What it does |
 |---|---|---|
-| `createApp` | `(opts: { store: GraphStore; config: Config; model?: () => ModelClient; preloaded?: string[]; webDir?: string; rateLimit?: number }) => Hono` | The HTTP API and web app of `lockstep-docs serve` as a [Hono](https://hono.dev) app. Without `model`, agent mode answers 409. `preloaded` defaults to `DEFAULT_PRELOADED`, `webDir` to the package's `web/dist` (any missing directory gives an API-only app), `rateLimit` to 30 POST requests per client per hour. Routes: [HTTP API](http-api.md) |
+| `createApp` | `(opts: { store: GraphStore; config: Config; model?: () => ModelClient; preloaded?: string[]; webDir?: string; rateLimit?: number }) => Hono` | The HTTP API and web app of `staleproof serve` as a [Hono](https://hono.dev) app. Without `model`, agent mode answers 409. `preloaded` defaults to `DEFAULT_PRELOADED`, `webDir` to the package's `web/dist` (any missing directory gives an API-only app), `rateLimit` to 30 POST requests per client per hour. Routes: [HTTP API](http-api.md) |
 | `defaultModelFactory` | `(config: Config) => (() => ModelClient) \| undefined` | What `serve` passes as `model`: an `AnthropicModel` factory built from `config`, or `undefined` when no credentials are found |
 | `DEFAULT_PRELOADED` | `string[]` | falkordb-py pull requests #262, #267 and #276 |
-| `createMcpServer` | `(graph: OrgGraph, config: Config) => Server` | An MCP `Server` (from `@modelcontextprotocol/sdk`) with the ten tools, not yet connected to a transport. `lockstep-docs mcp` connects it to stdio; see [MCP server](mcp.md) |
+| `createMcpServer` | `(graph: OrgGraph, config: Config) => Server` | An MCP `Server` (from `@modelcontextprotocol/sdk`) with the ten tools, not yet connected to a transport. `staleproof mcp` connects it to stdio; see [MCP server](mcp.md) |
 
 ## Recipes
 
@@ -172,15 +172,15 @@ Every recipe is a complete ES module (top-level `await`). Save it as `recipe.ts`
 ### Index an organisation
 
 ```ts
-import { checkoutRepo, GraphStore, indexOrg, loadConfig, parseRepoName } from 'lockstep-docs';
+import { checkoutRepo, GraphStore, indexOrg, loadConfig, parseRepoName } from 'staleproof';
 
-const config = loadConfig(); // FALKORDB_URL, LOCKSTEP_ORG, LOCKSTEP_HOME, ...
+const config = loadConfig(); // FALKORDB_URL, STALEPROOF_ORG, STALEPROOF_HOME, ...
 const store = await GraphStore.connect(config.falkordbUrl);
 try {
   const graph = store.org(config.org);
   const checkouts = [];
   for (const input of ['FalkorDB/falkordb-py', 'FalkorDB/GraphRAG-SDK', 'FalkorDB/docs']) {
-    // Clones (blob-less) or fetches into <LOCKSTEP_HOME>/repos/<owner>/<name>, then checks out the default branch.
+    // Clones (blob-less) or fetches into <STALEPROOF_HOME>/repos/<owner>/<name>, then checks out the default branch.
     checkouts.push(await checkoutRepo(config.home, parseRepoName(input)));
   }
   // Index all of them in one call: calls between repositories resolve only within one indexOrg run.
@@ -195,14 +195,14 @@ try {
 }
 ```
 
-This is what `lockstep-docs index` does. To pin a repository, pass a ref: `checkoutRepo(config.home, 'FalkorDB/docs', 'origin/main')`.
+This is what `staleproof index` does. To pin a repository, pass a ref: `checkoutRepo(config.home, 'FalkorDB/docs', 'origin/main')`.
 
 ### Check a pull request in graph mode and print the impacted sections
 
 The tool results are in `result.events`. Their data types are not exported, so the script declares the fields it prints:
 
 ```ts
-import { GraphStore, loadConfig, runGraphCheck, type TraceEvent } from 'lockstep-docs';
+import { GraphStore, loadConfig, runGraphCheck, type TraceEvent } from 'staleproof';
 
 /** The fields of an impacted section this script prints (the full type is not exported). */
 interface Impacted {
@@ -238,7 +238,7 @@ try {
 ### Run an agent check and stream its events
 
 ```ts
-import { AnthropicModel, GraphStore, loadConfig, runAgentCheck } from 'lockstep-docs';
+import { AnthropicModel, GraphStore, loadConfig, runAgentCheck } from 'staleproof';
 
 const config = loadConfig();
 // Throws without credentials, or for a claude-* model name on an Anthropic-compatible provider.
@@ -283,14 +283,14 @@ try {
 }
 ```
 
-For DeepSeek, set `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` and `LOCKSTEP_MODEL` (see [Configuration](configuration.md#model-agent-mode)); `config.modelCompatible` is then `true`. Pass `budgetMs` to stop starting new model turns after a wall-clock limit, as the server does on Vercel.
+For DeepSeek, set `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` and `STALEPROOF_MODEL` (see [Configuration](configuration.md#model-agent-mode)); `config.modelCompatible` is then `true`. Pass `budgetMs` to stop starting new model turns after a wall-clock limit, as the server does on Vercel.
 
 ### Call one tool directly
 
 `impactTool` and the other tool objects are not exported by name; find them in `ALL_TOOLS`:
 
 ```ts
-import { ALL_TOOLS, GraphStore, loadConfig, type ToolContext } from 'lockstep-docs';
+import { ALL_TOOLS, GraphStore, loadConfig, type ToolContext } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -314,7 +314,7 @@ try {
 
 ```ts
 import { writeFile } from 'node:fs/promises';
-import { buildDocsPatch, GraphStore, loadConfig, openDocsPr, parsePrUrl } from 'lockstep-docs';
+import { buildDocsPatch, GraphStore, loadConfig, openDocsPr, parsePrUrl } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -336,7 +336,7 @@ try {
 }
 ```
 
-The patch is built from the latest verdicts the agent recorded; graph mode records none. For falkordb-py #267 it is empty, because every verdict on that pull request is `ok`. With `--open-pr`, `openDocsPr` forks each docs repository, pushes a branch named `lockstep/<repo>-<number>` and opens the pull request in your fork.
+The patch is built from the latest verdicts the agent recorded; graph mode records none. For falkordb-py #267 it is empty, because every verdict on that pull request is `ok`. With `--open-pr`, `openDocsPr` forks each docs repository, pushes a branch named `staleproof/<repo>-<number>` and opens the pull request in your fork.
 
 ### Mount the HTTP API in your own server
 
@@ -345,11 +345,11 @@ The patch is built from the latest verdicts the agent recorded; graph mode recor
 ```ts
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { createApp, defaultModelFactory, GraphStore, loadConfig } from 'lockstep-docs';
+import { createApp, defaultModelFactory, GraphStore, loadConfig } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
-const lockstep = createApp({
+const staleproof = createApp({
   store,
   config,
   model: defaultModelFactory(config), // undefined without credentials: graph mode only
@@ -360,7 +360,7 @@ const lockstep = createApp({
 
 const app = new Hono();
 app.get('/', (c) => c.text('my service'));
-app.route('/lockstep', lockstep); // GET /lockstep/api/health, POST /lockstep/api/check, ...
+app.route('/staleproof', staleproof); // GET /staleproof/api/health, POST /staleproof/api/check, ...
 
 serve({ fetch: app.fetch, port: 3000 });
 ```
@@ -370,15 +370,15 @@ Install `hono` and `@hono/node-server` in your project for this. The web app cal
 ```ts
 import { createServer } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
-import { createApp, GraphStore, loadConfig } from 'lockstep-docs';
+import { createApp, GraphStore, loadConfig } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
-const lockstep = createApp({ store, config, webDir: '/nonexistent' });
-createServer(getRequestListener(lockstep.fetch)).listen(3000);
+const staleproof = createApp({ store, config, webDir: '/nonexistent' });
+createServer(getRequestListener(staleproof.fetch)).listen(3000);
 ```
 
-In tests and scripts you can skip the network: `await lockstep.request('/api/health')` returns a `Response`, which is how `npm run snapshot` reads the API.
+In tests and scripts you can skip the network: `await staleproof.request('/api/health')` returns a `Response`, which is how `npm run snapshot` reads the API.
 
 ### Serve MCP over another transport
 
@@ -388,7 +388,7 @@ In tests and scripts you can skip the network: `await lockstep.request('/api/hea
 import { serve } from '@hono/node-server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
-import { createMcpServer, GraphStore, loadConfig } from 'lockstep-docs';
+import { createMcpServer, GraphStore, loadConfig } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -406,14 +406,14 @@ app.all('/mcp', async (c) => {
 serve({ fetch: app.fetch, port: 3001, hostname: '127.0.0.1' });
 ```
 
-Install the same major version of `@modelcontextprotocol/sdk` that `lockstep-docs` depends on (1.x). The tools write to the graph (`propose_edit`, `record_verdict`, `write_decision`) and this endpoint has no authentication: keep it on `127.0.0.1` or behind your own auth.
+Install the same major version of `@modelcontextprotocol/sdk` that `staleproof` depends on (1.x). The tools write to the graph (`propose_edit`, `record_verdict`, `write_decision`) and this endpoint has no authentication: keep it on `127.0.0.1` or behind your own auth.
 
 For tests, connect a client in the same process:
 
 ```ts
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createMcpServer, GraphStore, loadConfig } from 'lockstep-docs';
+import { createMcpServer, GraphStore, loadConfig } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -439,14 +439,14 @@ Each successful call returns the summary and the data as JSON as two text items,
 `ScriptedModel` stands in for the model, and `recordPullRequest` stands in for GitHub, so a check runs with nothing but a FalkorDB. This is how the project's own tests drive the agent loop ([test/agent.test.ts](../test/agent.test.ts)).
 
 ```ts
-import { GraphStore, indexOrg, loadConfig, recordPullRequest, runAgentCheck, ScriptedModel } from 'lockstep-docs';
+import { GraphStore, indexOrg, loadConfig, recordPullRequest, runAgentCheck, ScriptedModel } from 'staleproof';
 
 // PullRequestInfo and PrDiff are not exported; take them from the function signature.
 type PrInfo = Parameters<typeof recordPullRequest>[1];
 type Diff = Parameters<typeof recordPullRequest>[2];
 
 const store = await GraphStore.connect('falkor://localhost:6379');
-const graph = store.org('lockstep-scripted-test'); // a throwaway graph
+const graph = store.org('staleproof-scripted-test'); // a throwaway graph
 const config = loadConfig({}); // defaults only: ignores the environment
 
 try {
@@ -502,7 +502,7 @@ The fixtures are two small directories: `fixtures/client/client/__init__.py` def
 The named queries and `graph.run` are enough for reports. Precision, counted from maintainer reviews:
 
 ```ts
-import { GraphStore, loadConfig } from 'lockstep-docs';
+import { GraphStore, loadConfig } from 'staleproof';
 
 const config = loadConfig();
 const store = await GraphStore.connect(config.falkordbUrl);
@@ -526,9 +526,9 @@ Even when compiling against the source, several types the functions use are not 
 ## Limits
 
 - No type declarations are published, and the package is at version 0.1.0: exports may change between versions.
-- Some functions shell out: `checkoutRepo`, PR ingestion with git, and example runs need `git`; example runs need `uv` or `python3`; the managed scratch server and `lockstep-docs db` run `bash` scripts.
+- Some functions shell out: `checkoutRepo`, PR ingestion with git, and example runs need `git`; example runs need `uv` or `python3`; the managed scratch server and `staleproof db` run `bash` scripts.
 - State is per process: example runs are serialised process-wide, and the git and sandbox availability checks are cached for the life of the process.
-- A few internals read the environment directly rather than `Config`: `LOCKSTEP_INGEST` (PR ingestion) and the Anthropic credential variables (`AnthropicModel`, `defaultModelFactory`).
+- A few internals read the environment directly rather than `Config`: `STALEPROOF_INGEST` (PR ingestion) and the Anthropic credential variables (`AnthropicModel`, `defaultModelFactory`).
 - Nothing in the library authenticates callers. Anything you expose over HTTP or MCP can write verdicts and decisions to the graph.
 
 ## Related

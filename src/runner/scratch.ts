@@ -7,7 +7,7 @@ import { packageRoot } from '../pkg.js';
 
 const exec = promisify(execFile);
 
-/** Start the scratch FalkorDB if Lockstep manages it locally (idempotent). */
+/** Start the scratch FalkorDB if Staleproof manages it locally (idempotent). */
 export async function ensureScratchDb(config: Config): Promise<void> {
   if (!config.scratch.managed) return;
   await exec('bash', [join(packageRoot(), 'scripts', 'falkordb-local.sh'), 'start', String(config.scratch.port)]);
@@ -31,7 +31,7 @@ export async function flushScratchDb(config: Config): Promise<void> {
   if (scratchIsOrgServer(config)) {
     throw new Error(
       `refusing to flush ${config.scratch.host}:${config.scratch.port}: it is the server holding the org graph (FALKORDB_URL). ` +
-        'Point LOCKSTEP_SCRATCH_URL / LOCKSTEP_SCRATCH_PORT at a separate server.',
+        'Point STALEPROOF_SCRATCH_URL / STALEPROOF_SCRATCH_PORT at a separate server.',
     );
   }
   const db = await FalkorDB.connect({ socket: { host: config.scratch.host, port: config.scratch.port, connectTimeout: 5000 } });

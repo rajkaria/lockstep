@@ -1,17 +1,17 @@
 # MCP server
 
-`lockstep-docs mcp` serves the ten Lockstep tools over the Model Context Protocol on stdio, so Claude Code, Claude Desktop, Cursor or any MCP client can ask what a pull request can falsify, run the affected examples, record verdicts and get the docs patch. This page covers client configuration, what the server exposes, how results and errors look, a worked session and security notes.
+`staleproof mcp` serves the ten Staleproof tools over the Model Context Protocol on stdio, so Claude Code, Claude Desktop, Cursor or any MCP client can ask what a pull request can falsify, run the affected examples, record verdicts and get the docs patch. This page covers client configuration, what the server exposes, how results and errors look, a worked session and security notes.
 
 ## Claude Code
 
 ```bash
-claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y lockstep-docs mcp
+claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y staleproof mcp
 ```
 
 To name the graph explicitly, or to use another organisation's graph:
 
 ```bash
-claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -e LOCKSTEP_ORG=falkordb -- npx -y lockstep-docs mcp
+claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
 ```
 
 For FalkorDB Cloud, pass its URL instead: `-e FALKORDB_URL='falkor://falkordb:<password>@<host>:<port>'` (`falkors://` with TLS). Add `-e GITHUB_TOKEN=<token>` to raise GitHub's limit of 60 API requests an hour, which the first look at each pull request uses. Check the server with `claude mcp list`.
@@ -23,12 +23,12 @@ Any client that launches a stdio server from a command, arguments and environmen
 ```json
 {
   "mcpServers": {
-    "lockstep": {
+    "staleproof": {
       "command": "npx",
-      "args": ["-y", "lockstep-docs", "mcp"],
+      "args": ["-y", "staleproof", "mcp"],
       "env": {
         "FALKORDB_URL": "falkor://localhost:6379",
-        "LOCKSTEP_ORG": "falkordb"
+        "STALEPROOF_ORG": "falkordb"
       }
     }
   }
@@ -43,22 +43,22 @@ Any client that launches a stdio server from a command, arguments and environmen
 
 Desktop apps often start without your shell's `PATH`. If the client reports that `npx` is not found, set `command` to its absolute path (the output of `which npx`). The tools that run examples also need `git`, `tar` and uv or `python3` on the `PATH` the server sees.
 
-One server serves one organisation's graph. For a second graph, add a second entry, for example `lockstep-encode` with `"LOCKSTEP_ORG": "encode"`.
+One server serves one organisation's graph. For a second graph, add a second entry, for example `staleproof-encode` with `"STALEPROOF_ORG": "encode"`.
 
 ## What the server exposes
 
 | Property | Value |
 |---|---|
-| Server name | `lockstep` |
-| Version | The package version (`lockstep-docs --version`) |
+| Server name | `staleproof` |
+| Version | The package version (`staleproof --version`) |
 | Capabilities | Tools only |
-| Transport | stdio. Stdout carries the protocol; the server logs `lockstep mcp: serving graph "<org>" from <url>` (password masked) to stderr. |
+| Transport | stdio. Stdout carries the protocol; the server logs `staleproof mcp: serving graph "<org>" from <url>` (password masked) to stderr. |
 | Startup | Connects to FalkorDB first. If it cannot, the process exits with `cannot reach FalkorDB at <url>: …` and the client shows the server as failed. |
 
 The server gives clients these instructions:
 
 ```text
-Lockstep keeps docs true to code over a FalkorDB graph of an organisation's repositories. For a pull request: call impact first, read_section and run_example to judge each impacted section, decisions_for before editing, then propose_edit or record_verdict for every impacted section, and docs_patch to get the diff. Every result lists the Cypher it ran.
+Staleproof keeps docs true to code over a FalkorDB graph of an organisation's repositories. For a pull request: call impact first, read_section and run_example to judge each impacted section, decisions_for before editing, then propose_edit or record_verdict for every impacted section, and docs_patch to get the diff. Every result lists the Cypher it ran.
 ```
 
 ## The tools
@@ -109,7 +109,7 @@ Errors come back as a result with `isError: true` and one text block:
 | Unknown tool | `unknown tool <name>` |
 | A parameter the tool does not declare | `<tool> has no parameter <names>; its parameters are <list>` |
 | Invalid input | `invalid input: <field or (root)>: <problem>; …` |
-| The tool failed | The tool's message, for example `pr_url is required`, `refused: no path in the graph from <pr>'s changes to <section>. …`, `<pr> has not been checked yet; call impact first`, or `<owner/repo> is not indexed in the "<org>" graph. Run: lockstep-docs index …` |
+| The tool failed | The tool's message, for example `pr_url is required`, `refused: no path in the graph from <pr>'s changes to <section>. …`, `<pr> has not been checked yet; call impact first`, or `<owner/repo> is not indexed in the "<org>" graph. Run: staleproof index …` |
 
 Unknown parameters are rejected with the same message the agent loop uses, so a client never gets a silently different answer.
 
@@ -161,7 +161,7 @@ With only `ok` verdicts, the summary is `No proposed edits for this pull request
 ## Security notes
 
 - **It runs code on your machine.** `run_example` clones the repositories, installs them from source, and executes docs code. Package installs fetch dependencies from the package index and run the projects' build steps with the server's environment, which includes `FALKORDB_URL` and any token you passed. The examples themselves run with a minimal environment and a socket-level block on network access other than the scratch FalkorDB; that is a guard, not a security boundary.
-- **It flushes the scratch FalkorDB** before every example run. Lockstep refuses only when the scratch server is the one in `FALKORDB_URL`; make sure `LOCKSTEP_SCRATCH_URL` (or the local port 6390) holds nothing you need.
+- **It flushes the scratch FalkorDB** before every example run. Staleproof refuses only when the scratch server is the one in `FALKORDB_URL`; make sure `STALEPROOF_SCRATCH_URL` (or the local port 6390) holds nothing you need.
 - **It writes to the graph.** Pull requests and their changes (`impact`, `clearance`), runs (`run_example`), verdicts (`propose_edit`, `record_verdict`) and decisions (`write_decision`, which can also mark an older decision superseded). Nothing is deleted, but whoever uses the server changes what later checks, the comment and the patch see.
 - **It writes nothing to GitHub.** No MCP tool opens a pull request or posts a comment; opening a docs pull request is the CLI's `patch --open-pr`.
 - **Credentials sit in the client configuration** in plain text, including the FalkorDB password in `FALKORDB_URL`.
@@ -171,7 +171,7 @@ With only `ok` verdicts, the summary is `No proposed edits for this pull request
 
 - The tools take a GitHub pull request URL in a public repository that is indexed in the graph. Unpushed changes cannot be checked.
 - One server, one organisation's graph.
-- No `--fresh` over MCP: an identical recorded run is always answered from the graph. Use `lockstep-docs run --fresh` to execute it again.
+- No `--fresh` over MCP: an identical recorded run is always answered from the graph. Use `staleproof run --fresh` to execute it again.
 - An MCP session creates no Check node and no stored trace.
 - `impact` returns 40 sections per call; for a larger pull request the client must page with `offset`, as the summary tells it to.
 

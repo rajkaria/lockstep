@@ -1,16 +1,16 @@
-name: Lockstep docs check
-description: Comment on a pull request with the docs it can falsify, across every repository in your Lockstep graph, with the evidence path for each.
-author: Lockstep
+name: Staleproof docs check
+description: Comment on a pull request with the docs it can falsify, across every repository in your Staleproof graph, with the evidence path for each.
+author: Staleproof
 branding:
   icon: link
   color: green
 
 inputs:
   falkordb-url:
-    description: FalkorDB holding your organisation's Lockstep graph (falkor[s]://user:password@host:port). Store it as a secret.
+    description: FalkorDB holding your organisation's Staleproof graph (falkor[s]://user:password@host:port). Store it as a secret.
     required: true
   org:
-    description: Graph name (your organisation slug, as used with `lockstep-docs index --org`).
+    description: Graph name (your organisation slug, as used with `staleproof index --org`).
     required: true
   github-token:
     description: Token used to read the pull request and post the comment.
@@ -22,7 +22,7 @@ inputs:
     description: Re-index this repository at the base branch before checking (keeps the graph current).
     default: 'false'
   version:
-    description: lockstep-docs version to run.
+    description: staleproof version to run.
     default: latest
 
 runs:
@@ -37,22 +37,22 @@ runs:
       shell: bash
       env:
         FALKORDB_URL: ${{ inputs.falkordb-url }}
-        LOCKSTEP_ORG: ${{ inputs.org }}
+        STALEPROOF_ORG: ${{ inputs.org }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: npx -y "lockstep-docs@${{ inputs.version }}" index "${{ github.repository }}"
+      run: npx -y "staleproof@${{ inputs.version }}" index "${{ github.repository }}"
 
     - name: Check the pull request
       shell: bash
       env:
         FALKORDB_URL: ${{ inputs.falkordb-url }}
-        LOCKSTEP_ORG: ${{ inputs.org }}
+        STALEPROOF_ORG: ${{ inputs.org }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         PR_URL: ${{ github.event.pull_request.html_url }}
       run: |
         mode="--no-agent"
         if [ -n "$ANTHROPIC_API_KEY" ]; then mode=""; fi
-        npx -y "lockstep-docs@${{ inputs.version }}" check "$PR_URL" $mode --format markdown --out lockstep-comment.md
+        npx -y "staleproof@${{ inputs.version }}" check "$PR_URL" $mode --format markdown --out staleproof-comment.md
 
     - name: Post or update the comment
       shell: bash
@@ -62,9 +62,9 @@ runs:
         REPO: ${{ github.repository }}
       run: |
         existing=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
-          --jq '[.[] | select(.body | startswith("<!-- lockstep-docs -->"))][0].id // empty')
+          --jq '[.[] | select(.body | startswith("<!-- staleproof -->") or startswith("<!-- lockstep-docs -->"))][0].id // empty')
         if [ -n "$existing" ]; then
-          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@lockstep-comment.md >/dev/null
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@staleproof-comment.md >/dev/null
         else
-          gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@lockstep-comment.md >/dev/null
+          gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@staleproof-comment.md >/dev/null
         fi

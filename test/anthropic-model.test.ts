@@ -75,14 +75,14 @@ describe('AnthropicModel (local fake API, no paid calls)', () => {
   });
 
   it('refuses a Claude model name on another provider, which would remap it and mislabel every trace', () => {
-    expect(() => new AnthropicModel({ model: 'claude-sonnet-5-5', apiKey: 'k', baseURL: url, compatible: true })).toThrow(/LOCKSTEP_MODEL/);
+    expect(() => new AnthropicModel({ model: 'claude-sonnet-5-5', apiKey: 'k', baseURL: url, compatible: true })).toThrow(/STALEPROOF_MODEL/);
   });
 
   it('detects the provider from ANTHROPIC_BASE_URL', () => {
     expect(isCompatibleProvider(undefined)).toBe(false);
     expect(isCompatibleProvider('https://api.anthropic.com')).toBe(false);
     expect(isCompatibleProvider('https://api.deepseek.com/anthropic')).toBe(true);
-    expect(loadConfig({ ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic', LOCKSTEP_MODEL: 'deepseek-v4-pro' })).toMatchObject({
+    expect(loadConfig({ ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic', STALEPROOF_MODEL: 'deepseek-v4-pro' })).toMatchObject({
       modelBaseUrl: 'https://api.deepseek.com/anthropic',
       modelCompatible: true,
       model: 'deepseek-v4-pro',

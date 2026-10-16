@@ -492,7 +492,7 @@ $ npx -y ${PACKAGE} patch ${PR}`,
     title: 'A comment on every pull request',
     body: <>Point the action at the FalkorDB holding your graph. It checks each PR and posts (or updates) one comment with the docs it can falsify.</>,
     lang: 'yaml',
-    file: '.github/workflows/lockstep.yml',
+    file: '.github/workflows/staleproof.yml',
     code: `on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -503,9 +503,9 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: rajkaria/lockstep/action@main
+      - uses: rajkaria/staleproof/action@main
         with:
-          falkordb-url: \${{ secrets.LOCKSTEP_FALKORDB_URL }}
+          falkordb-url: \${{ secrets.STALEPROOF_FALKORDB_URL }}
           org: falkordb`,
     doc: '#/docs/github-action',
     note: 'The action is written and its commands are tested against the CLI; it has not yet run on a live repository.',
@@ -517,7 +517,7 @@ jobs:
     title: 'Ten tools for your coding agent',
     body: <>One command adds the MCP server. Every tool description includes its Cypher, and every result lists the queries it ran.</>,
     lang: 'bash',
-    code: `$ claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y ${PACKAGE} mcp
+    code: `$ claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y ${PACKAGE} mcp
 
 # then ask:
 > Which docs can ${PR} falsify? Run the examples and give me the patch.`,

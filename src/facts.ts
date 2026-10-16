@@ -43,7 +43,7 @@ export function grepBaseline(url: string, names: string[], reached: string[], se
   return { url, names, reached: reachedSet.size, grepFound, grepOutside: hits.size - grepFound };
 }
 
-/** Every number Lockstep's README quotes, computed from the live graph. */
+/** Every number Staleproof's README quotes, computed from the live graph. */
 export async function collectFacts(graph: OrgGraph, falkordbVersion = 'unknown'): Promise<Facts> {
   const nodes: Record<string, number> = {};
   for (const r of (await graph.run<{ label: string; n: number }>(Q.graphCounts)).rows) nodes[r.label] = r.n;
@@ -93,7 +93,7 @@ export function factsMarkdown(f: Facts): string {
   const lines: string[] = [];
   lines.push(`# FACTS`, '');
   lines.push(
-    `Generated from the \`${f.org}\` graph by \`lockstep-docs facts\` at ${f.generatedAt} (FalkorDB ${f.falkordb}).`,
+    `Generated from the \`${f.org}\` graph by \`staleproof facts\` at ${f.generatedAt} (FalkorDB ${f.falkordb}).`,
     'Every number in the README comes from this file. Regenerate it; never edit it by hand.',
     '',
   );

@@ -87,7 +87,7 @@ export async function githubJson<T>(path: string, opts: GitHubOptions = {}, init
     ...init,
     headers: {
       Accept: 'application/vnd.github+json',
-      'User-Agent': 'lockstep-docs',
+      'User-Agent': 'staleproof',
       'X-GitHub-Api-Version': '2022-11-28',
       ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
       ...(init.headers ?? {}),

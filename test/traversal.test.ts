@@ -4,7 +4,7 @@ import * as Q from '../src/graph/queries.js';
 import { testGraph } from './helpers.js';
 
 /**
- * FalkorDB 4.18.3 (the falkordblite build `lockstep-docs db start` runs) can miss nodes in a variable-length
+ * FalkorDB 4.18.3 (the falkordblite build `staleproof db start` runs) can miss nodes in a variable-length
  * pattern that binds no path variable when a node is reachable along two routes of different length: here
  * `search` calls `err` directly and through `validate`, so callers above `search` drop out of
  * `(err)<-[:CALLS*0..3]-(t)`. `WHERE NOT (pattern)` then "proves" an absence that isn't there. The shape is the

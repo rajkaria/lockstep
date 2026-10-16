@@ -25,10 +25,10 @@ describe('MCP server (stdio, FalkorDB)', () => {
     const transport = new StdioClientTransport({
       command: join(root, 'node_modules', '.bin', 'tsx'),
       args: [join(root, 'src', 'cli.ts'), 'mcp'],
-      env: { ...(process.env as Record<string, string>), FALKORDB_URL: inject('falkordbUrl'), LOCKSTEP_ORG: graph.name },
+      env: { ...(process.env as Record<string, string>), FALKORDB_URL: inject('falkordbUrl'), STALEPROOF_ORG: graph.name },
       stderr: 'pipe',
     });
-    client = new Client({ name: 'lockstep-test', version: '0.0.0' });
+    client = new Client({ name: 'staleproof-test', version: '0.0.0' });
     await client.connect(transport);
   }, 60_000);
   afterAll(async () => {

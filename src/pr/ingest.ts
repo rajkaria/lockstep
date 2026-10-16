@@ -33,7 +33,7 @@ export async function ingestPullRequest(graph: OrgGraph, config: Config, prUrl: 
   const repoRow = await graph.run<{ name: string }>(`MATCH (r:Repo {name: $name}) RETURN r.name AS name`, { name: ref.fullName });
   if (repoRow.rows.length === 0) {
     throw new NotIndexedError(
-      `${ref.fullName} is not indexed in the "${graph.name}" graph. Run: lockstep-docs index ${ref.fullName} (plus the repositories that document it).`,
+      `${ref.fullName} is not indexed in the "${graph.name}" graph. Run: staleproof index ${ref.fullName} (plus the repositories that document it).`,
     );
   }
   const gh = { token: config.githubToken, cacheDir: join(config.home, 'cache') };

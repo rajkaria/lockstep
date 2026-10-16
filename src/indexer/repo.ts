@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { promisify } from 'node:util';
+import { setting } from '../config.js';
 
 const exec = promisify(execFile);
 
@@ -22,9 +23,9 @@ export async function git(cwd: string, args: string[], opts: { maxBuffer?: numbe
 
 let gitCheck: Promise<boolean> | undefined;
 
-/** Whether `git` can run here (false on serverless hosts, or when LOCKSTEP_INGEST=github). */
+/** Whether `git` can run here (false on serverless hosts, or when STALEPROOF_INGEST=github). */
 export function gitAvailable(): Promise<boolean> {
-  if (process.env.LOCKSTEP_INGEST === 'github') return Promise.resolve(false);
+  if (setting('INGEST') === 'github') return Promise.resolve(false);
   gitCheck ??= exec('git', ['--version']).then(
     () => true,
     () => false,

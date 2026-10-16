@@ -153,8 +153,9 @@ export function installFailure(spec: string[], stderr: string): string {
 async function buildVenv(home: string, key: string, targets: InstallTarget[], spec: string[], log?: (m: string) => void): Promise<string> {
   const venv = join(home, 'venvs', key);
   const python = join(venv, 'bin', 'python');
-  const marker = join(venv, '.lockstep-ok');
-  if (existsSync(marker) && existsSync(python)) return python;
+  const marker = join(venv, '.staleproof-ok');
+  // Venvs built before the rename carry `.lockstep-ok` and are reused as they are.
+  if ((existsSync(marker) || existsSync(join(venv, '.lockstep-ok'))) && existsSync(python)) return python;
   log?.(`building sandbox environment for ${spec.join(', ')}`);
   const src = join(home, 'src', key);
   await rm(src, { recursive: true, force: true });
@@ -196,7 +197,7 @@ export async function runInSandbox(
   code: string,
   opts: { scratchPort: number; scratchHost?: string; timeoutMs: number },
 ): Promise<SandboxRun> {
-  const work = await mkdtemp(join(tmpdir(), 'lockstep-run-'));
+  const work = await mkdtemp(join(tmpdir(), 'staleproof-run-'));
   try {
     const shim = join(work, '_shim');
     await mkdir(shim);
@@ -210,8 +211,8 @@ export async function runInSandbox(
       PYTHONPATH: shim,
       PYTHONDONTWRITEBYTECODE: '1',
       PYTHONUNBUFFERED: '1',
-      LOCKSTEP_SCRATCH_HOST: opts.scratchHost ?? '127.0.0.1',
-      LOCKSTEP_SCRATCH_PORT: String(opts.scratchPort),
+      STALEPROOF_SCRATCH_HOST: opts.scratchHost ?? '127.0.0.1',
+      STALEPROOF_SCRATCH_PORT: String(opts.scratchPort),
     };
     const r = await runProcess(python, ['-s', 'example.py'], { cwd: work, env, timeoutMs: opts.timeoutMs });
     return { ...r, python };

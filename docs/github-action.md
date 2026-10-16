@@ -8,16 +8,16 @@ The composite action in [action/action.yml](../action/action.yml) comments on ev
 
    ```bash
    export FALKORDB_URL='falkor://falkordb:<password>@<host>:<port>'
-   npx -y lockstep-docs --org falkordb index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+   npx -y staleproof --org falkordb index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
    ```
 
-2. In the repository's settings, add the secret `LOCKSTEP_FALKORDB_URL` with that URL. Optionally add `ANTHROPIC_API_KEY` for agent mode.
+2. In the repository's settings, add the secret `STALEPROOF_FALKORDB_URL` with that URL. Optionally add `ANTHROPIC_API_KEY` for agent mode.
 
-3. Add the workflow from [examples/lockstep.yml](../examples/lockstep.yml) as `.github/workflows/lockstep.yml`:
+3. Add the workflow from [examples/staleproof.yml](../examples/staleproof.yml) as `.github/workflows/staleproof.yml`:
 
    ```yaml
-   # .github/workflows/lockstep.yml — comment on every pull request with the docs it can falsify.
-   name: Lockstep
+   # .github/workflows/staleproof.yml — comment on every pull request with the docs it can falsify.
+   name: Staleproof
    on:
      pull_request:
        types: [opened, synchronize, reopened]
@@ -30,25 +30,25 @@ The composite action in [action/action.yml](../action/action.yml) comments on ev
      docs:
        runs-on: ubuntu-latest
        steps:
-         - uses: rajkaria/lockstep/action@main
+         - uses: rajkaria/staleproof/action@main
            with:
-             falkordb-url: ${{ secrets.LOCKSTEP_FALKORDB_URL }}
+             falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
              org: falkordb
              # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}   # optional: the agent judges and proposes edits
    ```
 
-Set `org` to the organisation you indexed with `--org` (or `LOCKSTEP_ORG`). The workflow needs no checkout step: Lockstep clones the public repository itself.
+Set `org` to the organisation you indexed with `--org` (or `STALEPROOF_ORG`). The workflow needs no checkout step: Staleproof clones the public repository itself.
 
 ## Inputs
 
 | Input | Required | Default | Meaning |
 |---|---|---|---|
 | `falkordb-url` | yes | | The FalkorDB holding your graph, `falkor[s]://user:password@host:port`. Passed as `FALKORDB_URL`. Store it as a secret. |
-| `org` | yes | | The graph name, as used with `lockstep-docs index --org`. Passed as `LOCKSTEP_ORG`. |
-| `github-token` | no | `${{ github.token }}` | Passed to Lockstep as `GITHUB_TOKEN` (pull request metadata from the GitHub API) and to the GitHub CLI as `GH_TOKEN` (reading and writing the comment). |
+| `org` | yes | | The graph name, as used with `staleproof index --org`. Passed as `STALEPROOF_ORG`. |
+| `github-token` | no | `${{ github.token }}` | Passed to Staleproof as `GITHUB_TOKEN` (pull request metadata from the GitHub API) and to the GitHub CLI as `GH_TOKEN` (reading and writing the comment). |
 | `anthropic-api-key` | no | `''` | Selects the mode. Empty: graph mode. Set: agent mode, passed as `ANTHROPIC_API_KEY`. |
 | `reindex` | no | `'false'` | `'true'` re-indexes this repository before the check. Read [Keep the graph current](#keep-the-graph-current) before turning it on. |
-| `version` | no | `latest` | The `lockstep-docs` npm version to run. |
+| `version` | no | `latest` | The `staleproof` npm version to run. |
 
 ## Permissions and secrets
 
@@ -56,7 +56,7 @@ Set `org` to the organisation you indexed with `--org` (or `LOCKSTEP_ORG`). The 
 |---|---|
 | `pull-requests: write` | Create and update the comment on the pull request. |
 | `contents: read` | The default read access for the workflow. |
-| Secret `LOCKSTEP_FALKORDB_URL` | The graph's URL, including its password. |
+| Secret `STALEPROOF_FALKORDB_URL` | The graph's URL, including its password. |
 | Secret `ANTHROPIC_API_KEY` (optional) | Agent mode. |
 
 The action reads the pull request URL and number from the `pull_request` event (`github.event.pull_request.html_url` and `.number`), so it works only in workflows triggered by pull request events.
@@ -67,20 +67,20 @@ The action reads the pull request URL and number from the `pull_request` event (
 2. **Re-index this repository**, only when `reindex` is `'true'`:
 
    ```bash
-   npx -y "lockstep-docs@<version>" index "<owner>/<repo>"
+   npx -y "staleproof@<version>" index "<owner>/<repo>"
    ```
 
-   with `FALKORDB_URL`, `LOCKSTEP_ORG` and `GITHUB_TOKEN` set from the inputs.
+   with `FALKORDB_URL`, `STALEPROOF_ORG` and `GITHUB_TOKEN` set from the inputs.
 3. **Check the pull request**:
 
    ```bash
    mode="--no-agent"
    if [ -n "$ANTHROPIC_API_KEY" ]; then mode=""; fi
-   npx -y "lockstep-docs@<version>" check "$PR_URL" $mode --format markdown --out lockstep-comment.md
+   npx -y "staleproof@<version>" check "$PR_URL" $mode --format markdown --out staleproof-comment.md
    ```
 
-   with `FALKORDB_URL`, `LOCKSTEP_ORG`, `GITHUB_TOKEN`, `ANTHROPIC_API_KEY` and `PR_URL` set.
-4. **Post or update the comment**: the GitHub CLI lists the pull request's comments (all pages), takes the first one whose body starts with `<!-- lockstep-docs -->`, and replaces its body with `lockstep-comment.md`. If there is none, it posts a new comment.
+   with `FALKORDB_URL`, `STALEPROOF_ORG`, `GITHUB_TOKEN`, `ANTHROPIC_API_KEY` and `PR_URL` set.
+4. **Post or update the comment**: the GitHub CLI lists the pull request's comments (all pages), takes the first one whose body starts with `<!-- staleproof -->`, and replaces its body with `staleproof-comment.md`. If there is none, it posts a new comment.
 
 Because the comment is found by its first-line marker, each run of the workflow edits the same comment instead of adding a new one.
 
@@ -94,15 +94,15 @@ Because the comment is found by its first-line marker, each run of the workflow 
 | Comment | Impact table, cleared symbols, and any verdicts recorded earlier (by an agent check, an MCP client or the API). | The same, with this check's verdicts and the agent's summary. |
 | Cost | Nothing beyond the runner and FalkorDB. | Model tokens; minutes per pull request (a 43-section check takes about 6 minutes). |
 
-Agent mode uses the default model, `claude-sonnet-5-5`. The action has no inputs for `ANTHROPIC_BASE_URL` or `LOCKSTEP_MODEL`; to use an Anthropic-compatible provider such as DeepSeek, set them as job-level `env:` in the workflow, which the action's steps inherit (not exercised). When an agent check ends with status `error` or `refused`, the check step exits with 1 and the comment is not posted.
+Agent mode uses the default model, `claude-sonnet-5-5`. The action has no inputs for `ANTHROPIC_BASE_URL` or `STALEPROOF_MODEL`; to use an Anthropic-compatible provider such as DeepSeek, set them as job-level `env:` in the workflow, which the action's steps inherit (not exercised). When an agent check ends with status `error` or `refused`, the check step exits with 1 and the comment is not posted.
 
 ## The comment
 
 The comment is the Markdown that `check --format markdown` renders ([src/format/markdown.ts](../src/format/markdown.ts)). Its shape, with placeholders in angle brackets:
 
 ```markdown
-<!-- lockstep-docs -->
-### Lockstep: docs this pull request can falsify
+<!-- staleproof -->
+### Staleproof: docs this pull request can falsify
 
 <n> changed symbols (and <m> added) reach <total> doc sections (<b> breaking, <a> signature, <c> behavior; <x> in other repositories).
 
@@ -124,16 +124,16 @@ _<k> more sections not shown._
 |---|---|---|
 | <ok|stale|governed|skipped> | [<heading>](<url>) | <reason> |
 
-Proposed edits: `npx lockstep-docs patch <pr-url>`
+Proposed edits: `npx staleproof patch <pr-url>`
 
 <the agent's summary, in agent mode>
 
-<sub>Lockstep · FalkorDB graph `<org>` · <before>..<after></sub>
+<sub>Staleproof · FalkorDB graph `<org>` · <before>..<after></sub>
 ```
 
 | Part | Content |
 |---|---|
-| Marker | `<!-- lockstep-docs -->` on the first line, invisible on GitHub. The post step finds the comment by it. |
+| Marker | `<!-- staleproof -->` on the first line, invisible on GitHub. The post step finds the comment by it. |
 | Summary | The impact summary: changed symbols, sections reached, the count per severity, and how many sections are in other repositories. When the pull request changed no Python symbol, it says so and the table is omitted. |
 | Sections table | One row per impacted section. **Change** is `**breaking**` (removed, renamed, or a removed export), `**signature**` or `behavior` (body changed). **Evidence path** lists the nodes from the changed symbol to the doc. **Hops** is the path length and its confidence: `exact` when every edge was resolved through imports and types, `by-name` or `late` otherwise. Rows are in PageRank order of their page. Only the first 40 sections are rendered; the rest are counted below the table. |
 | Cleared | Collapsed. The changed symbols with no path to any doc within 3 call hops, each with its raw text-match count and the `git grep` command to check it. Omitted when nothing is cleared. |
@@ -148,10 +148,10 @@ The comment is only as current as the graph. The `reindex` input runs `index "<o
 - **It indexes this repository alone.** Calls and doc links cross repositories only among the repositories of one `index` run. Re-indexing one repository re-resolves its calls and its docs' links against itself only, so its edges into the other repositories disappear until you re-index them all together. Links that earlier pull request checks added for removed symbols are dropped as well.
 - **It indexes the default branch's head.** No `--ref` is passed, so the repository is checked out at the remote default branch's head, not at the pull request's base branch. The input's description in `action.yml` says "at the base branch"; the code does not do that.
 
-Leave `reindex` at `'false'` unless the graph holds this one repository only. Instead, re-index every repository together on a schedule, from any one repository, for example as `.github/workflows/lockstep-index.yml`:
+Leave `reindex` at `'false'` unless the graph holds this one repository only. Instead, re-index every repository together on a schedule, from any one repository, for example as `.github/workflows/staleproof-index.yml`:
 
 ```yaml
-name: Lockstep index
+name: Staleproof index
 on:
   schedule:
     - cron: '0 3 * * *'
@@ -169,9 +169,9 @@ jobs:
           node-version: 22
       - name: Re-index every repository in one command
         env:
-          FALKORDB_URL: ${{ secrets.LOCKSTEP_FALKORDB_URL }}
-          LOCKSTEP_ORG: falkordb
-        run: npx -y lockstep-docs@0.1.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+          FALKORDB_URL: ${{ secrets.STALEPROOF_FALKORDB_URL }}
+          STALEPROOF_ORG: falkordb
+        run: npx -y staleproof@0.1.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
 This workflow uses only the documented `index` command; like the action, it has not been run on GitHub. Re-indexing never deletes: what disappeared is marked `gone`, and verdicts and decisions keep pointing at it.
@@ -181,9 +181,9 @@ This workflow uses only the documented `index` command; like the action, it has 
 `version: latest` runs whatever npm has at the time of each run. For repeatable results, pin both the package and the action:
 
 ```yaml
-- uses: rajkaria/lockstep/action@<commit-sha>
+- uses: rajkaria/staleproof/action@<commit-sha>
   with:
-    falkordb-url: ${{ secrets.LOCKSTEP_FALKORDB_URL }}
+    falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
     org: falkordb
     version: 0.1.0
 ```

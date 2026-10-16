@@ -80,7 +80,7 @@ export function TraceList({ view }: { view: CheckView }) {
 function TraceRow({ item }: { item: TraceItem }) {
   if (item.kind === 'thinking') return <li className="t-thinking">{item.text}</li>;
   if (item.kind === 'text') return <li className="t-text">{item.text}</li>;
-  if (item.kind === 'nudge') return <li className="t-nudge">{item.missing.length} impacted section(s) still had no verdict — Lockstep reminded the model.</li>;
+  if (item.kind === 'nudge') return <li className="t-nudge">{item.missing.length} impacted section(s) still had no verdict — Staleproof reminded the model.</li>;
   return (
     <li className={`t-tool ${item.result?.isError ? 'is-error' : ''} ${item.result ? '' : 'pending'}`}>
       <div className="t-call">

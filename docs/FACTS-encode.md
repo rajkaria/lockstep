@@ -1,6 +1,6 @@
 # FACTS
 
-Generated from the `encode` graph by `lockstep-docs facts` at 2026-10-15T16:46:14.410Z (FalkorDB 4.18.3).
+Generated from the `encode` graph by `staleproof facts` at 2026-10-15T16:46:14.410Z (FalkorDB 4.18.3).
 Every number in the README comes from this file. Regenerate it; never edit it by hand.
 
 ## Repositories

@@ -26,7 +26,7 @@ export function skipReason(code: string, lang: string): string | undefined {
   if (lang !== 'python') return `not Python (${lang || 'no language tag'})`;
   if (!code.trim()) return 'empty example';
   const llm = LLM.exec(code);
-  if (llm) return `needs an LLM provider (${llm[0].trim().slice(0, 40)}); Lockstep does not hold provider keys`;
+  if (llm) return `needs an LLM provider (${llm[0].trim().slice(0, 40)}); Staleproof does not hold provider keys`;
   const file = LOCAL_FILE.exec(code);
   if (file && !/\.(write|dump|to_csv|to_json)\b/.test(code)) return `reads a local file the docs do not provide (${file[1]})`;
   if (PLACEHOLDER.test(code)) return 'contains placeholders to fill in (e.g. "<your-host>")';

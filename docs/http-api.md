@@ -1,15 +1,15 @@
 # HTTP API
 
-`lockstep-docs serve` runs one HTTP server with a JSON API, a Server-Sent Events (SSE) stream for live checks, and the web app. This page lists every route with its parameters, response fields, status codes, error bodies and rate limits, and shows how to read the check stream from code. It is for developers who build a client, a dashboard or an integration against a running server. The same `/api` routes answer on a Vercel deployment, through the function in [api/[...route].js](../api/[...route].js).
+`staleproof serve` runs one HTTP server with a JSON API, a Server-Sent Events (SSE) stream for live checks, and the web app. This page lists every route with its parameters, response fields, status codes, error bodies and rate limits, and shows how to read the check stream from code. It is for developers who build a client, a dashboard or an integration against a running server. The same `/api` routes answer on a Vercel deployment, through the function in [api/[...route].js](../api/[...route].js).
 
 ## Start the server and call it
 
 ```bash
-npx -y lockstep-docs serve
+npx -y staleproof serve
 curl -s http://127.0.0.1:8080/api/health
 ```
 
-The server binds `127.0.0.1:8080` by default (`--host`, `--port`, or `HOST` and `PORT`; see [Configuration](configuration.md#server)). On startup it prints one line to stderr, either `lockstep serve: http://127.0.0.1:8080 (graph "falkordb", agent on, <model>)` or `... agent off: no Claude credentials, graph mode only`. It connects to FalkorDB before it listens, so it exits with `cannot reach FalkorDB at ...` when the graph server is down.
+The server binds `127.0.0.1:8080` by default (`--host`, `--port`, or `HOST` and `PORT`; see [Configuration](configuration.md#server)). On startup it prints one line to stderr, either `staleproof serve: http://127.0.0.1:8080 (graph "falkordb", agent on, <model>)` or `... agent off: no Claude credentials, graph mode only`. It connects to FalkorDB before it listens, so it exits with `cannot reach FalkorDB at ...` when the graph server is down.
 
 Run a graph-mode check and watch the trace arrive:
 
@@ -60,7 +60,7 @@ The API has no authentication. Anyone who can reach the port can start checks (w
 - **Counting**: a request counts before it is validated, so a request rejected with 400 still uses one slot.
 - **Over the limit**: `429 {"error": "rate limited: try again later"}`. No `Retry-After` header is sent; the oldest request in the window drops out an hour after it was made.
 - **Scope**: counts live in memory, per process. A restart resets them; on Vercel each function instance counts on its own.
-- **Changing it**: `createApp({ rateLimit })` in the [library](library.md#mount-the-http-api-in-your-own-server). `lockstep-docs serve` and the Vercel function use the default of 30; there is no flag or environment variable.
+- **Changing it**: `createApp({ rateLimit })` in the [library](library.md#mount-the-http-api-in-your-own-server). `staleproof serve` and the Vercel function use the default of 30; there is no flag or environment variable.
 
 ## One check at a time
 
@@ -85,7 +85,7 @@ The answer recorded in the bundled snapshot (a server without model credentials)
 | Field | Type | Meaning |
 |---|---|---|
 | `ok` | `true` | Always `true` when the route answers |
-| `version` | string | The `lockstep-docs` package version |
+| `version` | string | The `staleproof` package version |
 | `org` | string | The graph name (the org slug) |
 | `falkordb` | string | The FalkorDB module version from `MODULE LIST`, or `unknown` if the server does not report it |
 | `agent` | object | `{available: true, model, effort, provider}` or `{available: false, reason}` |
@@ -96,7 +96,7 @@ The answer recorded in the bundled snapshot (a server without model credentials)
 
 ## GET /api/stats
 
-The facts behind [FACTS.md](FACTS.md), as JSON: the same object `lockstep-docs facts --json` prints. It is computed from the graph and cached for 60 seconds per process.
+The facts behind [FACTS.md](FACTS.md), as JSON: the same object `staleproof facts --json` prints. It is computed from the graph and cached for 60 seconds per process.
 
 ```bash
 curl -s http://127.0.0.1:8080/api/stats
@@ -119,7 +119,7 @@ curl -s http://127.0.0.1:8080/api/stats
 
 ## GET /api/prs
 
-The pull requests the home page lists: `serve --preload`, else `LOCKSTEP_PRELOADED`, else falkordb-py #262, #267 and #276.
+The pull requests the home page lists: `serve --preload`, else `STALEPROOF_PRELOADED`, else falkordb-py #262, #267 and #276.
 
 ```bash
 curl -s http://127.0.0.1:8080/api/prs
@@ -180,7 +180,7 @@ Run a check of one pull request and stream its trace as Server-Sent Events.
 
 What each mode does (definitions in [Agent mode and graph mode](concepts.md#agent-mode-and-graph-mode)):
 
-- **Agent mode**: the model chooses every tool call and records a verdict or an edit for each impacted section. The server gives it at most 40 model turns and, if `LOCKSTEP_CHECK_BUDGET_MS` is set, a wall-clock budget (240 s by default on Vercel, none elsewhere). Neither can be changed per request.
+- **Agent mode**: the model chooses every tool call and records a verdict or an edit for each impacted section. The server gives it at most 40 model turns and, if `STALEPROOF_CHECK_BUDGET_MS` is set, a wall-clock budget (240 s by default on Vercel, none elsewhere). Neither can be changed per request.
 - **Graph mode**: no model. The tools run in a fixed order: `impact` (3 hops), `clearance`, `rank_sections` on the first impact page, then `run_example` before and after the PR for at most 3 exactly-linked examples on that page. It writes no verdicts.
 
 The first check of a pull request ingests it (GitHub metadata and the symbol-level diff); later checks reuse what the graph stored.
@@ -192,7 +192,7 @@ Responses before the stream starts:
 | 400 | `{"error": "not a GitHub pull request URL: \"<input>\" (expected https://github.com/<owner>/<repo>/pull/<n>)"}` | `pr_url` missing or malformed |
 | 409 | `{"error": "agent mode needs Claude API credentials on the server (ANTHROPIC_API_KEY); graph mode works without them", "agentUnavailable": true}` | `mode: "agent"` on a server without model credentials (an Anthropic-compatible provider's key in `ANTHROPIC_API_KEY` counts) |
 | 429 | `{"error": "rate limited: try again later"}` | over the `check` limit |
-| 503 | `{"error": "the Lockstep API is not connected to FalkorDB (<message>); set FALKORDB_URL", "offline": true}` | Vercel only, when the function cannot reach FalkorDB |
+| 503 | `{"error": "the Staleproof API is not connected to FalkorDB (<message>); set FALKORDB_URL", "offline": true}` | Vercel only, when the function cannot reach FalkorDB |
 | 200 | `text/event-stream` | the check runs |
 
 Once the stream has started the status is 200, so failures after that point (the repository is not indexed, a GitHub error, a model that cannot be constructed) arrive as an `error` event.
@@ -233,7 +233,7 @@ The `data` of every message is one of these objects, discriminated by `type`. Te
 - `data` on a `tool_result` is the tool's full result (the shapes are in [Tools reference](tools.md)); only the stored trace trims it.
 - In graph mode `usage` is all zeros, `verdicts` is `0` and `missing` is empty.
 - In agent mode, `missing` lists the impacted sections with no verdict or edit from this check. After any `impact` call the loop collects the section ids of every impact page, including pages the model has not requested, so `done` means every impacted section was closed.
-- Typical `error` messages: `<owner/repo> is not indexed in the "<graph>" graph. Run: lockstep-docs index <owner/repo> (plus the repositories that document it).`, the GitHub errors (rate limit, not found), and `"<model>" is a Claude model name, but the model endpoint is an Anthropic-compatible provider ...`. Failures inside the loop, such as the model API rejecting the key, end the check instead: `check_finished` with `status: "error"` and a summary starting `The check failed:`. Each message is explained in [Troubleshooting](troubleshooting.md#common-errors).
+- Typical `error` messages: `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`, the GitHub errors (rate limit, not found), and `"<model>" is a Claude model name, but the model endpoint is an Anthropic-compatible provider ...`. Failures inside the loop, such as the model API rejecting the key, end the check instead: `check_finished` with `status: "error"` and a summary starting `The check failed:`. Each message is explained in [Troubleshooting](troubleshooting.md#common-errors).
 
 ### Check statuses
 
@@ -281,7 +281,7 @@ curl -sG http://127.0.0.1:8080/api/patch --data-urlencode 'pr=https://github.com
 | `verdicts[]` | the latest verdict per section: `{section, repo, path, heading, lineno, endLineno, url, id, verdict, status, reason, newText, oldText, evidence, cites, runs: [{id, status, side, error}]}` |
 | `conflicts[]` | `{section, reason}` for edits that could not be placed |
 
-The patch is built from the latest verdict of each section: a `stale` verdict with new text whose review status is not `rejected`. Each file is read at the commit the graph indexed, from the local clone in `LOCKSTEP_HOME` when there is one, otherwise from `raw.githubusercontent.com`, so the route also works on hosts without git such as Vercel. An edit whose section text differs from what the verdict was written against becomes a conflict (`<path> changed since it was indexed at <sha7>`), and so does a file that is missing at that commit (`<path> not found in <repo>@<sha7>`).
+The patch is built from the latest verdict of each section: a `stale` verdict with new text whose review status is not `rejected`. Each file is read at the commit the graph indexed, from the local clone in `STALEPROOF_HOME` when there is one, otherwise from `raw.githubusercontent.com`, so the route also works on hosts without git such as Vercel. An edit whose section text differs from what the verdict was written against becomes a conflict (`<path> changed since it was indexed at <sha7>`), and so does a file that is missing at that commit (`<path> not found in <repo>@<sha7>`).
 
 On the FalkorDB examples the patch is empty: every verdict recorded on falkordb-py #262, #267 and #276 is `ok`.
 
@@ -316,7 +316,7 @@ curl -s -X POST http://127.0.0.1:8080/api/decisions \
 
 ## POST /api/verdicts/:id/review
 
-A maintainer accepts or rejects a verdict. Reviews are how precision is measured, and a rejected `stale` verdict is left out of the docs patch. The CLI equivalent is `lockstep-docs verdict accept|reject <id>`. The web app has no control for it.
+A maintainer accepts or rejects a verdict. Reviews are how precision is measured, and a rejected `stale` verdict is left out of the docs patch. The CLI equivalent is `staleproof verdict accept|reject <id>`. The web app has no control for it.
 
 | Body field | Type | Required | Meaning |
 |---|---|---|---|
@@ -355,7 +355,7 @@ When the package's built web app (`web/dist`) exists, as it does in the npm pack
 | `/docs/<slug>.md` | one documentation page as Markdown, `text/markdown; charset=utf-8`. `<slug>` is lowercase letters, digits and `-` (for example `/docs/http-api.md`); an unknown page is 404, and any other shape falls through to `index.html` |
 | `/robots.txt`, `/sitemap.xml` | crawler files, `text/plain` and `application/xml` |
 
-`/snapshot.json` is served as JSON when the built web app includes one; see [Snapshot mode](#snapshot-mode). Without a built web app, `GET /` answers the text ``Lockstep API is running. The web UI is not built (run `npm run build:web`).`` and other non-API paths are 404.
+`/snapshot.json` is served as JSON when the built web app includes one; see [Snapshot mode](#snapshot-mode). Without a built web app, `GET /` answers the text ``Staleproof API is running. The web UI is not built (run `npm run build:web`).`` and other non-API paths are 404.
 
 On Vercel these files are served by Vercel from `web/dist`, not by the function, and `/snapshot.json` is among them.
 
@@ -425,23 +425,23 @@ A static deployment can show the demo without a database. When an API call fails
 | In snapshot mode | Behaviour |
 |---|---|
 | Health, stats, preloaded PRs, recent checks, stored traces, the model page | answered from the snapshot; health reports `agent: {available: false, reason: "snapshot mode"}` |
-| Section text and the docs patch | fail with `the Lockstep API is unreachable and no snapshot is bundled` |
-| Running a check, recording a decision | fail with `Live checks need the Lockstep API connected to FalkorDB; this deployment is showing a snapshot. Run it locally: npx lockstep-docs serve` |
+| Section text and the docs patch | fail with `the Staleproof API is unreachable and no snapshot is bundled` |
+| Running a check, recording a decision | fail with `Live checks need the Staleproof API connected to FalkorDB; this deployment is showing a snapshot. Run it locally: npx staleproof serve` |
 
-`npm run snapshot` (in a clone of the repository; [scripts/snapshot.ts](../scripts/snapshot.ts)) writes `web/public/snapshot.json` from the graph `FALKORDB_URL` and `LOCKSTEP_ORG` point at: health, stats, the preloaded PRs (`LOCKSTEP_PRELOADED`), the model page, and stored traces for the latest check of each preloaded PR and for every agent check among the 20 most recent. The snapshot's list of recent checks keeps only the checks whose trace it carries. The next `npm run build` copies it into `web/dist`.
+`npm run snapshot` (in a clone of the repository; [scripts/snapshot.ts](../scripts/snapshot.ts)) writes `web/public/snapshot.json` from the graph `FALKORDB_URL` and `STALEPROOF_ORG` point at: health, stats, the preloaded PRs (`STALEPROOF_PRELOADED`), the model page, and stored traces for the latest check of each preloaded PR and for every agent check among the 20 most recent. The snapshot's list of recent checks keeps only the checks whose trace it carries. The next `npm run build` copies it into `web/dist`.
 
 ```bash
 FALKORDB_URL='falkor://localhost:6379' npm run snapshot
 npm run build
 ```
 
-Snapshot mode serves static hosting, where Vercel serves `web/dist/snapshot.json` as a file and the function answers 503 without FalkorDB. `lockstep-docs serve` cannot be in this state at startup (it refuses to start without FalkorDB), and it does not serve `/snapshot.json`.
+Snapshot mode serves static hosting, where Vercel serves `web/dist/snapshot.json` as a file and the function answers 503 without FalkorDB. `staleproof serve` cannot be in this state at startup (it refuses to start without FalkorDB), and it does not serve `/snapshot.json`.
 
 ## On Vercel
 
 The function in [api/[...route].js](../api/[...route].js) wraps the same app, so every `/api` route above behaves the same, with these differences:
 
-- **No database**: it connects to FalkorDB on the first request. If that fails, every `/api` route answers `503 {"error": "the Lockstep API is not connected to FalkorDB (<message>); set FALKORDB_URL", "offline": true}`, and the next request tries again.
+- **No database**: it connects to FalkorDB on the first request. If that fails, every `/api` route answers `503 {"error": "the Staleproof API is not connected to FalkorDB (<message>); set FALKORDB_URL", "offline": true}`, and the next request tries again.
 - **No git**: pull requests are ingested through the GitHub API, examples are not executed (runs recorded on the graph by another host are still answered), and `clearance` reports 0 raw text matches because there are no clones to grep.
 - **Time**: the function may run 300 s (`maxDuration` in [vercel.json](../vercel.json)); agent checks stop at 240 s by default and end `incomplete`.
 - **Per instance**: rate limits, the one-check-at-a-time queue and the stats cache are per function instance.
@@ -460,7 +460,7 @@ The function in [api/[...route].js](../api/[...route].js) wraps the same app, so
 ## Related
 
 - [CLI](cli.md): the same operations from a terminal, including `serve`
-- [Configuration](configuration.md): `PORT`, `HOST`, `LOCKSTEP_PRELOADED`, `LOCKSTEP_CHECK_BUDGET_MS` and the model variables
+- [Configuration](configuration.md): `PORT`, `HOST`, `STALEPROOF_PRELOADED`, `STALEPROOF_CHECK_BUDGET_MS` and the model variables
 - [Node.js library](library.md): `createApp` to mount this API in your own server
 - [Deploy](DEPLOY.md): Vercel, Docker Compose and a production checklist
 - [Troubleshooting and FAQ](troubleshooting.md)

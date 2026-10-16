@@ -27,7 +27,7 @@ export class MissingCredentialsError extends Error {}
 
 const NO_CREDENTIALS =
   'the agent needs model API credentials: set ANTHROPIC_API_KEY (or run `ant auth login`) for the Claude API, or ' +
-  'ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY and LOCKSTEP_MODEL for an Anthropic-compatible provider such as DeepSeek. ' +
+  'ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY and STALEPROOF_MODEL for an Anthropic-compatible provider such as DeepSeek. ' +
   'Use `check --no-agent` to run the graph tools without a model.';
 
 /** True when a base URL names another provider rather than the Claude API (`api.anthropic.com`). */
@@ -75,7 +75,7 @@ export class AnthropicModel implements ModelClient {
     if (this.compatible && /^claude-/i.test(opts.model)) {
       throw new Error(
         `"${opts.model}" is a Claude model name, but the model endpoint is an Anthropic-compatible provider, which would ` +
-          `answer with its own model under that name; set LOCKSTEP_MODEL to the provider's model (e.g. deepseek-v4-pro)`,
+          `answer with its own model under that name; set STALEPROOF_MODEL to the provider's model (e.g. deepseek-v4-pro)`,
       );
     }
     if (!opts.apiKey && !claudeCredentialsAvailable()) throw new MissingCredentialsError(NO_CREDENTIALS);

@@ -7,7 +7,7 @@ This page covers what the graph remembers between checks and how people steer it
 A decision is one sentence from a maintainer, attached to the doc sections or symbols it governs. Later checks find it and can cite it instead of flagging the docs again.
 
 ```bash
-npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" \
+npx -y staleproof decide "The async client keeps positional kwargs until 2.0" \
   --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__" \
   --author "maintainer" --source "https://github.com/FalkorDB/falkordb-py/issues/<n>"
 ```
@@ -16,7 +16,7 @@ It prints `Recorded decision dec-<id> governing 1 node(s).` The same decision ca
 
 | Interface | How | Notes |
 |---|---|---|
-| CLI | `lockstep-docs decide <text> --governs <id...> [--source <url>] [--author <name>] [--supersedes <decision-id>]` | `--governs` is required and takes several ids |
+| CLI | `staleproof decide <text> --governs <id...> [--source <url>] [--author <name>] [--supersedes <decision-id>]` | `--governs` is required and takes several ids |
 | MCP | `write_decision` with `text`, `governs`, and optional `source_url`, `author`, `supersedes` | Meant for a person driving an MCP client; the tool description says so |
 | HTTP | `POST /api/decisions` with the same JSON body as `write_decision` | Returns `{id, governed, summary}`; text is limited to 500 characters; rate-limited to 30 writes per hour per client |
 
@@ -43,7 +43,7 @@ So a decision on a function covers the docs of everything that calls it, up to t
 Decisions change. Record the new one with `--supersedes` (or `supersedes` in MCP and HTTP):
 
 ```bash
-npx -y lockstep-docs decide "The async client drops positional kwargs in 2.0; document keyword arguments only" \
+npx -y staleproof decide "The async client drops positional kwargs in 2.0; document keyword arguments only" \
   --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__" \
   --supersedes dec-<old-id>
 ```
@@ -82,8 +82,8 @@ A `governed` verdict without `cites` is refused: `a governed verdict must cite t
 Every verdict starts as `proposed`. A maintainer can accept or reject it:
 
 ```bash
-npx -y lockstep-docs verdict accept ver-<id>
-npx -y lockstep-docs verdict reject ver-<id> --by alice
+npx -y staleproof verdict accept ver-<id>
+npx -y staleproof verdict reject ver-<id> --by alice
 ```
 
 The CLI prints `ver-<id> accepted` (or `rejected`); `--by` defaults to `$USER`, else `maintainer`. Over HTTP:
@@ -161,7 +161,7 @@ falkordb-py#262 reaches one section, the README's "Asynchronous Example", throug
 1. **Record the decision**, governing the constructor:
 
    ```bash
-   npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" \
+   npx -y staleproof decide "The async client keeps positional kwargs until 2.0" \
      --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__"
    ```
 
@@ -170,7 +170,7 @@ falkordb-py#262 reaches one section, the README's "Asynchronous Example", throug
 2. **Check the pull request again** in agent mode:
 
    ```bash
-   npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
+   npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/262
    ```
 
    The model's first message includes `Since the last check: … 1 new decision(s): "The async client keeps positional kwargs until 2.0" (dec-<id>) …`.

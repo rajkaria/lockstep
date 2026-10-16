@@ -1,28 +1,28 @@
-# Lockstep
+# Staleproof
 
-> Lockstep keeps a software organisation’s documentation true to its code. For a GitHub pull request it walks a FalkorDB graph of code (Python symbols and call edges across repositories), docs (Markdown/MDX sections and code examples), maintainers’ decisions and past verdicts; runs the impacted docs examples before and after the change in a sandbox; and proposes the docs fix with the graph path behind each paragraph. Open source (MIT), published on npm as `lockstep-docs`.
+> Staleproof keeps a software organisation’s documentation true to its code. For a GitHub pull request it walks a FalkorDB graph of code (Python symbols and call edges across repositories), docs (Markdown/MDX sections and code examples), maintainers’ decisions and past verdicts; runs the impacted docs examples before and after the change in a sandbox; and proposes the docs fix with the graph path behind each paragraph. Open source (MIT), published on npm as `staleproof`.
 
 Quick facts for assistants:
 
-- Run: `npx -y lockstep-docs <command>` (Node 20+). Commands: `db start|stop|status`, `index <owner/repo...>`, `check <pr-url> [--no-agent]`, `run <example-id> --pr <url>`, `decide <text> --governs <id...>`, `verdict accept|reject <id>`, `patch <pr-url> [--open-pr]`, `mcp`, `serve`, `facts`.
-- MCP (Claude Code): `claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y lockstep-docs mcp`. Tools: impact, clearance, read_section, run_example, decisions_for, rank_sections, propose_edit, record_verdict, write_decision, docs_patch.
+- Run: `npx -y staleproof <command>` (Node 20+). Commands: `db start|stop|status`, `index <owner/repo...>`, `check <pr-url> [--no-agent]`, `run <example-id> --pr <url>`, `decide <text> --governs <id...>`, `verdict accept|reject <id>`, `patch <pr-url> [--open-pr]`, `mcp`, `serve`, `facts`.
+- MCP (Claude Code): `claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y staleproof mcp`. Tools: impact, clearance, read_section, run_example, decisions_for, rank_sections, propose_edit, record_verdict, write_decision, docs_patch.
 - Needs a FalkorDB server (`FALKORDB_URL`, default `falkor://localhost:6379`). Agent mode needs `ANTHROPIC_API_KEY` (Claude, or an Anthropic-compatible provider via `ANTHROPIC_BASE_URL`); without it, graph mode runs the same tools in a fixed order with no model.
 - Ids: Symbol `owner/repo:qualname`; DocSection `owner/repo:path#anchor`; CodeExample `owner/repo:path:index`.
 - Limits: code repositories are parsed as Python; docs can be any Markdown/MDX; public GitHub repositories only.
 
 ## Start here
 
-- [Introduction](docs/README.md): What Lockstep is, the problem it solves, and a map of the documentation.
+- [Introduction](docs/README.md): What Staleproof is, the problem it solves, and a map of the documentation.
 - [Quickstart](docs/getting-started.md): From zero to a checked pull request in five commands: local FalkorDB, index, check, patch, serve.
-- [Use cases](docs/use-cases.md): Who uses Lockstep and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, AI coding agents, multi-repo platforms.
+- [Use cases](docs/use-cases.md): Who uses Staleproof and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, AI coding agents, multi-repo platforms.
 
 ## Integrate
 
-- [CLI](docs/cli.md): Every lockstep-docs command and option, with examples and what each prints.
+- [CLI](docs/cli.md): Every staleproof command and option, with examples and what each prints.
 - [GitHub Action](docs/github-action.md): Comment on every pull request with the docs it can falsify: workflow, inputs, permissions, the comment format.
-- [MCP server](docs/mcp.md): Give Claude Code, Claude Desktop, Cursor or any MCP client the Lockstep tools over stdio.
-- [HTTP API](docs/http-api.md): Every endpoint of lockstep-docs serve: health, stats, streaming checks over SSE, traces, patches, decisions, verdict review.
-- [Node.js library](docs/library.md): Use Lockstep from TypeScript: index, check with or without a model, build patches, embed the API or the MCP server.
+- [MCP server](docs/mcp.md): Give Claude Code, Claude Desktop, Cursor or any MCP client the Staleproof tools over stdio.
+- [HTTP API](docs/http-api.md): Every endpoint of staleproof serve: health, stats, streaming checks over SSE, traces, patches, decisions, verdict review.
+- [Node.js library](docs/library.md): Use Staleproof from TypeScript: index, check with or without a model, build patches, embed the API or the MCP server.
 
 ## How it works
 
@@ -36,16 +36,16 @@ Quick facts for assistants:
 
 - [Tools reference](docs/tools.md): The ten tools the agent and MCP clients call: parameters, results, errors and the Cypher each one runs.
 - [Configuration](docs/configuration.md): Every environment variable and global CLI option, with defaults.
-- [Graph model and Cypher](docs/GRAPH-MODEL.md): Every Cypher statement Lockstep sends to FalkorDB, named and explained, generated from the code.
-- [Facts from the graph](docs/FACTS.md): Every number Lockstep quotes about FalkorDB’s repositories, computed from the graph.
+- [Graph model and Cypher](docs/GRAPH-MODEL.md): Every Cypher statement Staleproof sends to FalkorDB, named and explained, generated from the code.
+- [Facts from the graph](docs/FACTS.md): Every number Staleproof quotes about FalkorDB’s repositories, computed from the graph.
 - [Architecture](docs/ARCHITECTURE.md): Source layout and a check end to end, for contributors.
 
 ## Operate
 
-- [Deploy](docs/DEPLOY.md): Run Lockstep on Vercel with FalkorDB Cloud, on a VM with Docker Compose, or without Docker.
+- [Deploy](docs/DEPLOY.md): Run Staleproof on Vercel with FalkorDB Cloud, on a VM with Docker Compose, or without Docker.
 - [Troubleshooting and FAQ](docs/troubleshooting.md): Common errors and what they mean, limits stated plainly, and answers to frequent questions.
 
 ## Optional
 
-- [Live demo](https://lockstep-rho.vercel.app): paste a pull request and watch the check; the docs are also served as Markdown there
+- [Live demo](https://staleproof.dev): paste a pull request and watch the check; the docs are also served as Markdown there
 - [README](README.md): what it found on FalkorDB’s repositories, why the graph is load-bearing, limits

@@ -20,7 +20,7 @@ describe('diffRange', () => {
   let after: string;
 
   beforeAll(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'lockstep-diff-'));
+    dir = await mkdtemp(join(tmpdir(), 'staleproof-diff-'));
     await cp(join(FIXTURES, 'org', 'mini-client'), dir, { recursive: true });
     git(dir, 'init', '-q', '-b', 'main');
     git(dir, 'add', '-A');
@@ -87,7 +87,7 @@ describe('githubSource (serverless ingestion)', () => {
     const { join } = await import('node:path');
     const { diffWith, diffRange, parseNameStatus } = await import('../src/pr/changes.js');
     const { githubSource } = await import('../src/pr/github-diff.js');
-    const dir = await mkdtemp(join(tmpdir(), 'lockstep-gh-'));
+    const dir = await mkdtemp(join(tmpdir(), 'staleproof-gh-'));
     try {
       await cp(join(FIXTURES, 'org', 'mini-client'), dir, { recursive: true });
       git(dir, 'init', '-q', '-b', 'main');

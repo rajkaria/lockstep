@@ -29,7 +29,7 @@ import { loadConfig, type Config } from '../src/config.js';
 import type { PullRequestInfo } from '../src/pr/github.js';
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
-  return { ...loadConfig({}), home: join(FIXTURES, '..', '.lockstep-test-home'), ...overrides };
+  return { ...loadConfig({}), home: join(FIXTURES, '..', '.staleproof-test-home'), ...overrides };
 }
 
 export function fakePr(overrides: Partial<PullRequestInfo> = {}): PullRequestInfo {
@@ -62,7 +62,7 @@ export const gitIn = (cwd: string, ...args: string[]) =>
 
 /** The fixture org as real git repositories (one commit each) in a temp dir. */
 export async function makeGitOrg(): Promise<{ root: string; checkouts: Checkout[] }> {
-  const root = await mkdtemp(join(tmpdir(), 'lockstep-org-'));
+  const root = await mkdtemp(join(tmpdir(), 'staleproof-org-'));
   const checkouts: Checkout[] = [];
   for (const name of ['mini-client', 'mini-sdk', 'mini-docs']) {
     const dir = join(root, name);

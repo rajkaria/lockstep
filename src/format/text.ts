@@ -59,7 +59,7 @@ export function runText(d: RunExampleData): string {
 export function traceLine(e: TraceEvent): string | undefined {
   switch (e.type) {
     case 'check_started':
-      return `${bold('Lockstep')} checking ${e.pr} ${dim(`(${e.model}, ${e.checkId})`)}${e.since ? `\n${dim(`since the last check: ${e.since}`)}` : ''}`;
+      return `${bold('Staleproof')} checking ${e.pr} ${dim(`(${e.model}, ${e.checkId})`)}${e.since ? `\n${dim(`since the last check: ${e.since}`)}` : ''}`;
     case 'thinking':
       return dim(`  ${e.text.trim().split('\n').join('\n  ')}`);
     case 'tool_call':

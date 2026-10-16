@@ -1,6 +1,6 @@
 /**
  * A tolerant scanner for Markdown and MDX. Strict MDX parsers reject real-world
- * docs (Mintlify components, stray braces); Lockstep only needs headings, fenced
+ * docs (Mintlify components, stray braces); Staleproof only needs headings, fenced
  * code, inline code and links, which a line scanner gets right.
  */
 

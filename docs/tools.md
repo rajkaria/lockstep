@@ -69,7 +69,7 @@ The agent decides its own order; this is the order the system prompt and the MCP
 3. `decisions_for` on the section before editing it: a maintainer decision may say it stays as it is, and the history shows earlier verdicts.
 4. `run_example` with the pull request URL for sections that have Python examples: the before/after outcome is the strongest evidence.
 5. `propose_edit` for a section that is wrong, or `record_verdict` (`ok`, `governed`, `skipped`) for one that is not; several sections can share one `record_verdict`.
-6. `docs_patch` (MCP) or `lockstep-docs patch` for the diff.
+6. `docs_patch` (MCP) or `staleproof patch` for the diff.
 
 `clearance` (what no doc reaches) and `rank_sections` (which page matters most) are optional. For falkordb-py#262 the agent's order was impact → read_section → decisions_for → run_example → record_verdict.
 
@@ -79,7 +79,7 @@ A tool that cannot do its job throws an error with a message written for whoever
 
 - **In the agent loop**, the error goes back to the model as an error result for that tool call, the trace records it with `isError: true`, and the check continues.
 - **Over MCP**, the call returns `isError: true` with the message as its only text item.
-- **On the CLI**, the command prints `lockstep-docs: <message>` and exits with code 1.
+- **On the CLI**, the command prints `staleproof: <message>` and exits with code 1.
 - **Over HTTP**, endpoints answer 400, 404 or 500 with `{error}`; see [HTTP API](http-api.md).
 
 Input problems are caught before a tool runs, with the same rules in the agent loop and over MCP:
@@ -150,7 +150,7 @@ Cypher it runs: `exampleForRun`, `installSet`, `cachedRun`, `upsertRun`, `linkRu
 
 ### `decisions_for`
 
-Before judging a doc section, read the maintainers' decisions that govern it (directly, or through any symbol it mentions or its examples use, within 2 call hops; superseded decisions resolve to the current one) and the verdicts Lockstep gave this section on earlier pull requests (with whether maintainers accepted them). A governing decision can mean the section is intentionally as it is: cite it instead of editing.
+Before judging a doc section, read the maintainers' decisions that govern it (directly, or through any symbol it mentions or its examples use, within 2 call hops; superseded decisions resolve to the current one) and the verdicts Staleproof gave this section on earlier pull requests (with whether maintainers accepted them). A governing decision can mean the section is intentionally as it is: cite it instead of editing.
 
 Available to the agent and MCP clients.
 
@@ -174,7 +174,7 @@ Cypher it runs: `rankSections`, `rankSectionsByLinks` ([full text](GRAPH-MODEL.m
 
 ### `propose_edit`
 
-Propose replacement Markdown for a stale doc section (the whole section, heading line included, as read_section returned it). Refused unless the graph has a path from this pull request's changes to the section: Lockstep never edits a paragraph without one. Keep everything that is still true; change only what the PR falsified, or what makes an already-broken example fail (fails before and after: say so). Cite the runs that prove it.
+Propose replacement Markdown for a stale doc section (the whole section, heading line included, as read_section returned it). Refused unless the graph has a path from this pull request's changes to the section: Staleproof never edits a paragraph without one. Keep everything that is still true; change only what the PR falsified, or what makes an already-broken example fail (fails before and after: say so). Cite the runs that prove it.
 
 Available to the agent and MCP clients.
 
@@ -270,12 +270,12 @@ Each impacted section:
 
 Summary: `<n> changed symbols (and <m> added) reach <N> doc sections (<b> breaking, <a> signature, <c> behavior; <x> in other repositories).` The added count appears only when there are added symbols, and the wording agrees in number (`1 changed symbol reaches 1 doc section`). With more than 40 sections, or an `offset`, it continues `Showing <i>–<j> of <N>; call impact again with offset=<k> for the rest.` (or ends `Showing <i>–<j> of <N>.` on the last page). A pull request that changed no Python symbol gives `<url> changed no Python symbols in <repo>; no docs can be falsified through code.`
 
-Side effects: the first call for a pull request ingests it: the `PullRequest` node, `CHANGED_IN` edges, removed symbols recreated with `late` links ([Pull request ingestion](concepts.md#pull-request-ingestion)). With `git`, ingestion also fetches the pull request's repository and checks out its default branch in the local clone; the GitHub metadata of a merged pull request is cached under `LOCKSTEP_HOME/cache`.
+Side effects: the first call for a pull request ingests it: the `PullRequest` node, `CHANGED_IN` edges, removed symbols recreated with `late` links ([Pull request ingestion](concepts.md#pull-request-ingestion)). With `git`, ingestion also fetches the pull request's repository and checks out its default branch in the local clone; the GitHub metadata of a merged pull request is cached under `STALEPROOF_HOME/cache`.
 
 Errors:
 
 - `not a GitHub pull request URL: "<input>" (expected https://github.com/<owner>/<repo>/pull/<n>)`
-- `<owner/repo> is not indexed in the "<graph>" graph. Run: lockstep-docs index <owner/repo> (plus the repositories that document it).`
+- `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`
 - `GitHub API rate limit reached (60/hour without a token). Set GITHUB_TOKEN to raise it.`
 - `GitHub: <path> not found (private repositories are not supported)`
 - `GitHub <METHOD> <path> failed: <status> <body>`, `git <args> failed in <dir>: <stderr>`, `merge commit <sha> has no parent`
@@ -376,7 +376,7 @@ Side effects: a `Verdict` with `verdict: 'stale'`, `status: 'proposed'`, `new_te
 Errors:
 
 - `pr_url is required` (over MCP, without `pr_url`)
-- `refused: no path in the graph from <pr-url>'s changes to <section>. Lockstep never edits a paragraph without a path; record_verdict instead if it needs no change.` The path must have at most 3 call hops and start from a change other than `added`.
+- `refused: no path in the graph from <pr-url>'s changes to <section>. Staleproof never edits a paragraph without a path; record_verdict instead if it needs no change.` The path must have at most 3 call hops and start from a change other than `added`.
 - `new_text is identical to the current section; use record_verdict with ok`
 - `no doc section <section> or pull request <pr-url> in the graph`
 
@@ -422,7 +422,7 @@ Errors: `none of <ids> is a DocSection or Symbol id; decision not recorded`. `PO
 
 Summary: `<n> file(s) changed: <repo>:<path>, ….` or `No proposed edits for this pull request yet.` It reports no queries.
 
-The patch is built from the latest verdict per section: `stale` verdicts with replacement text that were not rejected. Files are read at the indexed commit, from the local clone when there is one, otherwise from `raw.githubusercontent.com`. An edit whose section changed since indexing, or whose file is missing at that commit, is listed in the body under "Not applied" instead of being applied. No side effects. `GET /api/patch` returns the same patch with the verdicts and conflicts as separate fields; `lockstep-docs patch` prints it.
+The patch is built from the latest verdict per section: `stale` verdicts with replacement text that were not rejected. Files are read at the indexed commit, from the local clone when there is one, otherwise from `raw.githubusercontent.com`. An edit whose section changed since indexing, or whose file is missing at that commit, is listed in the body under "Not applied" instead of being applied. No side effects. `GET /api/patch` returns the same patch with the verdicts and conflicts as separate fields; `staleproof patch` prints it.
 
 Errors: `<pr-url> has not been checked`; `GitHub raw <path>@<sha> failed: <status>`; `git show` errors from a local clone.
 
