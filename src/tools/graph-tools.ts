@@ -62,6 +62,8 @@ export interface ImpactData {
   changed: { symbol: string; change: string; before?: string; after?: string; renamedTo?: string }[];
   sections: ImpactedSection[];
   totalSections: number;
+  /** Index of the first returned section (paging). */
+  offset: number;
   truncated: boolean;
   /** Severity counts over all impacted sections (not only the ones shown). */
   counts: Record<Severity, number>;
@@ -131,16 +133,17 @@ function withHops(cypher: string, maxHops: number): string {
   return cypher.replace('[:CALLS*0..3]', `[:CALLS*0..${maxHops}]`);
 }
 
-export const impactTool: ToolDef<{ pr_url: string; max_hops?: number }, ImpactData> = {
+export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: number }, ImpactData> = {
   name: 'impact',
   description:
     'Find every doc section and code example a pull request can falsify, in any repository of the organisation. ' +
     'Walks changed symbol ← callers (up to max_hops, across repositories) ← MENTIONS/USES ← doc. ' +
     'Returns impacted sections ordered by severity (breaking: removed/renamed; api: signature; behavior: body changed) with the evidence path for each. ' +
-    'Call this first for a PR.',
+    `Call this first for a PR. At most ${MAX_SECTIONS} sections come back per call; when more are impacted, call again with offset to page.`,
   input: z.object({
     pr_url: z.string().describe('GitHub pull request URL, e.g. https://github.com/FalkorDB/falkordb-py/pull/262'),
     max_hops: z.number().int().min(0).max(5).optional().describe('Maximum call hops between the changed symbol and the doc (default 3)'),
+    offset: z.number().int().min(0).optional().describe(`Skip this many sections (paging: ${MAX_SECTIONS} per call; default 0)`),
   }),
   queries: [Q.impact, Q.prChanges, Q.upsertPullRequest, Q.upsertChangedIn, Q.upsertMissingSymbols, Q.lateLinkSections, Q.lateLinkExamples],
   async run(ctx, input) {
@@ -159,15 +162,18 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number }, ImpactDa
       { pr: url },
     );
     const sections = groupImpact(rows.rows);
+    const offset = input.offset ?? 0;
+    const page = sections.slice(offset, offset + MAX_SECTIONS);
     for (const s of sections) s.crossRepo = s.repo !== pr.repo;
     const counts = { breaking: 0, api: 0, behavior: 0 } as Record<Severity, number>;
     for (const s of sections) counts[s.severity]++;
     const data: ImpactData = {
       pr: { url, title: pr.title, repo: pr.repo, state: pr.state, before: pr.before, after: pr.after, docsTouched: pr.docs ?? [] },
       changed: changes.rows.map((c) => ({ symbol: c.symbol, change: c.change, before: c.before || undefined, after: c.after || undefined, renamedTo: c.renamedTo || undefined })),
-      sections: sections.slice(0, MAX_SECTIONS),
+      sections: page,
       totalSections: sections.length,
-      truncated: sections.length > MAX_SECTIONS,
+      offset,
+      truncated: sections.length > offset + page.length,
       counts,
     };
     const crossRepo = sections.filter((s) => s.crossRepo).length;
@@ -176,7 +182,10 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number }, ImpactDa
         ? `${url} changed no Python symbols in ${pr.repo}; no docs can be falsified through code.`
         : `${changes.rows.length} changed symbols reach ${sections.length} doc sections ` +
           `(${counts.breaking} breaking, ${counts.api} signature, ${counts.behavior} behavior; ${crossRepo} in other repositories).` +
-          (data.truncated ? ` Showing the first ${MAX_SECTIONS}.` : '');
+          (sections.length > MAX_SECTIONS || offset > 0
+            ? ` Showing ${page.length ? `${offset + 1}–${offset + page.length}` : 'none'} of ${sections.length}` +
+              (data.truncated ? `; call impact again with offset=${offset + page.length} for the rest.` : '.')
+            : '');
     return result('impact', tracer, summary, data);
   },
 };

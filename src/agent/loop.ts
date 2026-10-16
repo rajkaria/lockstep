@@ -241,6 +241,12 @@ async function executeTool(ctx: ToolContext, use: ModelToolUse): Promise<ExecOut
   if (!tool) return { ok: false, error: `unknown tool ${use.name}` };
   const raw = { ...(use.input as Record<string, unknown>) };
   if (PR_SCOPED.has(tool.name) && raw.pr_url === undefined && ctx.prUrl) raw.pr_url = ctx.prUrl;
+  // Unknown parameters would be dropped silently and the model would get the same answer again; say so instead.
+  const known = 'shape' in tool.input ? Object.keys((tool.input as unknown as { shape: object }).shape) : undefined;
+  const unknown = known ? Object.keys(raw).filter((k) => !known.includes(k)) : [];
+  if (unknown.length) {
+    return { ok: false, error: `${tool.name} has no parameter ${unknown.join(', ')}; its parameters are ${known!.join(', ')}` };
+  }
   // The SDK's tolerant parser can hand back a truncated input; validate before running.
   const parsed = tool.input.safeParse(raw);
   if (!parsed.success) {

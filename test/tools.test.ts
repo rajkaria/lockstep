@@ -46,6 +46,13 @@ describe('graph tools (FalkorDB)', () => {
   });
   afterAll(async () => done());
 
+  it('impact pages: offset skips sections and the summary says which ones came back', async () => {
+    const r = await impactTool.run(ctx, { pr_url: PR.url, offset: 1 });
+    expect(r.data.sections.map((s) => s.section)).toEqual(['acme/mini-docs:docs/rag.mdx#ask-a-question', 'acme/mini-sdk:minisdk/examples/quickstart.py:0']);
+    expect(r.data).toMatchObject({ totalSections: 3, offset: 1, truncated: false });
+    expect(r.summary).toMatch(/Showing 2–3 of 3\.$/);
+  });
+
   it('impact: finds docs in other repositories through call chains, breaking first, with evidence paths', async () => {
     const r = await impactTool.run(ctx, { pr_url: PR.url });
     expect(r.summary).toBe('3 changed symbols reach 3 doc sections (1 breaking, 2 signature, 0 behavior; 3 in other repositories).');

@@ -13,6 +13,7 @@ const impact: ImpactData = {
     },
   ],
   totalSections: 1,
+  offset: 0,
   truncated: false,
   counts: { breaking: 1, api: 0, behavior: 0 },
 };

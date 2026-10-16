@@ -120,4 +120,14 @@ describe('agent loop (scripted model, FalkorDB)', () => {
     const checks = await graph.run<{ n: number }>(Q.recentChecks, { limit: 10 });
     expect(checks.rows.length).toBe(3);
   });
+
+  it('rejects a parameter a tool does not have, naming the ones it does, instead of silently answering the same', async () => {
+    // Found on the first real run: paging past 40 sections, the model invented limit/offset/repo and got page one again.
+    const model = new ScriptedModel((history, turn) =>
+      turn === 0 ? { calls: [{ name: 'impact', input: { limit: 5 } }] }
+      : (turn === 1 && expect(lastToolResults(history)[0]!.content).toMatchObject({ text: expect.stringMatching(/^impact has no parameter limit; its parameters are pr_url, max_hops, offset/) }), { text: 'Done.' }),
+    );
+    const r = await runAgentCheck(ctx, model, PR_REMOVE.url, { maxNudges: 0 });
+    expect(r.events.filter((e) => e.type === 'tool_result' && e.isError)).toHaveLength(1);
+  });
 });
