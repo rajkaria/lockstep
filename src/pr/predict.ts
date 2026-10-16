@@ -115,15 +115,21 @@ export function importsNameJs(code: string, module: string, name: string): boole
 /** The calls in an example that a USES edge points at: same callee text, closest to the recorded line. */
 function matchingCalls(calls: PyCall[], row: Row): PyCall[] {
   const name = row.name === '__init__' ? row.symbol.split('.').slice(-2, -1)[0]! : row.name;
-  const same = row.text
-    ? calls.filter((c) => c.text === row.text)
-    : calls.filter((c) => c.text === name || c.text.endsWith(`.${name}`));
+  // A late link records only the name: any call of it (`g.ro_query`, `Client().select_graph().ro_query`).
+  const same =
+    row.text && row.text.includes('.') ? calls.filter((c) => c.text === row.text) : calls.filter((c) => c.text === name || c.text.endsWith(`.${name}`));
   return same;
 }
 
+/**
+ * The example as the pull request leaves it, for pages the pull request edits: its code,
+ * `null` when the pull request removes it, undefined to judge the indexed version.
+ */
+export type CodeAfter = (example: { id: string; repo: string; path: string }) => Promise<string | null | undefined>;
+
 /** Predicted breaks for every example that uses a symbol the pull request removed, renamed or re-signed. */
-export async function predictBreaks(tracer: Tracer, prUrl: string): Promise<PredictedBreak[]> {
-  return predictFromRows((await tracer.run<Row>(Q.predictedCalls, { pr: prUrl })).rows, 'this pull request');
+export async function predictBreaks(tracer: Tracer, prUrl: string, opts: { codeAfter?: CodeAfter } = {}): Promise<PredictedBreak[]> {
+  return predictFromRows((await tracer.run<Row>(Q.predictedCalls, { pr: prUrl })).rows, 'this pull request', opts.codeAfter);
 }
 
 /** The same prediction for changes that are not a pull request (a working tree, an editor's buffers). */
@@ -141,7 +147,7 @@ export interface ChangeRow {
   renamed_to: string;
 }
 
-async function predictFromRows(rows: Row[], subject: string): Promise<PredictedBreak[]> {
+async function predictFromRows(rows: Row[], subject: string, codeAfter?: CodeAfter): Promise<PredictedBreak[]> {
   // "this pull request removes" / "these changes remove"
   const plural = subject.startsWith('these');
   const v = (verb: string) => (plural ? verb : `${verb}s`);
@@ -173,8 +179,21 @@ async function predictFromRows(rows: Row[], subject: string): Promise<PredictedB
     });
   };
 
+  // A page the pull request edits is judged as the pull request leaves it: an example it
+  // removes can't break, and a call it rewrote must still be there to break.
+  const codeAfterPr = new Map<string, Promise<string | null | undefined>>();
+  const edited = new Set<string>();
   for (const row of rows) {
     if (row.resolved !== 'exact' && row.resolved !== 'late') continue;
+    if (codeAfter) {
+      if (!codeAfterPr.has(row.example)) codeAfterPr.set(row.example, codeAfter({ id: row.example, repo: row.repo, path: row.path }).catch(() => undefined));
+      const code = await codeAfterPr.get(row.example)!;
+      if (code === null) continue;
+      if (code !== undefined && code !== row.code) {
+        row.code = code;
+        edited.add(row.example);
+      }
+    }
     if (!parsed.has(row.example)) parsed.set(row.example, callsIn(row.code, row.lang ?? 'python'));
     const calls = await parsed.get(row.example)!;
     const docLine = (call?: PyCall) => (call ? row.lineno + call.lineno - 1 : (row.line ?? row.lineno));
@@ -182,8 +201,8 @@ async function predictFromRows(rows: Row[], subject: string): Promise<PredictedB
 
     if (row.change === 'removed' || row.change === 'renamed') {
       const hits = matchingCalls(calls, row);
-      // A late link is only a name match: require an actual call of that name.
-      if (row.resolved === 'late' && hits.length === 0) continue;
+      // A late link is only a name match, and an edited example may no longer make the call: require one.
+      if ((row.resolved === 'late' || edited.has(row.example)) && hits.length === 0) continue;
       const detail =
         row.change === 'renamed' && row.renamedTo
           ? `calls \`${short}\`, which ${subject} ${v('rename')} to \`${row.renamedTo.split('.').slice(-2).join('.')}\``

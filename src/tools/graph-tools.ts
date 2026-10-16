@@ -5,7 +5,8 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import * as Q from '../graph/queries.js';
 import { ingestPullRequest } from '../pr/ingest.js';
-import { knownMismatches, predictBreaks, type KnownMismatch, type PredictedBreak } from '../pr/predict.js';
+import { knownMismatches, predictBreaks, type CodeAfter, type KnownMismatch, type PredictedBreak } from '../pr/predict.js';
+import { exampleAtCommit, loadExample } from '../runner/index.js';
 import { parsePrUrl } from '../pr/github.js';
 import { result, Tracer, type ToolContext, type ToolDef } from './types.js';
 
@@ -183,7 +184,19 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
     for (const s of sections) s.crossRepo = s.repo !== pr.repo;
     const counts = { breaking: 0, api: 0, behavior: 0 } as Record<Severity, number>;
     for (const s of sections) counts[s.severity]++;
-    const predicted = await predictBreaks(tracer, url);
+    // Pages the pull request edits are judged as it leaves them (its own docs fix counts).
+    const touched = new Set((pr.docs ?? []).map((p) => `${pr.repo}:${p}`));
+    const codeAfter: CodeAfter | undefined = touched.size
+      ? async ({ id, repo, path }) => {
+          if (!touched.has(`${repo}:${path}`)) return undefined;
+          const example = await loadExample(tracer.graph, id);
+          const indexed = (await tracer.run<{ sha: string }>(`MATCH (r:Repo {name: $repo}) RETURN r.sha AS sha`, { repo })).rows[0]?.sha;
+          if (!example || !indexed) return undefined;
+          const at = await exampleAtCommit(ctx.config, example, indexed, pr.after, ctx.checkouts?.[repo]);
+          return at === null ? null : at?.code;
+        }
+      : undefined;
+    const predicted = await predictBreaks(tracer, url, { codeAfter });
     const predictedIds = new Set(predicted.map((p) => p.example));
     const mismatched = (await knownMismatches(tracer, [...new Set(sections.flatMap((s) => s.examples))])).filter(
       (m) => !predictedIds.has(m.example) || !predicted.some((p) => p.example === m.example && p.detail === m.detail),

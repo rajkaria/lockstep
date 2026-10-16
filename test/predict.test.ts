@@ -118,3 +118,51 @@ describe('open pull requests that moved', () => {
     }
   });
 });
+
+describe('predicted breaks on pages the pull request edits', () => {
+  it('judges the page as the pull request leaves it: its own docs fix is not a predicted break', async () => {
+    const { mkdtemp, cp, writeFile, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { gitIn, FIXTURES } = await import('./helpers.js');
+    const { diffRange } = await import('../src/pr/changes.js');
+    const dir = await mkdtemp(join(tmpdir(), 'staleproof-edited-'));
+    await cp(join(FIXTURES, 'org', 'mini-client'), dir, { recursive: true });
+    const page = (call: string) => `# Guide\n\n## Read\n\n\`\`\`python\nfrom miniclient import Client\ng = Client().select_graph("x")\ng.${call}("MATCH (n) RETURN n")\n\`\`\`\n\n## Other\n\n\`\`\`python\nfrom miniclient import Client\nClient().select_graph("y").ro_query("q")\n\`\`\`\n`;
+    await writeFile(join(dir, 'guide.md'), page('ro_query'));
+    gitIn(dir, 'init', '-q', '-b', 'main');
+    gitIn(dir, 'add', '-A');
+    gitIn(dir, 'commit', '-q', '-m', 'before');
+    const before = gitIn(dir, 'rev-parse', 'HEAD');
+    const { graph, done } = await testGraph('edited');
+    await indexOrg(graph, [{ repo: 'acme/mini-client', dir, sha: before }]);
+    const graphPy = join(dir, 'miniclient', 'graph.py');
+    await writeFile(graphPy, (await readFile(graphPy, 'utf8')).replace('def ro_query(self, q: str):', 'def read_query(self, q: str):'));
+    // The pull request fixes the first example and forgets the second.
+    await writeFile(join(dir, 'guide.md'), page('read_query'));
+    gitIn(dir, 'commit', '-q', '-am', 'rename');
+    const after = gitIn(dir, 'rev-parse', 'HEAD');
+    try {
+      const pr = fakePr({ number: 88, url: 'https://github.com/acme/mini-client/pull/88', mergeSha: after });
+      const diff = await diffRange(dir, 'acme/mini-client', before, after);
+      expect(diff.docsTouched).toEqual(['guide.md']);
+      await recordPullRequest(graph, pr, diff);
+      const r = await impactTool.run({ graph, config: testConfig(), checkouts: { 'acme/mini-client': dir } }, { pr_url: pr.url });
+      expect(r.data.predicted.map((p) => `${p.example.split(':').slice(1).join(':')} ${p.kind}`)).toEqual(['guide.md:1 removed']);
+
+      // Indexed after the merge (the hosted case): the removed name is linked late, by name, and still predicted.
+      const { graph: g2, done: d2 } = await testGraph('edited-late');
+      try {
+        await indexOrg(g2, [{ repo: 'acme/mini-client', dir, sha: after }]);
+        await recordPullRequest(g2, pr, diff);
+        const late = await impactTool.run({ graph: g2, config: testConfig(), checkouts: { 'acme/mini-client': dir } }, { pr_url: pr.url });
+        expect(late.data.predicted.map((p) => `${p.example.split(':').slice(1).join(':')} ${p.kind} ${p.confidence}`)).toEqual(['guide.md:1 removed by-name']);
+      } finally {
+        await d2();
+      }
+    } finally {
+      await done();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
