@@ -361,6 +361,39 @@ export class SymbolTable {
     return this.basesOf(cls).some((b) => this.classHas(b, attr, depth + 1));
   }
 
+  /**
+   * The repository's public API as its packages export it: names bound in a public
+   * package's `__init__` (or a top-level module) that resolve to the org's definitions,
+   * plus the public methods of exported classes and of their org base classes.
+   */
+  exportedIds(repo: string, modules: PyModule[]): Set<string> {
+    const out = new Set<string>();
+    const isPrivate = (q: string) => q.split('.').some((p) => p.startsWith('_') && !/^__.*__$/.test(p));
+    const addClass = (cls: SymbolInfo, depth = 0) => {
+      if (depth > 6) return;
+      out.add(cls.id);
+      for (const [q, infos] of this.byQualname) {
+        if (!q.startsWith(`${cls.def.qualname}.`) || q.slice(cls.def.qualname.length + 1).includes('.')) continue;
+        for (const m of infos) if (m.repo === cls.repo && m.def.kind === 'method' && !m.def.name.startsWith('_')) out.add(m.id);
+      }
+      for (const b of this.basesOf(cls)) addClass(b, depth + 1);
+    };
+    for (const mod of modules) {
+      const isInit = /(^|\/)__init__\.py$/.test(mod.path);
+      if ((!isInit && mod.module.includes('.')) || isPrivate(mod.module)) continue;
+      const names = new Set<string>();
+      for (const d of mod.defs) if (d.parent === mod.module && !d.name.startsWith('_')) names.add(d.name);
+      for (const i of mod.imports) if (i.alias !== '*' && !i.alias.includes('.') && !i.alias.startsWith('_')) names.add(i.alias);
+      for (const name of names) {
+        const v = this.resolveDotted(`${mod.module}.${name}`, 0, repo);
+        if (v?.t !== 'sym') continue;
+        if (v.sym.def.kind === 'class') addClass(v.sym);
+        else out.add(v.sym.id);
+      }
+    }
+    return out;
+  }
+
   /** Repositories whose packages this module imports (plus its own). */
   reposImportedBy(mod: PyModule, ownRepo?: string): Set<string> {
     const repos = new Set<string>();

@@ -31,6 +31,8 @@ import { parsePrUrl } from './pr/github.js';
 import { canonicalPrUrl } from './pr/ingest.js';
 import { impactTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
+import { auditDocs } from './audit.js';
+import { auditMarkdown, auditText } from './format/audit.js';
 
 const program = new Command();
 
@@ -224,6 +226,52 @@ program
         if (e.type === 'tool_result' && e.name === 'run_example' && !e.isError) console.log(`\n${runText(e.data as RunExampleData)}`);
       }
       console.log(dim(`\n${r.summary}\nStored as ${r.checkId}.`));
+    });
+  });
+
+program
+  .command('audit')
+  .description('Audit docs with no pull request: health score, examples that no longer fit the code, API coverage, example runs')
+  .argument('[repos...]', 'repositories to audit as owner/name (default: every repository in the graph); indexed together on first use')
+  .option('--run <n>', 'first run up to n examples at the indexed commits (needs Python 3.12+ and uv)', '0')
+  .option('--limit <n>', 'how many undocumented symbols to list', '25')
+  .option('--format <format>', 'text | markdown | json', 'text')
+  .option('--out <file>', 'write the report to a file instead of stdout')
+  .option('--fail-under <score>', 'exit 1 when the health score is below this')
+  .option('--fail-on-mismatch', 'exit 1 when any example no longer fits the code')
+  .option('--no-index', 'fail instead of indexing repositories the graph does not have yet')
+  .action(async (repos: string[], opts: { run: string; limit: string; format: string; out?: string; failUnder?: string; failOnMismatch?: boolean; index: boolean }) => {
+    if (!['text', 'markdown', 'json'].includes(opts.format)) throw new Error(`unknown --format ${opts.format} (text, markdown or json)`);
+    for (const flag of ['run', 'limit'] as const) {
+      if (!/^\d+$/.test(opts[flag])) throw new Error(`--${flag} must be a whole number, got ${opts[flag]}`);
+    }
+    if (opts.failUnder !== undefined && !/^\d+$/.test(opts.failUnder)) throw new Error(`--fail-under must be a score from 0 to 100, got ${opts.failUnder}`);
+    if (repos[0]) aboutRepo(repos[0]);
+    await withGraph(async (store, org) => {
+      const config = settings();
+      const ctx: ToolContext = { graph: store.org(org), config, log };
+      const names = repos.map(parseRepoName);
+      if (names.length && opts.index) {
+        const report = await ensureIndexed(ctx.graph, config, names, (p) => log(`${p.phase.padEnd(9)} ${p.message}`));
+        if (report) log(`indexed ${report.repos.map((r) => `${r.repo}@${r.sha.slice(0, 7)}`).join(', ')} into graph "${org}" in ${(report.ms / 1000).toFixed(1)}s`);
+      }
+      const r = await auditDocs(ctx, { repos: names.length ? names : undefined, run: Number(opts.run), limit: Number(opts.limit) });
+      const body =
+        opts.format === 'json' ? JSON.stringify({ summary: r.summary, ...r.data }, null, 2) : opts.format === 'markdown' ? auditMarkdown(r.data, r.summary) : auditText(r.data, r.summary);
+      if (opts.out) {
+        await writeFile(opts.out, `${body}\n`);
+        log(`wrote ${opts.out}: ${r.summary}`);
+      } else {
+        console.log(body);
+      }
+      if (opts.failUnder !== undefined && r.data.score < Number(opts.failUnder)) {
+        log(`health score ${r.data.score} is below --fail-under ${opts.failUnder}`);
+        process.exitCode = 1;
+      }
+      if (opts.failOnMismatch && r.data.mismatches.length) {
+        log(`${r.data.examples.mismatched} example(s) no longer fit the code (--fail-on-mismatch)`);
+        process.exitCode = 1;
+      }
     });
   });
 

@@ -643,6 +643,57 @@ export const impactFromSymbol = q('report', 'impactFromSymbol', 'Docs reachable 
   RETURN d.id AS doc, length(p) AS hops
 `);
 
+export const auditRepos = q('report', 'auditRepos', 'The repositories a docs audit covers, with the commit each was indexed at.', `
+  MATCH (r:Repo)
+  WHERE size($repos) = 0 OR r.name IN $repos
+  OPTIONAL MATCH (s:Symbol {repo: r.name})
+  WITH r, count(s) AS symbols
+  OPTIONAL MATCH (d:DocSection {repo: r.name})
+  WHERE d.status = 'live'
+  RETURN r.name AS name, r.sha AS sha, r.indexed_at AS indexedAt, symbols, count(d) AS sections
+  ORDER BY name
+`);
+
+export const auditMismatches = q('report', 'auditMismatches', 'Every example line that does not fit the code it calls, in the audited repositories\' docs or against their code.', `
+  MATCH (e:CodeExample)-[m:MISMATCH]->(s:Symbol)
+  WHERE e.status = 'live' AND (e.repo IN $repos OR s.repo IN $repos)
+  OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
+  RETURN e.id AS example, e.url AS url, e.repo AS repo, e.path AS path, coalesce(sec.heading_path, e.path) AS heading,
+         m.line AS line, m.kind AS kind, m.detail AS detail, m.text AS call, s.qualname AS symbol, s.repo AS symbolRepo
+  ORDER BY repo, path, line
+`);
+
+export const auditSymbols = q('report', 'auditSymbols', 'Every live symbol of the audited code repositories with how many docs reference it directly and how many symbols call it (API coverage).', `
+  MATCH (s:Symbol)
+  WHERE s.repo IN $repos AND s.status = 'live' AND s.kind <> 'module'
+  OPTIONAL MATCH (s)<-[:MENTIONS|USES]-(d)
+  WHERE d.status = 'live'
+  WITH s, count(DISTINCT d) AS docs
+  OPTIONAL MATCH (s)<-[:CALLS]-(caller:Symbol)
+  WITH s, docs, collect(DISTINCT caller.repo) AS callerRepos, count(DISTINCT caller) AS callers
+  RETURN s.id AS id, s.qualname AS qualname, s.name AS name, s.kind AS kind, s.repo AS repo, s.path AS path,
+         s.lineno AS lineno, s.signature AS signature, s.visibility AS visibility, s.exported AS exported, docs, callers, callerRepos
+`);
+
+export const auditExamples = q('report', 'auditExamples', 'The live examples in the audited repositories\' docs, and examples elsewhere that call their code, with how many symbols each calls.', `
+  MATCH (e:CodeExample)
+  WHERE e.status = 'live' AND e.repo IN $repos
+  OPTIONAL MATCH (e)-[u:USES]->(:Symbol)
+  RETURN e.id AS id, e.lang AS lang, e.url AS url, e.repo AS repo, count(u) AS uses
+  UNION
+  MATCH (e:CodeExample)-[:USES]->(s:Symbol)
+  WHERE e.status = 'live' AND s.repo IN $repos AND NOT e.repo IN $repos
+  OPTIONAL MATCH (e)-[u:USES]->(:Symbol)
+  RETURN e.id AS id, e.lang AS lang, e.url AS url, e.repo AS repo, count(u) AS uses
+`);
+
+export const auditRuns = q('report', 'auditRuns', 'Recorded runs of the audited examples at the indexed commits (not before/after a pull request).', `
+  MATCH (r:Run)-[:OF]->(e:CodeExample)
+  WHERE e.id IN $ids AND r.side = 'current'
+  RETURN e.id AS example, e.url AS url, r.status AS status, r.error AS error, r.reason AS reason, r.installed AS installed, r.created_at AS at
+  ORDER BY at ASC
+`);
+
 export const ALL_QUERIES: NamedQuery[] = [
   upsertPullRequest,
   upsertMissingSymbols,
@@ -694,6 +745,11 @@ export const ALL_QUERIES: NamedQuery[] = [
   upsertLinks,
   predictedCalls,
   mismatchesFor,
+  auditRepos,
+  auditMismatches,
+  auditSymbols,
+  auditExamples,
+  auditRuns,
   markGoneDocs,
   repoSymbols,
   callsFrom,

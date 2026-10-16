@@ -105,6 +105,7 @@ export async function writeCode(
       p.files.map((f) => ({ id: fileId(repo, f.path), repo, props: { repo, path: f.path, kind: f.kind } })),
       { run },
     );
+    const exported = table.exportedIds(repo, p.modules);
     const symbols = p.modules.flatMap((m) =>
       m.defs.map((d) => ({
         id: symbolId(repo, d.qualname),
@@ -121,6 +122,7 @@ export async function writeCode(
           doc: d.doc ?? '',
           visibility: visibility(d.name),
           decorators: d.decorators,
+          exported: exported.has(symbolId(repo, d.qualname)),
         },
       })),
     );
