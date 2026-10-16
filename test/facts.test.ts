@@ -33,4 +33,17 @@ describe('facts', () => {
     expect(md).toContain('| CALLS |');
     expect(md).toContain('CALLS edges that cross a repository boundary: 4');
   });
+
+  it('compares a grep for the changed names with what the traversal reaches', async () => {
+    const { grepBaseline } = await import('../src/facts.js');
+    const sections = [
+      { id: 'd:a', body: 'Call `db.select_graph("g")` and then query it.' }, // reached through callers, never names the change
+      { id: 'd:b', body: 'Internals: `_query` retries on MOVED.' }, // names it and is reached
+      { id: 'd:c', body: 'How to _query the cluster (unrelated page).' }, // names it, not reached
+      { id: 'd:d', body: 'my_query_helper is not a match' },
+      { id: 'd:e', body: null },
+    ];
+    expect(grepBaseline('pr', ['_query'], ['d:a', 'd:b', 'd:a'], sections)).toEqual({ url: 'pr', names: ['_query'], reached: 2, grepFound: 1, grepOutside: 1 });
+    expect(grepBaseline('pr', [], ['d:a'], sections)).toMatchObject({ reached: 1, grepFound: 0, grepOutside: 0 });
+  });
 });

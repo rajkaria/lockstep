@@ -580,8 +580,28 @@ export const factsPullRequests = q('report', 'factsPullRequests', 'Pull requests
   ORDER BY url
 `);
 
-export const factsRuns = q('report', 'factsRuns', 'Every recorded example execution, latest first per example and side.', `
-  MATCH (r:Run)-[:OF]->(e:CodeExample)
+export const factsGrepBaseline = q('report', 'factsGrepBaseline', 'Per pull request: the names of the symbols it changed and the doc sections the impact traversal reaches from them (the grep baseline in FACTS compares the two).', `
+  MATCH (pr:PullRequest)<-[c:CHANGED_IN]-(s:Symbol)
+  WHERE c.kind <> 'added'
+  WITH pr, collect(DISTINCT s.name) AS names
+  OPTIONAL MATCH p = (pr)<-[c2:CHANGED_IN]-(:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+  WHERE c2.kind <> 'added' AND (d:DocSection OR d:CodeExample) AND d.status = 'live'
+  OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
+  RETURN pr.url AS url, names, collect(DISTINCT coalesce(sec.id, d.id)) AS reached
+  ORDER BY url
+`);
+
+export const factsSectionBodies = q('report', 'factsSectionBodies', 'The text of every live doc section, for the grep baseline.', `
+  MATCH (d:DocSection)
+  WHERE d.status = 'live'
+  RETURN d.id AS id, d.body AS body
+`);
+
+export const factsRuns = q('report', 'factsRuns', 'Every recorded example execution (the latest attempt of each identical run), latest first per example and side.', `
+  MATCH (r:Run)-[:OF]->(:CodeExample)
+  WITH r.key AS key, max(r.created_at) AS latest
+  MATCH (r:Run {key: key})-[:OF]->(e:CodeExample)
+  WHERE r.created_at = latest
   OPTIONAL MATCH (r)-[:AT]->(pr:PullRequest)
   RETURN e.id AS example, e.url AS url, r.side AS side, r.status AS status, r.error AS error, r.reason AS reason,
          r.installed AS installed, pr.url AS pr, r.created_at AS at
@@ -655,6 +675,8 @@ export const ALL_QUERIES: NamedQuery[] = [
   factsCrossRepoDocPaths,
   factsSamplePaths,
   factsPullRequests,
+  factsGrepBaseline,
+  factsSectionBodies,
   factsRuns,
   impactFromSymbol,
 ];

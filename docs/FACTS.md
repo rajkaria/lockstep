@@ -1,6 +1,6 @@
 # FACTS
 
-Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-16T04:47:42.895Z (FalkorDB 4.22.0).
+Generated from the `falkordb` graph by `lockstep-docs facts` at 2026-10-16T17:19:38.971Z (FalkorDB 4.22.0).
 Every number in the README comes from this file. Regenerate it; never edit it by hand.
 
 ## Repositories
@@ -15,32 +15,32 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 | Nodes (live) | Count |
 |---|---:|
-| Check | 11 |
+| Check | 13 |
 | CodeExample | 1835 |
 | DocSection | 3138 |
 | File | 329 |
 | PullRequest | 4 |
 | Repo | 3 |
-| Run | 51 |
+| Run | 57 |
 | Symbol | 1298 |
-| Verdict | 67 |
+| Verdict | 70 |
 
 | Edges | Count |
 |---|---:|
-| ABOUT | 67 |
-| AT | 51 |
+| ABOUT | 70 |
+| AT | 57 |
 | CALLS | 1708 |
 | CHANGED_IN | 9 |
 | DEFINED_IN | 6271 |
 | DEPENDS_ON | 3 |
-| EVIDENCE | 750 |
-| FOR | 78 |
+| EVIDENCE | 756 |
+| FOR | 83 |
 | IN_REPO | 329 |
 | IN_SECTION | 1824 |
 | LINKS_TO | 644 |
 | MENTIONS | 594 |
-| OF | 51 |
-| PRODUCED | 67 |
+| OF | 57 |
+| PRODUCED | 70 |
 | USES | 716 |
 
 ## Resolution quality
@@ -71,19 +71,33 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | [test: assert the client parses execution plans, and fix a plan parser bug](https://github.com/FalkorDB/falkordb-py/pull/267) | 2 | 3 | 2 |
 | [fix(asyncio): prevent connection pool kwargs mutation and await schema refresh](https://github.com/FalkorDB/falkordb-py/pull/276) | 4 | 43 | 41 |
 
+## Without the graph: grep for the changed names
+
+For each pull request, a whole-word search of every live doc section for the names of the symbols it changed
+(what a reviewer can do without the graph), next to the sections the impact traversal reaches.
+
+| Pull request | Changed names | Reached by the graph | …that grep also finds | grep matches outside them |
+|---|---|---:|---:|---:|
+| FalkorDB/GraphRAG-SDK/pull/336 | `update`, `run` | 73 | 30 | 219 |
+| FalkorDB/falkordb-py/pull/262 | `Is_Cluster` | 1 | 0 | 0 |
+| FalkorDB/falkordb-py/pull/267 | `_operation_tree`, `Is_Cluster` | 3 | 0 | 0 |
+| FalkorDB/falkordb-py/pull/276 | `Cluster_Conn`, `_query`, `__init__` | 43 | 0 | 8 |
+
+Total: the graph reaches 120 sections; grep finds 30 of them and matches 227 others.
+
 ## Example runs (sandbox)
 
-51 recorded runs: 5 skipped, 6 error, 23 pass, 17 fail.
+51 recorded runs: 5 skipped, 6 error, 24 pass, 16 fail.
 
 | Example | Side | Status | Error / reason | Installed |
 |---|---|---|---|---|
 | [FalkorDB/GraphRAG-SDK:docs/api-reference.mdx:52](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/api-reference.mdx#L716) | before of FalkorDB/GraphRAG-SDK/pull/336 | skipped | reads a local file the docs do not provide (employees.csv) | FalkorDB/GraphRAG-SDK@d703d4a, FalkorDB/falkordb-py@31f63f4 |
-| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:7](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L267) | after of FalkorDB/falkordb-py/pull/276 | error | installing FalkorDB/GraphRAG-SDK@35e67a0b27fdcc7f2c28508b09e86169851a8187, FalkorDB/falkordb-py@2a970dc6d02e2143cb588645 | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@2a970dc |
-| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:7](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L267) | before of FalkorDB/falkordb-py/pull/276 | error | installing FalkorDB/GraphRAG-SDK@35e67a0b27fdcc7f2c28508b09e86169851a8187, FalkorDB/falkordb-py@e307df34e43ff9eae511aa85 | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3 |
-| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:8](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L276) | after of FalkorDB/falkordb-py/pull/276 | error | installing FalkorDB/GraphRAG-SDK@35e67a0b27fdcc7f2c28508b09e86169851a8187, FalkorDB/falkordb-py@2a970dc6d02e2143cb588645 | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@2a970dc |
-| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:8](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L276) | before of FalkorDB/falkordb-py/pull/276 | error | installing FalkorDB/GraphRAG-SDK@35e67a0b27fdcc7f2c28508b09e86169851a8187, FalkorDB/falkordb-py@e307df34e43ff9eae511aa85 | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3 |
-| [FalkorDB/GraphRAG-SDK:docs/storage.mdx:16](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/storage.mdx#L314) | after of FalkorDB/falkordb-py/pull/276 | error | installing FalkorDB/GraphRAG-SDK@35e67a0b27fdcc7f2c28508b09e86169851a8187, FalkorDB/falkordb-py@2a970dc6d02e2143cb588645 | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@2a970dc |
-| [FalkorDB/GraphRAG-SDK:docs/storage.mdx:16](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/storage.mdx#L314) | before of FalkorDB/falkordb-py/pull/276 | error | installing FalkorDB/GraphRAG-SDK@35e67a0b27fdcc7f2c28508b09e86169851a8187, FalkorDB/falkordb-py@e307df34e43ff9eae511aa85 | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3 |
+| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:7](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L267) | after of FalkorDB/falkordb-py/pull/276 | error | dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy ( | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@2a970dc |
+| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:7](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L267) | before of FalkorDB/falkordb-py/pull/276 | error | dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy ( | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3 |
+| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:8](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L276) | after of FalkorDB/falkordb-py/pull/276 | error | dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy ( | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@2a970dc |
+| [FalkorDB/GraphRAG-SDK:docs/graph-schema.mdx:8](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/graph-schema.mdx#L276) | before of FalkorDB/falkordb-py/pull/276 | error | dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy ( | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3 |
+| [FalkorDB/GraphRAG-SDK:docs/storage.mdx:16](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/storage.mdx#L314) | after of FalkorDB/falkordb-py/pull/276 | error | dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy ( | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@2a970dc |
+| [FalkorDB/GraphRAG-SDK:docs/storage.mdx:16](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/docs/storage.mdx#L314) | before of FalkorDB/falkordb-py/pull/276 | error | dependency conflict: graphrag-sdk==1.4.0 requires falkordb[hiredis]>=1.8.0,<2, which the other checkouts don't satisfy ( | FalkorDB/GraphRAG-SDK@35e67a0, FalkorDB/falkordb-py@e307df3 |
 | [FalkorDB/GraphRAG-SDK:graphrag_sdk/examples/07_incremental_updates.py:0](https://github.com/FalkorDB/GraphRAG-SDK/blob/35e67a0b27fdcc7f2c28508b09e86169851a8187/graphrag_sdk/examples/07_incremental_updates.py#L1) | before of FalkorDB/GraphRAG-SDK/pull/336 | skipped | needs an LLM provider (OPENAI_API_KEY); Lockstep does not hold provider keys | FalkorDB/GraphRAG-SDK@d703d4a, FalkorDB/falkordb-py@31f63f4 |
 | [FalkorDB/docs:agentic-memory/graphiti-mcp-server.mdx:19](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/agentic-memory/graphiti-mcp-server.mdx#L384) | after of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@2a970dc |
 | [FalkorDB/docs:agentic-memory/graphiti-mcp-server.mdx:19](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/agentic-memory/graphiti-mcp-server.mdx#L384) | before of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@e307df3 |
@@ -115,7 +129,7 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 | [FalkorDB/docs:operations/opentelemetry.mdx:10](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/operations/opentelemetry.mdx#L206) | after of FalkorDB/falkordb-py/pull/276 | fail | ModuleNotFoundError: No module named 'opentelemetry' | FalkorDB/falkordb-py@2a970dc |
 | [FalkorDB/docs:operations/opentelemetry.mdx:10](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/operations/opentelemetry.mdx#L206) | before of FalkorDB/falkordb-py/pull/276 | fail | ModuleNotFoundError: No module named 'opentelemetry' | FalkorDB/falkordb-py@e307df3 |
 | [FalkorDB/docs:operations/opentelemetry.mdx:4](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/operations/opentelemetry.mdx#L81) | before of FalkorDB/falkordb-py/pull/276 | skipped | contains placeholders to fill in (e.g. "<your-host>") | FalkorDB/falkordb-py@e307df3 |
-| [FalkorDB/docs:udfs/index.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/udfs/index.mdx#L20) | after of FalkorDB/falkordb-py/pull/276 | fail | redis.exceptions.ResponseError: Failed to register, UDF Library 'StringUtils' already registered | FalkorDB/falkordb-py@2a970dc |
+| [FalkorDB/docs:udfs/index.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/udfs/index.mdx#L20) | after of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@2a970dc |
 | [FalkorDB/docs:udfs/index.mdx:0](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/udfs/index.mdx#L20) | before of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@e307df3 |
 | [FalkorDB/docs:udfs/index.mdx:6](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/udfs/index.mdx#L158) | after of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@2a970dc |
 | [FalkorDB/docs:udfs/index.mdx:6](https://github.com/FalkorDB/docs/blob/f804fd70f915fbd6f2651b56088739c0227c36fc/udfs/index.mdx#L158) | before of FalkorDB/falkordb-py/pull/276 | pass |  | FalkorDB/falkordb-py@e307df3 |
@@ -133,6 +147,6 @@ Every number in the README comes from this file. Regenerate it; never edit it by
 
 | Changed symbol | Rows | ms |
 |---|---:|---:|
-| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.73 |
-| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 1.23 |
-| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 2.39 |
+| `falkordb.asyncio.falkordb.FalkorDB` | 49 | 0.74 |
+| `falkordb.asyncio.falkordb.FalkorDB.select_graph` | 49 | 0.79 |
+| `falkordb.asyncio.graph.AsyncGraph.query` | 670 | 2.85 |

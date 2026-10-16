@@ -664,10 +664,34 @@ RETURN pr.url AS url, pr.title AS title, size(changed) AS changed, size(sections
 ORDER BY url
 ```
 
-**`factsRuns`** — Every recorded example execution, latest first per example and side.
+**`factsGrepBaseline`** — Per pull request: the names of the symbols it changed and the doc sections the impact traversal reaches from them (the grep baseline in FACTS compares the two).
 
 ```cypher
-MATCH (r:Run)-[:OF]->(e:CodeExample)
+MATCH (pr:PullRequest)<-[c:CHANGED_IN]-(s:Symbol)
+WHERE c.kind <> 'added'
+WITH pr, collect(DISTINCT s.name) AS names
+OPTIONAL MATCH p = (pr)<-[c2:CHANGED_IN]-(:Symbol)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-(d)
+WHERE c2.kind <> 'added' AND (d:DocSection OR d:CodeExample) AND d.status = 'live'
+OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
+RETURN pr.url AS url, names, collect(DISTINCT coalesce(sec.id, d.id)) AS reached
+ORDER BY url
+```
+
+**`factsSectionBodies`** — The text of every live doc section, for the grep baseline.
+
+```cypher
+MATCH (d:DocSection)
+WHERE d.status = 'live'
+RETURN d.id AS id, d.body AS body
+```
+
+**`factsRuns`** — Every recorded example execution (the latest attempt of each identical run), latest first per example and side.
+
+```cypher
+MATCH (r:Run)-[:OF]->(:CodeExample)
+WITH r.key AS key, max(r.created_at) AS latest
+MATCH (r:Run {key: key})-[:OF]->(e:CodeExample)
+WHERE r.created_at = latest
 OPTIONAL MATCH (r)-[:AT]->(pr:PullRequest)
 RETURN e.id AS example, e.url AS url, r.side AS side, r.status AS status, r.error AS error, r.reason AS reason,
        r.installed AS installed, pr.url AS pr, r.created_at AS at

@@ -16,6 +16,31 @@ export interface Facts {
   impactQueryMs: { symbol: string; ms: number; rows: number }[];
   pullRequests: { url: string; title: string; changed: number; sections: number; otherRepos: number }[];
   runs: { example: string; url: string; side: string; status: string; error: string; reason: string; installed: string[]; pr: string | null }[];
+  grepBaseline: GrepBaseline[];
+}
+
+export interface GrepBaseline {
+  url: string;
+  names: string[];
+  /** Doc sections the impact traversal reaches. */
+  reached: number;
+  /** …of which a whole-word search for a changed name also finds. */
+  grepFound: number;
+  /** Sections the search matches that the traversal does not reach. */
+  grepOutside: number;
+}
+
+/**
+ * What a reviewer gets without the graph: a whole-word search of every doc section
+ * for the names of the changed symbols, compared with what the traversal reaches.
+ */
+export function grepBaseline(url: string, names: string[], reached: string[], sections: { id: string; body: string | null }[]): GrepBaseline {
+  const esc = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = names.length ? new RegExp(`\\b(?:${names.map(esc).join('|')})\\b`) : null;
+  const hits = new Set(re ? sections.filter((d) => re.test(d.body ?? '')).map((d) => d.id) : []);
+  const reachedSet = new Set(reached);
+  const grepFound = [...reachedSet].filter((id) => hits.has(id)).length;
+  return { url, names, reached: reachedSet.size, grepFound, grepOutside: hits.size - grepFound };
 }
 
 /** Every number Lockstep's README quotes, computed from the live graph. */
@@ -40,10 +65,15 @@ export async function collectFacts(graph: OrgGraph, falkordbVersion = 'unknown')
 
   const pullRequests = (await graph.run<Facts['pullRequests'][number]>(Q.factsPullRequests)).rows;
   const runs = (await graph.run<Facts['runs'][number]>(Q.factsRuns)).rows;
+  const bodies = (await graph.run<{ id: string; body: string | null }>(Q.factsSectionBodies)).rows;
+  const grep = (await graph.run<{ url: string; names: string[]; reached: string[] }>(Q.factsGrepBaseline)).rows.map((r) =>
+    grepBaseline(r.url, r.names, r.reached, bodies),
+  );
 
   return {
     pullRequests,
     runs,
+    grepBaseline: grep,
     org: graph.name,
     generatedAt: new Date().toISOString(),
     falkordb: falkordbVersion,
@@ -92,6 +122,23 @@ export function factsMarkdown(f: Facts): string {
   for (const p of f.samplePaths) lines.push(`- ${p.hops} hops: ${p.path.map((x) => `\`${x}\``).join(' ← ')}`);
   lines.push('', '## Pull requests checked', '', '| Pull request | Changed symbols | Doc sections reached (≤ 3 hops) | …in other repositories |', '|---|---:|---:|---:|');
   for (const p of f.pullRequests) lines.push(`| [${p.title.replace(/\|/g, '\\|')}](${p.url}) | ${p.changed} | ${p.sections} | ${p.otherRepos} |`);
+  if (f.grepBaseline.length) {
+    const sum = (k: 'reached' | 'grepFound' | 'grepOutside') => f.grepBaseline.reduce((n, g) => n + g[k], 0);
+    lines.push(
+      '',
+      '## Without the graph: grep for the changed names',
+      '',
+      'For each pull request, a whole-word search of every live doc section for the names of the symbols it changed',
+      '(what a reviewer can do without the graph), next to the sections the impact traversal reaches.',
+      '',
+      '| Pull request | Changed names | Reached by the graph | …that grep also finds | grep matches outside them |',
+      '|---|---|---:|---:|---:|',
+    );
+    for (const g of f.grepBaseline) {
+      lines.push(`| ${g.url.replace('https://github.com/', '')} | ${g.names.map((n) => `\`${n}\``).join(', ')} | ${g.reached} | ${g.grepFound} | ${g.grepOutside} |`);
+    }
+    lines.push('', `Total: the graph reaches ${sum('reached')} sections; grep finds ${sum('grepFound')} of them and matches ${sum('grepOutside')} others.`);
+  }
   lines.push('', '## Example runs (sandbox)', '');
   const byStatus = new Map<string, number>();
   for (const r of f.runs) byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);
