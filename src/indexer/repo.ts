@@ -7,12 +7,27 @@ import { setting } from '../config.js';
 
 const exec = promisify(execFile);
 
+/**
+ * With GITHUB_TOKEN (or GH_TOKEN) set, clones and fetches from github.com send it, so
+ * private repositories the token can read work too. It goes through git's environment
+ * config (not the remote URL or argv) and only to https://github.com/.
+ */
+function gitAuthEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const token = env.GITHUB_TOKEN || env.GH_TOKEN;
+  if (!token || env.GIT_CONFIG_COUNT) return {};
+  return {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+  };
+}
+
 export async function git(cwd: string, args: string[], opts: { maxBuffer?: number } = {}): Promise<string> {
   try {
     const { stdout } = await exec('git', args, {
       cwd,
       maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...gitAuthEnv() },
     });
     return stdout;
   } catch (err) {

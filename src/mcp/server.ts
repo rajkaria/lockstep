@@ -6,10 +6,13 @@ import type { Config } from '../config.js';
 import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
 import { buildDocsPatch } from '../patch.js';
+import { runGraphCheck } from '../agent/graph-check.js';
+import { checkReport } from '../format/report.js';
+import { ensureIndexed } from '../indexer/ensure.js';
 import { parsePrUrl } from '../pr/github.js';
 import { packageVersion } from '../pkg.js';
 import { ALL_TOOLS, inputJsonSchema } from '../tools/index.js';
-import type { ToolDef, ToolResult } from '../tools/types.js';
+import type { ToolContext, ToolDef, ToolResult } from '../tools/types.js';
 import { unknownParamsError } from '../tools/types.js';
 
 /** A tool only MCP clients get: the docs patch, for the human driving Claude Code to apply locally. */
@@ -32,7 +35,35 @@ const docsPatchTool: ToolDef<{ pr_url: string }, { diff: string; title: string; 
   },
 };
 
-export const MCP_TOOLS: ToolDef[] = [...ALL_TOOLS, docsPatchTool];
+/**
+ * One call for the whole answer: the graph check (impact, clearance, ranking) as the
+ * Markdown report the GitHub Action posts. Hosted servers index the repository first.
+ */
+export const checkPullRequestTool: ToolDef<{ pr_url: string; run_examples?: boolean }, { report: string; checkId: string; status: string }> = {
+  name: 'check_pull_request',
+  description:
+    'Check a GitHub pull request for docs it can make false, in one call: every doc section and example the changed code reaches (with the evidence path), ' +
+    'the changed symbols no doc reaches, ranked by PageRank, as a Markdown report. Start here; use impact/read_section/decisions_for to dig into one section.',
+  input: z.object({
+    pr_url: z.string().describe('https://github.com/<owner>/<repo>/pull/<n>'),
+    run_examples: z.boolean().optional().describe('Also run up to 3 affected examples before and after the PR (local servers only; takes minutes)'),
+  }),
+  queries: [Q.impact, Q.clearance, Q.rankSections],
+  async run(ctx, input) {
+    const pr = parsePrUrl(input.pr_url).url;
+    const r = await runGraphCheck(ctx, pr, { maxRuns: input.run_examples ? 3 : 0 });
+    const report = await checkReport(ctx, ctx.graph.name, pr);
+    return { tool: 'check_pull_request', summary: r.summary, data: { report, checkId: r.checkId, status: r.status }, queries: [] };
+  },
+};
+
+export const MCP_TOOLS: ToolDef[] = [checkPullRequestTool, ...ALL_TOOLS, docsPatchTool];
+
+export const MCP_INSTRUCTIONS =
+  "Staleproof keeps docs true to code over a FalkorDB graph of an organisation's repositories. For a pull request, call check_pull_request first: " +
+  'it returns every doc section and example the change can make false, with the evidence path for each. To judge sections one by one: impact, ' +
+  'read_section and run_example, decisions_for before editing, then propose_edit or record_verdict for every impacted section, and docs_patch for the diff. ' +
+  'Every result lists the Cypher it ran.';
 
 /** Tool description for MCP clients: what it does, then the Cypher it runs. */
 export function mcpDescription(tool: ToolDef): string {
@@ -40,8 +71,8 @@ export function mcpDescription(tool: ToolDef): string {
   return primary ? `${tool.description}\n\nCypher (${primary.name}):\n${primary.cypher}` : tool.description;
 }
 
-export function mcpToolList(): Tool[] {
-  return MCP_TOOLS.map((t) => ({
+export function mcpToolList(tools: ToolDef[] = MCP_TOOLS): Tool[] {
+  return tools.map((t) => ({
     name: t.name,
     description: mcpDescription(t),
     inputSchema: inputJsonSchema(t) as Tool['inputSchema'],
@@ -49,6 +80,10 @@ export function mcpToolList(): Tool[] {
 }
 
 export function formatResult(r: ToolResult): CallToolResult {
+  if (r.tool === 'check_pull_request') {
+    const d = r.data as { report: string; checkId: string };
+    return { content: [{ type: 'text', text: d.report }, { type: 'text', text: `Stored as check ${d.checkId}. ${r.summary}` }] };
+  }
   const cypher = r.queries
     .filter((q) => q.name !== 'adhoc')
     .map((q) => `-- ${q.name} (${q.rows} rows, ${q.ms.toFixed(2)} ms)\n${q.cypher}`)
@@ -62,20 +97,24 @@ export function formatResult(r: ToolResult): CallToolResult {
   };
 }
 
-export function createMcpServer(graph: OrgGraph, config: Config): Server {
+/** Where a tool call runs: the graph (and context) for its arguments. */
+export type McpResolver = (tool: ToolDef, input: Record<string, unknown>) => Promise<ToolContext>;
+
+export function createMcpServer(
+  target: OrgGraph | McpResolver,
+  config: Config,
+  opts: { tools?: ToolDef[]; instructions?: string } = {},
+): Server {
+  const tools = opts.tools ?? MCP_TOOLS;
+  const resolve: McpResolver =
+    typeof target === 'function' ? target : async (_tool, input) => ({ graph: target, config, prUrl: (input as { pr_url?: string }).pr_url });
   const server = new Server(
     { name: 'staleproof', version: packageVersion() },
-    {
-      capabilities: { tools: {} },
-      instructions:
-        'Staleproof keeps docs true to code over a FalkorDB graph of an organisation\'s repositories. For a pull request: call impact first, ' +
-        'read_section and run_example to judge each impacted section, decisions_for before editing, then propose_edit or record_verdict for every impacted section, ' +
-        'and docs_patch to get the diff. Every result lists the Cypher it ran.',
-    },
+    { capabilities: { tools: {} }, instructions: opts.instructions ?? MCP_INSTRUCTIONS },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpToolList() }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpToolList(tools) }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = MCP_TOOLS.find((t) => t.name === req.params.name);
+    const tool = tools.find((t) => t.name === req.params.name);
     if (!tool) return { isError: true, content: [{ type: 'text', text: `unknown tool ${req.params.name}` }] };
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
     const unknownError = unknownParamsError(tool, args);
@@ -88,8 +127,8 @@ export function createMcpServer(graph: OrgGraph, config: Config): Server {
       };
     }
     try {
-      const prUrl = (parsed.data as { pr_url?: string }).pr_url;
-      return formatResult(await tool.run({ graph, config, prUrl }, parsed.data));
+      const ctx = await resolve(tool, parsed.data as Record<string, unknown>);
+      return formatResult(await tool.run(ctx, parsed.data));
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: (err as Error).message }] };
     }
@@ -99,7 +138,14 @@ export function createMcpServer(graph: OrgGraph, config: Config): Server {
 
 /** `staleproof mcp`: serve the tools over stdio until the client disconnects. */
 export async function serveMcp(graph: OrgGraph, config: Config): Promise<void> {
-  const server = createMcpServer(graph, config);
+  // The first check of a repository indexes it: nothing to set up before asking about a pull request.
+  const server = createMcpServer(async (tool, input) => {
+    const prUrl = typeof input.pr_url === 'string' ? input.pr_url : undefined;
+    if (prUrl && ['check_pull_request', 'impact', 'clearance'].includes(tool.name)) {
+      await ensureIndexed(graph, config, [parsePrUrl(prUrl).fullName], (p) => process.stderr.write(`staleproof: ${p.message}\n`));
+    }
+    return { graph, config, prUrl };
+  }, config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   await new Promise<void>((resolve) => {

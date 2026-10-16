@@ -19,6 +19,11 @@ import { packageRoot, packageVersion } from '../pkg.js';
 import { readSectionTool } from '../tools/graph-tools.js';
 import { reviewVerdict, writeDecisionTool } from '../tools/memory-tools.js';
 import { ALL_TOOLS } from '../tools/index.js';
+import { HostedLimitError, Workspaces, type HostedEvent } from '../hosted/workspaces.js';
+import { RepoTooLargeError } from '../indexer/tarball.js';
+import { parseRepoName } from '../indexer/repo.js';
+import { NotIndexedError } from '../pr/ingest.js';
+import { handleMcpRequest } from '../mcp/http.js';
 
 export const DEFAULT_PRELOADED = [
   'https://github.com/FalkorDB/falkordb-py/pull/262',
@@ -36,6 +41,13 @@ export interface AppOptions {
   webDir?: string;
   /** Requests per hour per client for POST endpoints. */
   rateLimit?: number;
+  /**
+   * Hosted mode: any public repository is indexed on demand into its own workspace graph
+   * (see src/hosted/workspaces.ts). Without it the server answers from the one org graph.
+   */
+  workspaces?: Workspaces;
+  /** Hosted mode: agent checks per day across the service (they cost model tokens). */
+  agentChecksPerDay?: number;
 }
 
 /** One check at a time: example runs share a scratch database and the model budget is shared. */
@@ -85,6 +97,7 @@ export function defaultModelFactory(config: Config): (() => ModelClient) | undef
 export function createApp(opts: AppOptions): Hono {
   const { store, config } = opts;
   const graph: OrgGraph = store.org(config.org);
+  const hosted = opts.workspaces;
   const preloaded = opts.preloaded ?? DEFAULT_PRELOADED;
   const mutex = new Mutex();
   const limiter = new RateLimiter(opts.rateLimit ?? 30);
@@ -92,12 +105,30 @@ export function createApp(opts: AppOptions): Hono {
   const app = new Hono();
 
   const clientKey = (c: { req: { header(n: string): string | undefined } }) =>
-    c.req.header('fly-client-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+    c.req.header('x-real-ip') ?? c.req.header('fly-client-ip') ?? c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim() ?? 'local';
 
-  app.onError((err, c) => c.json({ error: err.message }, 500));
+  /** The graph holding a repository: its hosted workspace, or the org graph. */
+  const graphForRepo = async (repo: string): Promise<OrgGraph | undefined> => {
+    if (!hosted) return graph;
+    return (await hosted.locate(repo))?.graph;
+  };
+  /** Graphs to search for an id (check, verdict) that doesn't name its repository. */
+  const searchGraphs = async (): Promise<OrgGraph[]> => (hosted ? hosted.graphs() : [graph]);
+  const findIn = async <T>(query: string, params: Record<string, unknown>): Promise<{ graph: OrgGraph; row: T } | undefined> => {
+    for (const g of await searchGraphs()) {
+      const row = (await g.run<T>(query, params)).rows[0];
+      if (row) return { graph: g, row };
+    }
+    return undefined;
+  };
+  const repoOfId = (id: string) => /^([\w.-]+\/[\w.-]+):/.exec(id)?.[1];
+  const userError = (err: unknown) => err instanceof HostedLimitError || err instanceof RepoTooLargeError || err instanceof NotIndexedError;
 
-  app.get('/api/health', async (c) =>
-    c.json({
+  app.onError((err, c) => c.json({ error: err.message }, userError(err) ? 400 : 500));
+
+  app.get('/api/health', async (c) => {
+    const memory = hosted ? await store.memoryMb().catch(() => undefined) : undefined;
+    return c.json({
       ok: true,
       version: packageVersion(),
       org: graph.name,
@@ -106,8 +137,16 @@ export function createApp(opts: AppOptions): Hono {
         ? { available: true, model: config.model, effort: config.effort, provider: config.modelCompatible ? new URL(config.modelBaseUrl!).hostname : 'api.anthropic.com' }
         : { available: false, reason: 'the server has no model API credentials (ANTHROPIC_API_KEY)' },
       busy: mutex.busy,
-    }),
-  );
+      hosted: hosted
+        ? {
+            enabled: true,
+            limits: { maxRepos: hosted.limits.maxRepos, maxFiles: hosted.limits.tarball.maxFiles, maxGraphMb: hosted.limits.maxGraphMb },
+            memory,
+            githubToken: !!config.githubToken,
+          }
+        : { enabled: false },
+    });
+  });
 
   app.get('/api/stats', async (c) => {
     if (!factsCache || Date.now() - factsCache.at > 60_000) {
@@ -140,40 +179,113 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   app.get('/api/checks', async (c) => {
-    const limit = Math.min(Number(c.req.query('limit') ?? 20), 100);
-    return c.json({ checks: (await graph.run(Q.recentChecks, { limit })).rows });
+    const raw = Number(c.req.query('limit') ?? 20);
+    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 100) : 20;
+    // Hosted: the newest checks across the curated graph and the most recently used workspaces.
+    const graphs = (await searchGraphs()).slice(0, 8);
+    const rows: (Record<string, unknown> & { startedAt: number })[] = [];
+    for (const g of graphs) {
+      for (const r of (await g.run<Record<string, unknown> & { startedAt: number }>(Q.recentChecks, { limit })).rows) rows.push({ ...r, org: g.name });
+    }
+    rows.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    return c.json({ checks: rows.slice(0, limit) });
   });
 
   app.get('/api/checks/:id', async (c) => {
-    const row = (await graph.run<{ trace: string }>(Q.checkTrace, { id: c.req.param('id') })).rows[0];
-    if (!row) return c.json({ error: 'no such check' }, 404);
-    return c.json({ id: c.req.param('id'), events: JSON.parse(row.trace ?? '[]') as TraceEvent[] });
+    const found = await findIn<{ trace: string }>(Q.checkTrace.cypher, { id: c.req.param('id') });
+    if (!found) return c.json({ error: 'no such check' }, 404);
+    return c.json({ id: c.req.param('id'), org: found.graph.name, events: JSON.parse(found.row.trace ?? '[]') as TraceEvent[] });
+  });
+
+  /** Hosted: which workspace holds a repository (and whether it needs indexing first). */
+  app.get('/api/repos', async (c) => {
+    let name: string;
+    try {
+      name = parseRepoName(c.req.query('name') ?? '');
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    if (!hosted) {
+      const row = (await graph.run<{ sha: string; at: number }>(`MATCH (r:Repo {name: $name}) RETURN r.sha AS sha, r.indexed_at AS at`, { name })).rows[0];
+      return c.json({ name, indexed: !!row, graph: graph.name, curated: true, sha: row?.sha ?? null, indexedAt: row?.at ?? null });
+    }
+    const found = await hosted.locate(name);
+    if (!found) return c.json({ name, indexed: false, graph: hosted.graphNameFor(name), curated: false, sha: null, indexedAt: null });
+    const row = (await found.graph.run<{ sha: string; at: number; name: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name, r.sha AS sha, r.indexed_at AS at`, { name })).rows[0];
+    const others = (await found.graph.run<{ name: string }>(`MATCH (r:Repo) RETURN r.name AS name ORDER BY name`)).rows.map((r) => r.name);
+    return c.json({ name: row?.name ?? name, indexed: true, graph: found.graph.name, curated: found.curated, sha: row?.sha ?? null, indexedAt: row?.at ?? null, workspace: others });
+  });
+
+  app.get('/api/workspaces', async (c) => {
+    if (!hosted) return c.json({ workspaces: [] });
+    const list = await hosted.list();
+    return c.json({ workspaces: list.map((w) => ({ graph: w.graph, curated: w.curated, repos: w.repos.map((r) => ({ name: r.name, sha: r.sha, indexedAt: r.indexedAt, lastUsed: r.lastUsed })) })) });
+  });
+
+  /** Hosted: index public repositories into one workspace, streaming progress. */
+  app.post('/api/index', async (c) => {
+    if (!hosted) return c.json({ error: 'this server indexes from the CLI only: staleproof index <owner/repo>...' }, 404);
+    if (!limiter.allow(`index:${clientKey(c)}`)) return c.json({ error: 'rate limited: try again later' }, 429);
+    const body = await c.req.json<{ repos?: unknown; refresh?: boolean }>().catch(() => ({}) as { repos?: unknown; refresh?: boolean });
+    let repos: string[];
+    try {
+      repos = (Array.isArray(body.repos) ? body.repos : typeof body.repos === 'string' ? [body.repos] : []).map((r) => parseRepoName(String(r)));
+      if (!repos.length) throw new Error('repos required: ["owner/name", ...]');
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    return streamSSE(c, async (stream) => {
+      let chain: Promise<unknown> = Promise.resolve();
+      const send = (e: HostedEvent | { type: 'indexed'; graph: string; curated: boolean } | { type: 'error'; message: string }) => {
+        chain = chain.then(() => stream.writeSSE({ event: 'trace', data: JSON.stringify(e) })).catch(() => undefined);
+      };
+      try {
+        const r = await mutex.run(() => hosted.ensure(repos[0]!, { with: repos.slice(1), refresh: body.refresh === true, onEvent: send }));
+        send({ type: 'indexed', graph: r.graph.name, curated: r.curated });
+      } catch (err) {
+        send({ type: 'error', message: (err as Error).message });
+      }
+      await chain;
+    });
   });
 
   app.post('/api/check', async (c) => {
     if (!limiter.allow(`check:${clientKey(c)}`)) return c.json({ error: 'rate limited: try again later' }, 429);
-    const body = await c.req.json<{ pr_url?: string; mode?: 'agent' | 'graph' }>().catch(() => ({}) as { pr_url?: string; mode?: 'agent' | 'graph' });
+    const body = await c.req.json<{ pr_url?: string; mode?: 'agent' | 'graph'; with?: unknown }>().catch(() => ({}) as { pr_url?: string; mode?: 'agent' | 'graph'; with?: unknown });
     let pr: string;
+    let repo: string;
+    let withRepos: string[] = [];
     try {
-      pr = parsePrUrl(body.pr_url ?? '').url;
+      const ref = parsePrUrl(body.pr_url ?? '');
+      pr = ref.url;
+      repo = ref.fullName;
+      withRepos = (Array.isArray(body.with) ? body.with : []).map((r) => parseRepoName(String(r)));
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
     const mode = body.mode ?? (opts.model ? 'agent' : 'graph');
     if (mode === 'agent' && !opts.model) {
-      return c.json({ error: 'agent mode needs Claude API credentials on the server (ANTHROPIC_API_KEY); graph mode works without them', agentUnavailable: true }, 409);
+      return c.json({ error: 'agent mode needs model API credentials on the server (ANTHROPIC_API_KEY); graph mode works without them', agentUnavailable: true }, 409);
     }
+    if (mode === 'agent' && hosted && !(await hosted.withinDailyBudget('agent', opts.agentChecksPerDay ?? 150))) {
+      return c.json({ error: "today's hosted agent checks are used up; graph mode still works, and the agent runs anywhere with your own key (npx -y staleproof check <pr-url>)", agentUnavailable: true }, 429);
+    }
+    const t0 = Date.now();
     return streamSSE(c, async (stream) => {
       let chain: Promise<unknown> = Promise.resolve();
-      const send = (e: TraceEvent | { type: 'queued' } | { type: 'error'; message: string }) => {
+      const send = (e: TraceEvent | HostedEvent | { type: 'queued' } | { type: 'error'; message: string }) => {
         chain = chain.then(() => stream.writeSSE({ event: 'trace', data: JSON.stringify(e) })).catch(() => undefined);
       };
       if (mutex.busy) send({ type: 'queued' });
       try {
         await mutex.run(async () => {
-          const ctx = { graph, config };
-          if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send, budgetMs: config.checkBudgetMs });
-          else await runGraphCheck(ctx, pr, { onEvent: send });
+          const target = hosted ? await hosted.ensure(repo, { with: withRepos, onEvent: send }) : { graph, curated: true };
+          const ctx = { graph: target.graph, config };
+          // Indexing came out of the same function-time budget.
+          const budgetMs = config.checkBudgetMs ? Math.max(45_000, config.checkBudgetMs - (Date.now() - t0)) : undefined;
+          if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send, budgetMs });
+          // A hosted workspace has no recorded runs and the server no sandbox: don't try examples there.
+          else await runGraphCheck(ctx, pr, { onEvent: send, maxRuns: target.curated ? undefined : 0 });
         });
       } catch (err) {
         send({ type: 'error', message: (err as Error).message });
@@ -185,14 +297,22 @@ export function createApp(opts: AppOptions): Hono {
   app.get('/api/sections', async (c) => {
     const id = c.req.query('id');
     if (!id) return c.json({ error: 'id required' }, 400);
-    const r = await readSectionTool.run({ graph, config }, { section_id: id });
+    const g = repoOfId(id) ? await graphForRepo(repoOfId(id)!) : graph;
+    if (!g) return c.json({ error: 'no such section' }, 404);
+    const r = await readSectionTool.run({ graph: g, config }, { section_id: id });
     return r.data ? c.json(r.data) : c.json({ error: 'no such section' }, 404);
   });
 
   app.get('/api/patch', async (c) => {
-    const pr = c.req.query('pr');
-    if (!pr) return c.json({ error: 'pr required' }, 400);
-    const patch = await buildDocsPatch({ graph, config }, parsePrUrl(pr).url);
+    let pr: ReturnType<typeof parsePrUrl>;
+    try {
+      pr = parsePrUrl(c.req.query('pr') ?? '');
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    const g = await graphForRepo(pr.fullName);
+    if (!g) return c.json({ error: `${pr.fullName} is not indexed` }, 404);
+    const patch = await buildDocsPatch({ graph: g, config }, pr.url);
     return c.json({ title: patch.title, body: patch.body, diff: patch.diff, files: patch.files.map((f) => ({ repo: f.repo, path: f.path, sections: f.sections })), verdicts: patch.verdicts, conflicts: patch.conflicts });
   });
 
@@ -202,8 +322,11 @@ export function createApp(opts: AppOptions): Hono {
     const parsed = writeDecisionTool.input.safeParse(body);
     if (!parsed.success) return c.json({ error: parsed.error.issues.map((i) => i.message).join('; ') }, 400);
     if (parsed.data.text.length > 500) return c.json({ error: 'decision text is limited to 500 characters' }, 400);
+    const repo = parsed.data.governs.map(repoOfId).find(Boolean);
+    const g = repo ? await graphForRepo(repo) : graph;
+    if (!g) return c.json({ error: `${repo} is not indexed` }, 404);
     try {
-      const r = await writeDecisionTool.run({ graph, config }, parsed.data);
+      const r = await writeDecisionTool.run({ graph: g, config }, parsed.data);
       return c.json({ ...r.data, summary: r.summary });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
@@ -214,9 +337,14 @@ export function createApp(opts: AppOptions): Hono {
     if (!limiter.allow(`write:${clientKey(c)}`)) return c.json({ error: 'rate limited: try again later' }, 429);
     const body = await c.req.json<{ status?: string; by?: string }>().catch(() => ({}) as { status?: string; by?: string });
     if (body.status !== 'accepted' && body.status !== 'rejected') return c.json({ error: 'status must be accepted or rejected' }, 400);
-    const ok = await reviewVerdict({ graph, config }, c.req.param('id'), body.status, (body.by ?? 'web').slice(0, 60));
+    const found = await findIn<{ id: string }>(`MATCH (v:Verdict {id: $id}) RETURN v.id AS id`, { id: c.req.param('id') });
+    if (!found) return c.json({ error: 'no such verdict' }, 404);
+    const ok = await reviewVerdict({ graph: found.graph, config }, c.req.param('id'), body.status, (body.by ?? 'web').slice(0, 60));
     return ok ? c.json({ ok }) : c.json({ error: 'no such verdict' }, 404);
   });
+
+  /** MCP over Streamable HTTP: the same tools for any MCP client, no install. */
+  app.all('/api/mcp', (c) => handleMcpRequest(c.req.raw, { store, config, graph, workspaces: hosted }));
 
   app.get('/api/model', (c) =>
     c.json({

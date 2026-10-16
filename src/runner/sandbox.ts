@@ -203,6 +203,7 @@ export async function runInSandbox(
     await mkdir(shim);
     await writeFile(join(shim, 'sitecustomize.py'), await readFile(join(packageRoot(), 'python', 'sitecustomize.py'), 'utf8'));
     await writeFile(join(work, 'example.py'), code);
+    await writeFile(join(work, '_run_example.py'), await readFile(join(packageRoot(), 'python', 'run_example.py'), 'utf8'));
     const env: NodeJS.ProcessEnv = {
       PATH: '/usr/bin:/bin',
       HOME: work,
@@ -214,7 +215,8 @@ export async function runInSandbox(
       STALEPROOF_SCRATCH_HOST: opts.scratchHost ?? '127.0.0.1',
       STALEPROOF_SCRATCH_PORT: String(opts.scratchPort),
     };
-    const r = await runProcess(python, ['-s', 'example.py'], { cwd: work, env, timeoutMs: opts.timeoutMs });
+    // _run_example.py runs example.py, with top-level await allowed for async docs.
+    const r = await runProcess(python, ['-s', '_run_example.py'], { cwd: work, env, timeoutMs: opts.timeoutMs });
     return { ...r, python };
   } finally {
     await rm(work, { recursive: true, force: true });

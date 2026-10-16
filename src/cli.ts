@@ -9,8 +9,10 @@ import { GraphStore, redact } from './graph/client.js';
 import { serveMcp } from './mcp/server.js';
 import { serve } from '@hono/node-server';
 import { createApp, defaultModelFactory } from './server/app.js';
+import { Workspaces } from './hosted/workspaces.js';
 import { indexOrg } from './indexer/index.js';
-import { checkoutRepo, parseRepoName, type Checkout } from './indexer/repo.js';
+import { parseRepoName, type Checkout } from './indexer/repo.js';
+import { checkoutOrDownload } from './indexer/ensure.js';
 import { packageRoot, packageVersion } from './pkg.js';
 import { clearanceText, dim, impactText, runText, traceLine } from './format/text.js';
 import { AnthropicModel, type Effort } from './agent/anthropic.js';
@@ -22,10 +24,11 @@ import type { RunExampleData } from './tools/run-example.js';
 import { runExampleTool } from './tools/run-example.js';
 import { reviewVerdict, writeDecisionTool } from './tools/memory-tools.js';
 import { buildDocsPatch, loadVerdicts } from './patch.js';
-import { checkMarkdown } from './format/markdown.js';
+import { checkReport } from './format/report.js';
+import { ensureIndexed } from './indexer/ensure.js';
 import { openDocsPr } from './pr/open-pr.js';
 import { parsePrUrl } from './pr/github.js';
-import { clearanceTool, impactTool, rankSectionsTool } from './tools/graph-tools.js';
+import { impactTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 
 const program = new Command();
@@ -36,20 +39,52 @@ program
     'Keep docs true to code: a FalkorDB graph of code, docs and decisions across repositories, and an agent that checks every pull request against it.',
   )
   .version(packageVersion())
-  .option('--org <org>', 'organisation (one graph per org); env STALEPROOF_ORG')
+  .option('--org <org>', 'graph name, one per organisation; env STALEPROOF_ORG (default: the owner of the repository the command is about, else falkordb)')
   .option('--db <url>', 'FalkorDB URL; env FALKORDB_URL (default falkor://localhost:6379)');
+
+/**
+ * The graph a command uses when neither --org nor STALEPROOF_ORG names one: the owner of
+ * the repository it is about (one graph per organisation), so `check acme/x#1` reads `acme`.
+ */
+let ownerOrg: string | undefined;
+function aboutRepo(repoOrId: string): void {
+  const owner = /^(?:https?:\/\/github\.com\/)?([\w.-]+)\//.exec(repoOrId.trim())?.[1];
+  if (owner) ownerOrg ??= owner;
+}
 
 function settings() {
   const opts = program.opts<{ org?: string; db?: string }>();
   const config = loadConfig();
   if (opts.org) config.org = orgSlug(opts.org);
+  else if (!setting('ORG') && ownerOrg) config.org = orgSlug(ownerOrg);
   if (opts.db) config.falkordbUrl = opts.db;
   return config;
 }
 
-async function withGraph<T>(fn: (store: GraphStore, org: string) => Promise<T>): Promise<T> {
+/** FALKORDB_URL was not given, so the default local server may be started for the user. */
+function defaultLocalDb(): boolean {
+  return !program.opts<{ db?: string }>().db && !process.env.FALKORDB_URL;
+}
+
+/**
+ * Connect to FalkorDB. With `autoStart`, and no server configured, start a local one
+ * (falkordblite, installed on first use) instead of failing: `npx staleproof check <pr>`
+ * works on a machine with nothing set up.
+ */
+async function connect(config: ReturnType<typeof settings>, autoStart: boolean): Promise<GraphStore> {
+  try {
+    return await GraphStore.connect(config.falkordbUrl);
+  } catch (err) {
+    if (!autoStart || !defaultLocalDb()) throw err;
+    log('No FalkorDB on localhost:6379: starting a local one (falkordblite; the first start installs it, which takes a minute).');
+    execFileSync('bash', [join(packageRoot(), 'scripts', 'falkordb-local.sh'), 'start', '6379'], { stdio: ['ignore', 2, 2] });
+    return GraphStore.connect(config.falkordbUrl);
+  }
+}
+
+async function withGraph<T>(fn: (store: GraphStore, org: string) => Promise<T>, opts: { autoStart?: boolean } = {}): Promise<T> {
   const config = settings();
-  const store = await GraphStore.connect(config.falkordbUrl);
+  const store = await connect(config, opts.autoStart ?? true);
   try {
     return await fn(store, config.org);
   } finally {
@@ -68,13 +103,15 @@ program
   .option('--ref <repo=ref>', 'check out a specific ref for one repository (repeatable)', collect, [])
   .option('--json', 'print the index report as JSON')
   .action(async (repos: string[], opts: { ref: string[]; json?: boolean }) => {
+    aboutRepo(parseRepoName(repos[0] ?? ''));
     const config = settings();
     const refs = new Map(opts.ref.map((r) => r.split('=') as [string, string]).map(([k, v]) => [parseRepoName(k), v]));
     const names = repos.map(parseRepoName);
+    aboutRepo(names[0]!);
     const checkouts: Checkout[] = [];
     for (const name of names) {
       log(`checkout  ${name}${refs.has(name) ? `@${refs.get(name)}` : ''}`);
-      checkouts.push(await checkoutRepo(config.home, name, refs.get(name)));
+      checkouts.push(await checkoutOrDownload(config, name, refs.get(name)));
     }
     await withGraph(async (store, org) => {
       const report = await indexOrg(store.org(org), checkouts, (p) => log(`${p.phase.padEnd(9)} ${p.message}`));
@@ -113,10 +150,17 @@ program
   .option('--json', 'print JSON')
   .option('--format <format>', 'text | markdown (a PR comment)', 'text')
   .option('--out <file>', 'write the markdown comment to a file')
-  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string }) => {
+  .option('--with <repos...>', 'repositories to index together with the pull request\'s on first use (e.g. a docs site)', [])
+  .option('--no-index', 'fail instead of indexing the repository when the graph does not have it yet')
+  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean }) => {
+    aboutRepo(parsePrUrl(prUrl).fullName);
     await withGraph(async (store, org) => {
       const config = settings();
       const ctx: ToolContext = { graph: store.org(org), config, log };
+      if (opts.index) {
+        const report = await ensureIndexed(ctx.graph, config, [parsePrUrl(prUrl).fullName, ...opts.with], (p) => log(`${p.phase.padEnd(9)} ${p.message}`));
+        if (report) log(`indexed ${report.repos.map((r) => `${r.repo}@${r.sha.slice(0, 7)}`).join(', ')} into graph "${org}" in ${(report.ms / 1000).toFixed(1)}s`);
+      }
       if (opts.agent) {
         const model = new AnthropicModel({
           model: opts.model ?? config.model,
@@ -141,12 +185,16 @@ program
         if (r.status === 'error' || r.status === 'refused') process.exitCode = 1;
         return;
       }
+      // Graph mode: the same tools in a fixed order, no model; stored as a Check like agent runs.
+      const r = await runGraphCheck(ctx, prUrl, { maxRuns: Number(opts.runs), maxHops: Number(opts.maxHops), onEvent: opts.format === 'markdown' ? (e) => {
+        const line = traceLine(e);
+        if (line) log(line);
+      } : undefined });
       if (opts.format === 'markdown') {
-        await emitMarkdown(ctx, org, prUrl, opts.out);
+        await emitMarkdown(ctx, org, r.pr, opts.out);
+        if (r.status === 'error') process.exitCode = 1;
         return;
       }
-      // Graph mode: the same tools in a fixed order, no model; stored as a Check like agent runs.
-      const r = await runGraphCheck(ctx, prUrl, { maxRuns: Number(opts.runs), maxHops: Number(opts.maxHops) });
       if (opts.json) {
         console.log(JSON.stringify(r, null, 2));
         return;
@@ -174,6 +222,7 @@ program
   .option('--fresh', 're-run even if an identical run is recorded (replaces it)')
   .option('--json', 'print JSON')
   .action(async (exampleId: string, opts: { pr?: string; fresh?: boolean; json?: boolean }) => {
+    aboutRepo(exampleId);
     await withGraph(async (store, org) => {
       const ctx: ToolContext = { graph: store.org(org), config: settings(), log, freshRuns: opts.fresh };
       if (opts.pr) await impactTool.run(ctx, { pr_url: opts.pr });
@@ -197,6 +246,7 @@ program
   .option('--author <name>', 'who decided')
   .option('--supersedes <decision-id>', 'the decision this replaces')
   .action(async (text: string, opts: { governs: string[]; source?: string; author?: string; supersedes?: string }) => {
+    aboutRepo(opts.governs[0] ?? '');
     await withGraph(async (store, org) => {
       const r = await writeDecisionTool.run(
         { graph: store.org(org), config: settings() },
@@ -229,6 +279,7 @@ program
   .option('--open-pr', 'open the fix as a pull request in your fork (needs GITHUB_TOKEN)')
   .option('--upstream', 'with --open-pr: target the original repository instead of your fork')
   .action(async (prUrl: string, opts: { out?: string; openPr?: boolean; upstream?: boolean }) => {
+    aboutRepo(parsePrUrl(prUrl).fullName);
     await withGraph(async (store, org) => {
       const config = settings();
       const patch = await buildDocsPatch({ graph: store.org(org), config }, parsePrUrl(prUrl).url);
@@ -263,14 +314,20 @@ program
   .option('--port <port>', 'port (env PORT)', process.env.PORT ?? '8080')
   .option('--host <host>', 'interface to bind', process.env.HOST ?? '127.0.0.1')
   .option('--preload <urls...>', 'pull requests listed on the home page (env STALEPROOF_PRELOADED, comma-separated)')
-  .action(async (opts: { port: string; host: string; preload?: string[] }) => {
+  .option('--hosted', 'index any public repository on demand into its own workspace graph, like staleproof.dev (env STALEPROOF_HOSTED=on)')
+  .action(async (opts: { port: string; host: string; preload?: string[]; hosted?: boolean }) => {
     const config = settings();
-    const store = await GraphStore.connect(config.falkordbUrl);
+    const store = await connect(config, true);
     const preloaded = opts.preload ?? setting('PRELOADED')?.split(',').map((s) => s.trim()).filter(Boolean);
     const model = defaultModelFactory(config);
-    const app = createApp({ store, config, model, preloaded });
+    const hosted = opts.hosted || setting('HOSTED') === 'on';
+    const workspaces = hosted ? new Workspaces(store, config, store.org(config.org)) : undefined;
+    const app = createApp({ store, config, model, preloaded, workspaces });
     serve({ fetch: app.fetch, port: Number(opts.port), hostname: opts.host }, (info) => {
-      log(`staleproof serve: http://${opts.host}:${info.port} (graph "${config.org}", agent ${model ? `on, ${config.model}` : 'off: no Claude credentials, graph mode only'})`);
+      log(
+        `staleproof serve: http://${opts.host}:${info.port} (graph "${config.org}"${hosted ? ', hosted: any public repository on demand' : ''}, ` +
+          `agent ${model ? `on, ${config.model}` : 'off: no model credentials, graph mode only'}; MCP at /api/mcp)`,
+      );
     });
   });
 
@@ -301,12 +358,7 @@ program
   });
 
 async function emitMarkdown(ctx: ToolContext, org: string, prUrl: string, out: string | undefined, agentSummary?: string): Promise<void> {
-  const impact = await impactTool.run(ctx, { pr_url: prUrl });
-  const clearance = await clearanceTool.run(ctx, { pr_url: prUrl });
-  const ids = [...new Set(impact.data.sections.map((s) => s.section).filter((id) => id.includes('#')))];
-  const ranked = ids.length ? (await rankSectionsTool.run(ctx, { section_ids: ids })).data.ranked : undefined;
-  const verdicts = await loadVerdicts(ctx, impact.data.pr.url);
-  const md = checkMarkdown({ impact: impact.data, summary: impact.summary, cleared: clearance.data.cleared, ranked, verdicts, agentSummary, org });
+  const md = await checkReport(ctx, org, prUrl, agentSummary);
   if (out) {
     await writeFile(out, `${md}\n`);
     log(`wrote ${out}`);

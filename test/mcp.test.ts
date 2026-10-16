@@ -39,7 +39,7 @@ describe('MCP server (stdio, FalkorDB)', () => {
   it('lists every tool with a JSON schema and its Cypher in the description', async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
-      'impact', 'clearance', 'read_section', 'run_example', 'decisions_for', 'rank_sections', 'propose_edit', 'record_verdict', 'write_decision', 'docs_patch',
+      'check_pull_request', 'impact', 'clearance', 'read_section', 'run_example', 'decisions_for', 'rank_sections', 'propose_edit', 'record_verdict', 'write_decision', 'docs_patch',
     ]);
     const impact = tools.find((t) => t.name === 'impact')!;
     expect(impact.description).toContain('Cypher (impact):');

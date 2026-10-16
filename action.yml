@@ -1,0 +1,189 @@
+name: Staleproof docs check
+description: Comment on every pull request with the docs it can make false (evidence path for each) and run their examples before and after. No setup, no secrets.
+author: Raj Karia
+branding:
+  icon: book-open
+  color: green
+
+inputs:
+  with:
+    description: Other repositories to index together with this one, space- or comma-separated (e.g. your docs site `acme/docs`), so links across them resolve.
+    default: ''
+  anthropic-api-key:
+    description: Optional. With a model key the agent judges every impacted section and proposes the edits; without one the graph tools run in a fixed order (no key needed).
+    default: ''
+  model:
+    description: Optional model for agent mode (default claude-sonnet-5-5). For an Anthropic-compatible provider, also set base-url.
+    default: ''
+  base-url:
+    description: Optional Anthropic-compatible API base URL for agent mode (e.g. https://api.deepseek.com/anthropic).
+    default: ''
+  runs:
+    description: Graph mode runs up to this many affected examples before and after the pull request (0 to skip).
+    default: '3'
+  fail-on:
+    description: "`never` (default) or `breaks`: fail the job when an example passes before the pull request and fails after it."
+    default: never
+  comment:
+    description: Post (and keep updating) one pull request comment. The report always goes to the job summary.
+    default: 'true'
+  pr-url:
+    description: The pull request to check. Defaults to the one that triggered the workflow.
+    default: ''
+  falkordb-url:
+    description: Optional. A FalkorDB that keeps your graph between runs (decisions, verdicts and run history). Default is a throwaway FalkorDB in the job.
+    default: ''
+  org:
+    description: Graph name on falkordb-url (default falkordb). Ignored without falkordb-url.
+    default: ''
+  reindex:
+    description: With falkordb-url, re-index this repository (and `with`) at the default branch before checking.
+    default: 'false'
+  github-token:
+    description: Token to read the repository and post the comment. Private repositories work with the default token.
+    default: ${{ github.token }}
+  version:
+    description: The staleproof npm version to run, or `source` to build the CLI from this action's checkout.
+    default: '0.2.0'
+
+outputs:
+  report:
+    description: Path of the Markdown report (the comment).
+    value: ${{ steps.check.outputs.report }}
+  breaks:
+    description: How many docs examples pass before the pull request and fail after it.
+    value: ${{ steps.check.outputs.breaks }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+
+    - uses: astral-sh/setup-uv@v10.3.0
+
+    - name: Start FalkorDB
+      id: db
+      shell: bash
+      env:
+        FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
+      run: |
+        if [ -n "$FALKORDB_URL_INPUT" ]; then
+          echo "Using the FalkorDB from the falkordb-url input."
+          exit 0
+        fi
+        if command -v docker >/dev/null 2>&1; then
+          # One server for the graph, one disposable server the docs examples run against.
+          docker run -d --name staleproof-graph -p 6379:6379 falkordb/falkordb:latest >/dev/null
+          docker run -d --name staleproof-scratch -p 6390:6379 falkordb/falkordb:latest >/dev/null
+          for i in $(seq 1 90); do
+            if (exec 3<>/dev/tcp/127.0.0.1/6379) 2>/dev/null && (exec 3<>/dev/tcp/127.0.0.1/6390) 2>/dev/null; then break; fi
+            sleep 1
+          done
+          echo "FALKORDB_URL=falkor://localhost:6379" >> "$GITHUB_ENV"
+          echo "STALEPROOF_SCRATCH_URL=falkor://localhost:6390" >> "$GITHUB_ENV"
+        else
+          echo "No Docker on this runner: staleproof starts FalkorDB itself (falkordblite)."
+        fi
+
+    - name: Install staleproof
+      id: cli
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [ "$VERSION" = "source" ]; then
+          cd "$GITHUB_ACTION_PATH"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx tsup >/dev/null
+          echo "cli=node $GITHUB_ACTION_PATH/dist/cli.js" >> "$GITHUB_OUTPUT"
+        else
+          npm install -g "staleproof@$VERSION" --no-audit --no-fund >/dev/null
+          echo "cli=staleproof" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Re-index
+      if: inputs.reindex == 'true' && inputs.falkordb-url != ''
+      shell: bash
+      env:
+        FALKORDB_URL: ${{ inputs.falkordb-url }}
+        STALEPROOF_ORG: ${{ inputs.org }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        WITH: ${{ inputs.with }}
+        REPO: ${{ github.repository }}
+      run: ${{ steps.cli.outputs.cli }} index "$REPO" $(echo "$WITH" | tr ',' ' ')
+
+    - name: Check the pull request
+      id: check
+      shell: bash
+      env:
+        FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
+        ORG: ${{ inputs.org }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_BASE_URL: ${{ inputs.base-url }}
+        STALEPROOF_MODEL: ${{ inputs.model }}
+        PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
+        WITH: ${{ inputs.with }}
+        RUNS: ${{ inputs.runs }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        CLI: ${{ steps.cli.outputs.cli }}
+      run: |
+        if [ -z "$PR_URL" ]; then
+          echo "::error::No pull request to check: run this on pull_request events, or set pr-url."
+          exit 1
+        fi
+        [ -n "$FALKORDB_URL_INPUT" ] && export FALKORDB_URL="$FALKORDB_URL_INPUT"
+        [ -n "$FALKORDB_URL_INPUT" ] && [ -n "$ORG" ] && export STALEPROOF_ORG="$ORG"
+        [ -z "$ANTHROPIC_BASE_URL" ] && unset ANTHROPIC_BASE_URL
+        [ -z "$STALEPROOF_MODEL" ] && unset STALEPROOF_MODEL
+        mode="--no-agent"
+        if [ -n "$ANTHROPIC_API_KEY" ]; then mode=""; else unset ANTHROPIC_API_KEY; fi
+        with_args=()
+        for r in $(echo "$WITH" | tr ',' ' '); do with_args+=("$r"); done
+        report="$RUNNER_TEMP/staleproof-report.md"
+        status=0
+        $CLI check "$PR_URL" $mode --runs "$RUNS" --format markdown --out "$report" ${with_args[@]:+--with "${with_args[@]}"} || status=$?
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        breaks=0
+        if [ -f "$report" ]; then
+          breaks=$(grep -c '| \*\*breaks\*\*' "$report" || true)
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        echo "breaks=$breaks" >> "$GITHUB_OUTPUT"
+        if [ "$status" != "0" ] && [ ! -f "$report" ]; then
+          echo "::error::staleproof check failed (exit $status); see the log above."
+          exit "$status"
+        fi
+        [ "$status" != "0" ] && echo "::warning::staleproof check ended with exit $status; the report may be incomplete."
+        exit 0
+
+    - name: Post or update the comment
+      if: always() && inputs.comment == 'true' && steps.check.outputs.report != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
+        REPORT: ${{ steps.check.outputs.report }}
+      run: |
+        [ -f "$REPORT" ] || exit 0
+        repo=$(echo "$PR_URL" | sed -E 's#https://github.com/([^/]+/[^/]+)/pull/.*#\1#')
+        number=$(echo "$PR_URL" | sed -E 's#.*/pull/([0-9]+).*#\1#')
+        existing=$(gh api "repos/$repo/issues/$number/comments" --paginate \
+          --jq '[.[] | select(.body | startswith("<!-- staleproof -->") or startswith("<!-- lockstep-docs -->"))][0].id // empty' 2>/dev/null || true)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$repo/issues/comments/$existing" -F body=@"$REPORT" >/dev/null && echo "Updated the Staleproof comment." && exit 0
+        else
+          gh api -X POST "repos/$repo/issues/$number/comments" -F body=@"$REPORT" >/dev/null && echo "Posted the Staleproof comment." && exit 0
+        fi
+        echo "::warning::Could not comment on the pull request (pull requests from forks get a read-only token). The report is in the job summary."
+
+    - name: Fail on broken examples
+      if: inputs.fail-on == 'breaks' && steps.check.outputs.breaks != '0' && steps.check.outputs.breaks != ''
+      shell: bash
+      env:
+        BREAKS: ${{ steps.check.outputs.breaks }}
+      run: |
+        echo "::error::This pull request breaks $BREAKS docs example(s): they pass before it and fail after. See the report in the job summary."
+        exit 1

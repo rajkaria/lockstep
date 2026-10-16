@@ -96,9 +96,11 @@ export async function githubJson<T>(path: string, opts: GitHubOptions = {}, init
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     if (res.status === 403 && /rate limit/i.test(text)) {
-      throw new Error('GitHub API rate limit reached (60/hour without a token). Set GITHUB_TOKEN to raise it.');
+      const reset = Number(res.headers.get('x-ratelimit-reset') ?? 0);
+      const wait = reset ? ` It resets in ${Math.max(1, Math.ceil((reset * 1000 - Date.now()) / 60_000))} min.` : '';
+      throw new Error(`GitHub API rate limit reached${opts.token ? '' : ' (60 requests/hour without a token; set GITHUB_TOKEN to raise it)'}.${wait}`);
     }
-    if (res.status === 404) throw new Error(`GitHub: ${path} not found (private repositories are not supported)`);
+    if (res.status === 404) throw new Error(`GitHub: ${path} not found${opts.token ? '' : ' (a private repository needs GITHUB_TOKEN with read access)'}`);
     throw new Error(`GitHub ${init.method ?? 'GET'} ${path} failed: ${res.status} ${text.slice(0, 200)}`);
   }
   return (await res.json()) as T;

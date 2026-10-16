@@ -1,8 +1,8 @@
-# .github/workflows/staleproof.yml — comment on every pull request with the docs it can falsify.
+# .github/workflows/staleproof.yml: a comment on every pull request with the docs it can make false.
+# No secrets and no database to set up; the action starts a FalkorDB in the job.
 name: Staleproof
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -12,8 +12,8 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: rajkaria/staleproof/action@main
-        with:
-          falkordb-url: ${{ secrets.STALEPROOF_FALKORDB_URL }}
-          org: falkordb
-          # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}   # optional: the agent judges and proposes edits
+      - uses: rajkaria/staleproof@v1
+        # with:
+        #   with: your-org/your-docs                               # docs in another repository
+        #   anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}   # the agent judges each section and proposes edits
+        #   fail-on: breaks                                       # fail when an example passes before and fails after

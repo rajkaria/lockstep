@@ -32,7 +32,7 @@ describe('checkMarkdown', () => {
     expect(md).toBe(
       [
         '<!-- staleproof -->',
-        '### Staleproof: docs this pull request can falsify',
+        '### Staleproof: 1 doc section this pull request can make false',
         '',
         '1 changed symbols reach 1 doc sections.',
         '',
@@ -54,8 +54,31 @@ describe('checkMarkdown', () => {
         '',
         'Proposed edits: `npx staleproof patch https://github.com/acme/c/pull/1`',
         '',
-        '<sub>Staleproof · FalkorDB graph `acme` · aaaaaaa..bbbbbbb</sub>',
+        '<sub>[Staleproof](https://github.com/rajkaria/staleproof) · FalkorDB graph `acme` · aaaaaaa..bbbbbbb</sub>',
       ].join('\n'),
     );
+  });
+
+  it('leads with the examples the pull request breaks, before and after', () => {
+    const md = checkMarkdown({
+      impact,
+      summary: 's',
+      cleared: [],
+      runs: [
+        { example: 'acme/docs:a.mdx:0', url: 'https://github.com/acme/docs/blob/s/a.mdx#L5', verdict: 'breaks', before: { status: 'pass', error: '', reason: '' }, after: { status: 'fail', error: "AttributeError: 'Graph' object has no attribute 'ro_query'", reason: '' } },
+        { example: 'acme/docs:a.mdx:1', url: 'https://github.com/acme/docs/blob/s/a.mdx#L9', verdict: 'skipped', before: { status: 'skipped', error: '', reason: 'needs an LLM provider (OpenAI(); x)' } },
+      ],
+      org: 'acme',
+    });
+    const lines = md.split('\n');
+    expect(lines[1]).toBe('### Staleproof: this pull request breaks 1 docs example');
+    expect(md).toContain('| Example | Before (`aaaaaaa`) | After (`bbbbbbb`) | Result |');
+    expect(md).toContain("| [a.mdx:0](https://github.com/acme/docs/blob/s/a.mdx#L5) | passes | `AttributeError: 'Graph' object has no attribute 'ro_query'` | **breaks**: passes before this PR, fails after |");
+    expect(md).toContain('| [a.mdx:1](https://github.com/acme/docs/blob/s/a.mdx#L9) | skipped (needs an LLM provider (OpenAI(); x)) | — | not run |');
+  });
+
+  it('says so when no doc reaches the change', () => {
+    const md = checkMarkdown({ impact: { ...impact, sections: [], totalSections: 0, counts: { breaking: 0, api: 0, behavior: 0 } }, summary: 's', cleared: [], org: 'acme' });
+    expect(md.split('\n')[1]).toBe('### Staleproof: no docs reach the code this pull request changed');
   });
 });

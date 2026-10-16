@@ -73,7 +73,7 @@ export async function runGraphCheck(
         : opts.maxRuns === 0
           ? ' Example runs not requested.'
           : ' No exactly-linked Python example to run.') +
-      ' Graph mode: fixed tool order and no verdicts — agent mode (Claude) judges each section and proposes the edits.';
+      ' Graph mode: fixed tool order and no verdicts; agent mode (a model) judges each section and proposes the edits.';
   } catch (err) {
     status = 'error';
     summary = `The check failed: ${(err as Error).message}`;

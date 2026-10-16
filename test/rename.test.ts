@@ -35,7 +35,7 @@ describe('former name (Lockstep)', () => {
   });
 
   it('the GitHub Action updates comments posted under either marker', async () => {
-    const action = await readFile(join(import.meta.dirname, '..', 'action', 'action.yml'), 'utf8');
+    const action = await readFile(join(import.meta.dirname, '..', 'action.yml'), 'utf8');
     expect(COMMENT_MARKER).toBe('<!-- staleproof -->');
     expect(action).toContain(`startswith("${COMMENT_MARKER}")`);
     expect(action).toContain('startswith("<!-- lockstep-docs -->")');

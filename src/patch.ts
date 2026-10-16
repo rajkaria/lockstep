@@ -84,7 +84,7 @@ export async function buildDocsPatch(ctx: ToolContext, prUrl: string, opts: { fe
     const sha = (await ctx.graph.run<{ sha: string }>(`MATCH (r:Repo {name: $repo}) RETURN r.sha AS sha`, { repo })).rows[0]?.sha;
     if (!sha) continue;
     const dir = ctx.checkouts?.[repo] ?? join(ctx.config.home, 'repos', ...repo.split('/'));
-    const before = existsSync(dir) ? await git(dir, ['show', `${sha}:${path}`]) : await githubSource(repo, opts).read(sha, path);
+    const before = existsSync(dir) ? await git(dir, ['show', `${sha}:${path}`]) : await githubSource(repo, { ...opts, token: ctx.config.githubToken }).read(sha, path);
     if (before === undefined) {
       for (const v of list) conflicts.push({ section: v.section, reason: `${path} not found in ${repo}@${sha.slice(0, 7)}` });
       continue;

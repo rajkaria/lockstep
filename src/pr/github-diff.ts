@@ -50,7 +50,7 @@ export function githubSource(fullName: string, opts: GitHubOptions = {}): DiffSo
     },
     async read(sha, path) {
       const url = `https://raw.githubusercontent.com/${fullName}/${sha}/${path.split('/').map(encodeURIComponent).join('/')}`;
-      const res = await f(url, { headers: { 'User-Agent': 'staleproof' } });
+      const res = await f(url, { headers: { 'User-Agent': 'staleproof', ...(opts.token ? { Authorization: `token ${opts.token}` } : {}) } });
       if (res.status === 404) return undefined;
       if (!res.ok) throw new Error(`GitHub raw ${path}@${sha.slice(0, 7)} failed: ${res.status}`);
       return res.text();

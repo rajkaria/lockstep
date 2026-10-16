@@ -61,6 +61,29 @@ export class GraphStore {
     return this.db.list();
   }
 
+  private async command<T>(args: string[]): Promise<T> {
+    const conn = (await this.db.connection) as unknown as { sendCommand(args: string[]): Promise<T> };
+    return conn.sendCommand(args);
+  }
+
+  /** Server memory in MB: what the instance uses now, and its cap (0 when uncapped). */
+  async memoryMb(): Promise<{ used: number; max: number }> {
+    const info = await this.command<string>(['INFO', 'memory']);
+    const num = (key: string) => Number(new RegExp(`^${key}:(\\d+)`, 'm').exec(info)?.[1] ?? 0) / 1024 / 1024;
+    return { used: num('used_memory'), max: num('maxmemory') };
+  }
+
+  /** One graph's memory in MB (`GRAPH.MEMORY USAGE`); undefined when the server can't say. */
+  async graphMemoryMb(name: string): Promise<number | undefined> {
+    try {
+      const reply = await this.command<unknown[]>(['GRAPH.MEMORY', 'USAGE', name]);
+      const i = reply.indexOf('total_graph_sz_mb');
+      return i >= 0 ? Number(reply[i + 1]) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }
