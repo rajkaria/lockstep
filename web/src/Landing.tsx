@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { PACKAGE, PRODUCT, REPO_URL } from './docs/manifest';
+import { PACKAGE, PRODUCT, REPO_URL, SITE_URL } from './docs/manifest';
 import { CodeBlock, CopyButton, Icon } from './layout';
 
 /**
@@ -18,9 +18,9 @@ export function Landing({ demo, stats }: { demo?: ReactNode; stats?: ReactNode }
       <section id="try" className="band try-band">
         <div className="wrap">
           <SectionHead
-            eyebrow="Live demo"
-            title="Check a real pull request"
-            lede="Pick one of FalkorDB's pull requests or paste any public PR from the indexed repositories. The trace streams every tool call and the Cypher it ran on FalkorDB."
+            eyebrow="Try it"
+            title="Check any pull request"
+            lede="Paste a pull request from any public Python repository on GitHub: the first check indexes it, in seconds for most projects. Or pick one of FalkorDB's. The trace streams every tool call and the Cypher it ran on FalkorDB."
           />
           <Modes />
           {stats}
@@ -68,11 +68,11 @@ function Hero() {
             evidence behind each edit.
           </p>
           <div className="cta-row">
-            <a className="btn btn-primary" href="#/try">
-              <Icon name="play" /> Check a pull request
+            <a className="btn btn-primary" href="#/install">
+              <Icon name="github" /> Add to GitHub in one click
             </a>
-            <a className="btn btn-ghost" href="#/docs/getting-started">
-              <Icon name="book" /> Quickstart
+            <a className="btn btn-ghost" href="#/try">
+              <Icon name="play" /> Check a pull request
             </a>
           </div>
           <div className="install">
@@ -476,12 +476,14 @@ const INTEGRATIONS: { id: string; icon: string; label: string; title: string; bo
     id: 'cli',
     icon: 'terminal',
     label: 'CLI',
-    title: 'Four commands from nothing to a docs patch',
-    body: <>No install and no Docker: <code>db start</code> runs FalkorDB locally from a Python wheel. Add <code>ANTHROPIC_API_KEY</code> for agent mode, or pass <code>--no-agent</code>.</>,
+    title: 'One command from nothing to a checked pull request',
+    body: <>No install and no Docker: the first check starts FalkorDB locally from a Python wheel and indexes the repository (<code>--with</code> adds a docs repository). Add <code>ANTHROPIC_API_KEY</code> for agent mode, or pass <code>--no-agent</code>.</>,
     lang: 'bash',
-    code: `$ npx -y ${PACKAGE} db start
+    code: `$ npx -y ${PACKAGE} check ${PR} --no-agent
+
+# an organisation's repositories in one graph, then the docs patch
 $ npx -y ${PACKAGE} index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
-$ npx -y ${PACKAGE} check ${PR} --no-agent
+$ npx -y ${PACKAGE} check ${PR}
 $ npx -y ${PACKAGE} patch ${PR}`,
     doc: '#/docs/cli',
   },
@@ -489,13 +491,12 @@ $ npx -y ${PACKAGE} patch ${PR}`,
     id: 'action',
     icon: 'pr',
     label: 'GitHub Action',
-    title: 'A comment on every pull request',
-    body: <>Point the action at the FalkorDB holding your graph. It checks each PR and posts (or updates) one comment with the docs it can falsify.</>,
+    title: 'A comment on every pull request, in one click',
+    body: <>No inputs and no secrets: the job starts its own FalkorDB, indexes the repository, runs the affected examples before and after, and posts (or updates) one comment. The <a href="#/install">install page</a> commits this file for you.</>,
     lang: 'yaml',
     file: '.github/workflows/staleproof.yml',
     code: `on:
   pull_request:
-    types: [opened, synchronize, reopened]
 permissions:
   contents: read
   pull-requests: write
@@ -503,24 +504,24 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: rajkaria/staleproof/action@main
-        with:
-          falkordb-url: \${{ secrets.STALEPROOF_FALKORDB_URL }}
-          org: falkordb`,
+      - uses: rajkaria/staleproof@v1`,
     doc: '#/docs/github-action',
-    note: 'The action is written and its commands are tested against the CLI; it has not yet run on a live repository.',
   },
   {
     id: 'mcp',
     icon: 'bot',
-    label: 'Claude Code (MCP)',
-    title: 'Ten tools for your coding agent',
-    body: <>One command adds the MCP server. Every tool description includes its Cypher, and every result lists the queries it ran.</>,
+    label: 'AI assistants (MCP)',
+    title: 'Ask Claude, Cursor or VS Code about any pull request',
+    body: <>The hosted MCP server needs nothing installed and indexes any public repository on first use; one-click buttons are on the <a href="#/install">install page</a>. Every tool description includes its Cypher, and every result lists the queries it ran.</>,
     lang: 'bash',
-    code: `$ claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -- npx -y ${PACKAGE} mcp
+    code: `# hosted: nothing to install
+$ claude mcp add --transport http staleproof ${SITE_URL}/api/mcp
+
+# or local, with example runs
+$ claude mcp add staleproof -- npx -y ${PACKAGE} mcp
 
 # then ask:
-> Which docs can ${PR} falsify? Run the examples and give me the patch.`,
+> Which docs can ${PR} make false? Show the evidence path for each.`,
     doc: '#/docs/mcp',
   },
   {
@@ -712,7 +713,7 @@ export const FAQ: [string, ReactNode][] = [
   ],
   [
     'Does my code leave my machine?',
-    <>Indexing, the graph and example runs stay wherever you run them. In agent mode, tool results (doc text, signatures, run output) go to the model provider you configure; graph mode sends nothing to a model. Only public repositories are supported today.</>,
+    <>With the CLI or the GitHub Action, indexing, the graph and example runs stay wherever you run them, and private repositories work with a token. In agent mode, tool results (doc text, signatures, run output) go to the model provider you configure; graph mode sends nothing to a model. The hosted site and MCP server index public repositories only.</>,
   ],
   [
     'What does it cost?',
@@ -750,10 +751,13 @@ function FinalCta() {
     <section className="band cta-band">
       <div className="wrap cta-inner">
         <h2>Check your next pull request before your readers do.</h2>
-        <p>Index your repositories once; every PR after that gets its docs impact, with proof.</p>
+        <p>Add the workflow once; every pull request after that gets its docs impact, with proof.</p>
         <div className="cta-row center">
-          <a className="btn btn-primary" href="#/docs/getting-started">
-            <Icon name="terminal" /> Start in five minutes
+          <a className="btn btn-primary" href="#/install">
+            <Icon name="github" /> Install in one click
+          </a>
+          <a className="btn btn-ghost" href="#/try">
+            <Icon name="play" /> Check a pull request
           </a>
           <a className="btn btn-ghost" href={REPO_URL} target="_blank" rel="noreferrer">
             <Icon name="github" /> Star on GitHub

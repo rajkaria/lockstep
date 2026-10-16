@@ -13,7 +13,7 @@ function app() {
     const store = await GraphStore.connect(config.falkordbUrl);
     const preloaded = setting('PRELOADED')?.split(',').map((s) => s.trim()).filter(Boolean);
     const workspaces = setting('HOSTED') === 'off' ? undefined : new Workspaces(store, config, store.org(config.org));
-    const agentChecksPerDay = Number(setting('AGENT_CHECKS_PER_DAY') ?? 150);
+    const agentChecksPerDay = Number(setting('AGENT_CHECKS_PER_DAY') ?? 50);
     return createApp({ store, config, model: defaultModelFactory(config), preloaded, webDir: '/nonexistent', workspaces, agentChecksPerDay });
   })().catch((err) => {
     appPromise = undefined;

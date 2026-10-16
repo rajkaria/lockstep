@@ -10,7 +10,7 @@ describe('GitHub Action', () => {
     expect(yml).toContain('using: composite');
     // Zero configuration: no input is required.
     expect(yml).not.toMatch(/required: true/);
-    for (const input of ['with:', 'anthropic-api-key:', 'model:', 'base-url:', 'runs:', 'fail-on:', 'comment:', 'pr-url:', 'falkordb-url:', 'org:', 'reindex:', 'github-token:', 'version:']) {
+    for (const input of ['also-index:', 'anthropic-api-key:', 'model:', 'base-url:', 'runs:', 'fail-on:', 'comment:', 'pr-url:', 'falkordb-url:', 'org:', 'reindex:', 'github-token:', 'version:']) {
       expect(yml).toContain(`\n  ${input}`);
     }
   });

@@ -19,7 +19,18 @@ export interface Verdict {
   newText?: string;
 }
 
+export interface IndexingView {
+  repos: string[];
+  graph: string;
+  reason: string;
+  startedAt: number;
+  steps: { message: string; at: number }[];
+  finished?: Extract<TraceEvent, { type: 'index_finished' }>;
+}
+
 export interface CheckView {
+  /** Hosted: the repository was indexed first, as part of this check. */
+  indexing?: IndexingView;
   checkId?: string;
   pr?: string;
   model?: string;
@@ -116,6 +127,14 @@ export function reduce(view: CheckView, e: TraceEvent): CheckView {
     }
     case 'check_finished':
       return { ...view, finished: e, live: { text: '', thinking: '' } };
+    case 'index_started':
+      return { ...view, queued: false, indexing: { repos: e.repos, graph: e.graph, reason: e.reason, startedAt: e.at, steps: [] } };
+    case 'index_progress':
+      return view.indexing ? { ...view, indexing: { ...view.indexing, steps: [...view.indexing.steps, { message: e.message, at: e.at }] } } : view;
+    case 'index_finished':
+      return view.indexing ? { ...view, indexing: { ...view.indexing, finished: e } } : view;
+    case 'indexed':
+      return view;
   }
 }
 

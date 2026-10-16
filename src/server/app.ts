@@ -267,7 +267,7 @@ export function createApp(opts: AppOptions): Hono {
     if (mode === 'agent' && !opts.model) {
       return c.json({ error: 'agent mode needs model API credentials on the server (ANTHROPIC_API_KEY); graph mode works without them', agentUnavailable: true }, 409);
     }
-    if (mode === 'agent' && hosted && !(await hosted.withinDailyBudget('agent', opts.agentChecksPerDay ?? 150))) {
+    if (mode === 'agent' && hosted && !(await hosted.withinDailyBudget('agent', opts.agentChecksPerDay ?? 50))) {
       return c.json({ error: "today's hosted agent checks are used up; graph mode still works, and the agent runs anywhere with your own key (npx -y staleproof check <pr-url>)", agentUnavailable: true }, 429);
     }
     const t0 = Date.now();

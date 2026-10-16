@@ -1,4 +1,4 @@
-import type { CheckRow, Facts, Health, NamedQuery, PreloadedPr, SectionText, TraceEvent } from './types';
+import type { CheckRow, Facts, Health, NamedQuery, PreloadedPr, RepoStatus, SectionText, TraceEvent } from './types';
 
 type HttpError = Error & { status?: number; body?: unknown };
 
@@ -68,6 +68,7 @@ export const api = {
     live<{ id: string; events: TraceEvent[] }>(`/api/checks/${encodeURIComponent(id)}`, (s) => (s.traces[id] ? { id, events: s.traces[id]! } : undefined)),
   section: (id: string) => live<SectionText>(`/api/sections?id=${encodeURIComponent(id)}`, () => undefined),
   model: () => live<{ queries: NamedQuery[]; tools: { name: string; description: string; queries: string[] }[] }>('/api/model', (s) => s.model),
+  repo: (name: string) => json<RepoStatus>(`/api/repos?name=${encodeURIComponent(name)}`),
   patch: (pr: string) => live<{ title: string; body: string; diff: string }>(`/api/patch?pr=${encodeURIComponent(pr)}`, () => undefined),
   decide: async (text: string, governs: string[]) => {
     if (offline) throw new Error(SNAPSHOT_ONLY);
@@ -80,12 +81,18 @@ export const api = {
 };
 
 /** POST a check and read the server-sent trace events as they arrive. */
-export async function streamCheck(prUrl: string, mode: 'agent' | 'graph', onEvent: (e: TraceEvent) => void, signal?: AbortSignal): Promise<void> {
+export async function streamCheck(
+  prUrl: string,
+  mode: 'agent' | 'graph',
+  onEvent: (e: TraceEvent) => void,
+  signal?: AbortSignal,
+  withRepos: string[] = [],
+): Promise<void> {
   if (offline) throw new Error(SNAPSHOT_ONLY);
   const res = await fetch('/api/check', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ pr_url: prUrl, mode }),
+    body: JSON.stringify({ pr_url: prUrl, mode, ...(withRepos.length ? { with: withRepos } : {}) }),
     signal,
   });
   if (!res.ok || !res.body) {

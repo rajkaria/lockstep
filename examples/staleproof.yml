@@ -14,6 +14,6 @@ jobs:
     steps:
       - uses: rajkaria/staleproof@v1
         # with:
-        #   with: your-org/your-docs                               # docs in another repository
+        #   also-index: your-org/docs                              # docs in another repository
         #   anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}   # the agent judges each section and proposes edits
         #   fail-on: breaks                                       # fail when an example passes before and fails after

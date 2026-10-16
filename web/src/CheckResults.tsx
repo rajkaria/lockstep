@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { PACKAGE } from './docs/manifest';
 import { ClearedList, SectionCard, TraceList, type PackageRepo } from './components';
-import { replay, type CheckView } from './state';
+import { Icon } from './layout';
+import { replay, type CheckView, type IndexingView } from './state';
 
 export function CheckResults({ view, packageRepo }: { view: CheckView; packageRepo: PackageRepo }) {
   const sections = useMemo(() => {
@@ -30,6 +31,7 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
         {view.error && <div className="banner err">{view.error}</div>}
         {view.since && <div className="since">Since the last check: {view.since}</div>}
       </div>
+      {view.indexing && <IndexingPanel ix={view.indexing} />}
       <div className="columns">
         <div className="col trace-col">
           <h3>Trace</h3>
@@ -45,6 +47,7 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
               {view.finished.verdicts > 0 && view.pr && <PatchLink pr={view.pr} />}
             </div>
           )}
+          {view.finished?.status === 'done' && view.impact && <InstallNudge repo={view.impact.pr.repo} />}
           {view.impact && (
             <>
               <h3>
@@ -68,6 +71,47 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
         </div>
       </div>
     </section>
+  );
+}
+
+/** Hosted: the repository wasn't in any graph yet, so it was downloaded and indexed first. */
+function IndexingPanel({ ix }: { ix: IndexingView }) {
+  const f = ix.finished;
+  const total = f?.repos.reduce((a, r) => ({ symbols: a.symbols + r.symbols, sections: a.sections + r.sections, examples: a.examples + r.examples }), { symbols: 0, sections: 0, examples: 0 });
+  const last = ix.steps.at(-1)?.message;
+  const why = ix.reason === 'new' ? 'first check of this repository' : ix.reason === 'stale' ? 'the index was over a week old' : ix.reason === 'added' ? 'a repository was added' : 'refresh';
+  return (
+    <div className={`indexing${f ? ' done' : ''}`} role="status" aria-live="polite">
+      <div className="indexing-head">
+        <span className={`indexing-dot${f ? ' done' : ''}`} aria-hidden="true" />
+        <strong>{f ? 'Indexed' : 'Indexing'} {ix.repos.join(' + ')}</strong>
+        <span className="muted small">
+          {' '}
+          · {why} · graph <code>{ix.graph}</code>
+        </span>
+      </div>
+      {f && total ? (
+        <p className="small">
+          {total.symbols.toLocaleString()} code symbols, {total.sections.toLocaleString()} doc sections and {total.examples.toLocaleString()} examples in{' '}
+          {(f.ms / 1000).toFixed(1)} s{f.repos.map((r) => ` · ${r.repo}@${r.sha.slice(0, 7)}`).join('')}. Next time this repository is checked straight away.
+        </p>
+      ) : (
+        <p className="small muted">{last ?? 'Downloading the repository…'}</p>
+      )}
+    </div>
+  );
+}
+
+/** After a check on someone's own repository: the way to get it on every pull request. */
+function InstallNudge({ repo }: { repo: string }) {
+  return (
+    <a className="install-nudge" href={`#/install?repo=${encodeURIComponent(repo)}`}>
+      <Icon name="pr" size={18} />
+      <span>
+        <strong>Get this on every pull request of {repo}.</strong> The GitHub Action comments on each PR and runs the examples before and after. One click to add.
+      </span>
+      <Icon name="arrow" size={16} />
+    </a>
   );
 }
 

@@ -174,6 +174,7 @@ export function CodeBlock({ code, lang, title }: { code: string; lang?: string; 
 }
 
 export const NAV: { href: string; label: string }[] = [
+  { href: '#/install', label: 'Install' },
   { href: '#/how-it-works', label: 'How it works' },
   { href: '#/use-cases', label: 'Use cases' },
   { href: '#/integrations', label: 'Integrations' },
@@ -202,8 +203,11 @@ export function Header({ stats, current }: { stats?: ReactNode; current?: string
           <a className="icon-link" href={REPO_URL} target="_blank" rel="noreferrer" aria-label="Source on GitHub">
             <Icon name="github" />
           </a>
-          <a className="btn btn-primary btn-sm" href="#/try">
-            Try it live
+          <a className="btn btn-ghost btn-sm hide-sm" href="#/try">
+            Try it
+          </a>
+          <a className="btn btn-primary btn-sm" href="#/install">
+            Install
           </a>
           <button type="button" className="menu-btn" aria-label="Menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
             <Icon name={open ? 'x' : 'menu'} />
@@ -230,7 +234,8 @@ export function Footer({ meta }: { meta?: ReactNode }) {
           <h4>Product</h4>
           <a href="#/how-it-works">How it works</a>
           <a href="#/use-cases">Use cases</a>
-          <a href="#/try">Live demo</a>
+          <a href="#/try">Check a pull request</a>
+          <a href="#/install">Install</a>
           <a href="#/model">Graph model</a>
         </div>
         <div>

@@ -2319,3 +2319,375 @@ table.compare thead .us {
 .prose img {
   max-width: 100%;
 }
+
+/* hosted indexing, shown before a check of a repository no graph had yet */
+.indexing {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.indexing.done {
+  border-left-color: var(--ok);
+}
+.indexing p {
+  margin: 4px 0 0;
+}
+.indexing-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.indexing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.indexing-dot.done {
+  background: var(--ok);
+  animation: none;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indexing-dot {
+    animation: none;
+  }
+}
+.install-nudge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--brand-soft);
+  color: var(--text);
+  font-size: 0.92em;
+}
+.install-nudge:hover {
+  text-decoration: none;
+  background: color-mix(in srgb, var(--brand-soft) 80%, var(--brand));
+}
+.install-nudge svg {
+  color: var(--brand);
+  flex: none;
+}
+
+/* try it: docs-repository field and other projects */
+.with-repos {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.with-repos label {
+  font-size: 0.86em;
+  font-weight: 600;
+}
+.with-repos input,
+.repo-form input:not([type='checkbox']) {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+.with-repos input:focus,
+.repo-form input:focus {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.chip-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 0.82em;
+  cursor: pointer;
+}
+.chip-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+/* install page */
+.install-hero {
+  padding-bottom: 8px;
+}
+.install-hero h1 {
+  margin: 10px 0 12px;
+  font-size: clamp(1.9em, 4vw, 2.6em);
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+.install-jump {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 26px;
+}
+.install-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+}
+.install-option strong {
+  margin-top: 4px;
+}
+.install-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+.install-copy h2 {
+  margin: 8px 0 10px;
+  letter-spacing: -0.015em;
+}
+.install-copy > p {
+  color: var(--text-2);
+}
+.install-preview {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.repo-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.repo-form > label,
+.options > label:not(.check) {
+  font-size: 0.86em;
+  font-weight: 600;
+}
+.repo-input-row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+.repo-input-row:focus-within {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.repo-input-row .prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 0 0 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+.repo-form .repo-input-row input {
+  border: 0;
+  border-radius: 0;
+  padding-left: 2px;
+  outline: none;
+}
+.repo-line {
+  margin: 0;
+  color: var(--text-2);
+}
+.repo-line.ok svg {
+  color: var(--ok);
+  vertical-align: -2px;
+}
+.options {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  background: var(--surface);
+}
+.options summary {
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+.options[open] {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+.options .check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 0.9em;
+  color: var(--text-2);
+}
+.options .check input {
+  margin-top: 4px;
+}
+.repo-form .cta-row {
+  align-items: center;
+  margin: 8px 0 0;
+}
+.btn.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.install-steps {
+  margin: 20px 0 0;
+  padding-left: 20px;
+  color: var(--text-2);
+  font-size: 0.93em;
+}
+.install-steps li + li {
+  margin-top: 6px;
+}
+.try-pulls {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.try-pulls h3 {
+  margin: 0 0 2px;
+  font-size: 1em;
+}
+.try-pulls ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  gap: 6px;
+}
+.try-pulls .pr-ref {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+.sample-comment {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+.sample-comment figcaption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sample-body h4 {
+  margin: 12px 0 6px;
+  font-size: 1em;
+}
+.sample-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8em;
+  margin: 8px 0;
+  display: block;
+  overflow-x: auto;
+}
+.sample-body th,
+.sample-body td {
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.mcp-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+.mcp-list {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 14px;
+}
+.mcp-list dt {
+  font-weight: 600;
+  font-size: 0.9em;
+  margin-bottom: 6px;
+}
+.mcp-list dd {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.93em;
+  min-width: 0;
+}
+.inline-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.inline-copy code {
+  overflow-wrap: anywhere;
+}
+.chat-sample {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+.chat-q,
+.chat-a {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.92em;
+}
+.chat-q {
+  justify-self: end;
+  max-width: 90%;
+  background: var(--brand-soft);
+}
+.chat-a {
+  background: var(--surface-2);
+}
+ul.plain {
+  padding-left: 18px;
+  color: var(--text-2);
+}
+@media (max-width: 900px) {
+  .install-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+@media (max-width: 640px) {
+  .install-jump {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hide-sm {
+    display: none;
+  }
+}
+.install-hero .lede {
+  max-width: 760px;
+}

@@ -30,7 +30,19 @@ export type TraceEvent =
       at: number;
     }
   | { type: 'queued' }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  // Hosted servers index a repository no graph holds before checking it.
+  | { type: 'index_started'; repos: string[]; graph: string; reason: 'new' | 'stale' | 'added' | 'refresh'; at: number }
+  | { type: 'index_progress'; repo?: string; phase: string; message: string; at: number }
+  | {
+      type: 'index_finished';
+      graph: string;
+      repos: { repo: string; sha: string; files: number; symbols: number; sections: number; examples: number }[];
+      mb?: number;
+      ms: number;
+      at: number;
+    }
+  | { type: 'indexed'; graph: string; curated: boolean };
 
 export type Severity = 'breaking' | 'api' | 'behavior';
 
@@ -112,6 +124,8 @@ export interface Health {
   falkordb: string;
   agent: { available: true; model: string; effort: string; provider?: string } | { available: false; reason: string };
   busy: boolean;
+  /** Hosted mode: any public repository is indexed on demand. */
+  hosted?: { enabled: boolean; limits?: { maxRepos: number; maxFiles: number; maxGraphMb: number }; githubToken?: boolean };
   /** Set when the UI is showing the bundled snapshot because the live API is unreachable. */
   snapshot?: { takenAt: string };
 }
@@ -137,6 +151,8 @@ export interface PreloadedPr {
 
 export interface CheckRow {
   id: string;
+  /** The graph (workspace) the check is stored in. */
+  org?: string;
   pr: string;
   title: string;
   status: string;
@@ -161,4 +177,14 @@ export interface NamedQuery {
   group: string;
   purpose: string;
   cypher: string;
+}
+
+export interface RepoStatus {
+  name: string;
+  indexed: boolean;
+  graph: string;
+  curated: boolean;
+  sha: string | null;
+  indexedAt: number | null;
+  workspace?: string[];
 }

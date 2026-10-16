@@ -6,11 +6,16 @@ import { ago, runSummary } from './format';
 import { emptyView, reduce, type CheckView } from './state';
 import type { CheckRow, Health, PreloadedPr, TraceEvent } from './types';
 
-/** The live demo: paste a pull request (or pick a preloaded one) and watch the check stream in. */
-export function TryIt({ health, packageRepo }: { health?: Health; packageRepo: PackageRepo }) {
+/** Public pull requests outside the curated graph, to show any repository works (indexed on first use). */
+const ELSEWHERE = ['https://github.com/encode/httpx/pull/3571', 'https://github.com/psf/requests/pull/7502'];
+
+/** Check any pull request: paste one (or pick one) and watch the check stream in. */
+export function TryIt({ health, packageRepo, initialPr }: { health?: Health; packageRepo: PackageRepo; initialPr?: string }) {
   const [view, dispatch] = useReducer((v: CheckView, e: TraceEvent | { type: 'reset' }) => (e.type === 'reset' ? emptyView() : reduce(v, e)), undefined, emptyView);
   const [prUrl, setPrUrl] = useState('');
   const [mode, setMode] = useState<'agent' | 'graph'>('graph');
+  const [withRepos, setWithRepos] = useState('');
+  const [showWith, setShowWith] = useState(false);
   const [prs, setPrs] = useState<PreloadedPr[]>([]);
   const [checks, setChecks] = useState<CheckRow[]>([]);
   const [running, setRunning] = useState(false);
@@ -23,20 +28,21 @@ export function TryIt({ health, packageRepo }: { health?: Health; packageRepo: P
     api.checks().then((r) => setChecks(r.checks)).catch(() => undefined);
   }, []);
   useEffect(refresh, [refresh]);
-  useEffect(() => {
-    if (health) setMode(health.agent.available ? 'agent' : 'graph');
-  }, [health]);
 
-  const start = async (url: string) => {
+  const start = async (url: string, scrollDelayMs = 50) => {
     setFormError(undefined);
     setPrUrl(url);
     abort.current?.abort();
     abort.current = new AbortController();
     dispatch({ type: 'reset' });
     setRunning(true);
-    setTimeout(() => results.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    setTimeout(() => results.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), scrollDelayMs);
     try {
-      await streamCheck(url, mode, dispatch, abort.current.signal);
+      const extra = withRepos
+        .split(/[\s,]+/)
+        .map((r) => r.trim().replace(/^https:\/\/github\.com\//, '').replace(/\/$/, ''))
+        .filter(Boolean);
+      await streamCheck(url, mode, dispatch, abort.current.signal, extra);
     } catch (err) {
       if ((err as Error).name !== 'AbortError') setFormError((err as Error).message);
     } finally {
@@ -45,8 +51,19 @@ export function TryIt({ health, packageRepo }: { health?: Health; packageRepo: P
     }
   };
 
+  // A link like #/try?pr=<url> (from the install page) starts that check once the server is known.
+  const started = useRef(false);
+  useEffect(() => {
+    if (!initialPr || started.current || !health || health.snapshot) return;
+    started.current = true;
+    // After the page's own scroll to #try (App scrolls section routes again at 700 ms).
+    void start(initialPr, 900);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPr, health]);
+
   const agentOff = health && !health.agent.available;
   const snapshot = !!health?.snapshot;
+  const hosted = !!health?.hosted?.enabled;
   return (
     <div className="tryit">
       <div className="demo-card">
@@ -60,7 +77,7 @@ export function TryIt({ health, packageRepo }: { health?: Health; packageRepo: P
           <input
             value={prUrl}
             onChange={(e) => setPrUrl(e.target.value)}
-            placeholder="https://github.com/FalkorDB/falkordb-py/pull/267"
+            placeholder={hosted ? 'https://github.com/<owner>/<repo>/pull/<number>' : 'https://github.com/FalkorDB/falkordb-py/pull/267'}
             aria-label="Pull request URL"
             spellCheck={false}
           />
@@ -69,22 +86,60 @@ export function TryIt({ health, packageRepo }: { health?: Health; packageRepo: P
           </button>
         </form>
         <div className="modes" role="radiogroup" aria-label="Mode">
-          <label className={mode === 'agent' ? 'on' : ''}>
-            <input type="radio" name="mode" checked={mode === 'agent'} disabled={agentOff} onChange={() => setMode('agent')} />
-            Agent mode{health?.agent.available ? <code>{health.agent.model}</code> : null}
-          </label>
           <label className={mode === 'graph' ? 'on' : ''}>
             <input type="radio" name="mode" checked={mode === 'graph'} onChange={() => setMode('graph')} />
-            Graph mode <span className="muted">(no model)</span>
+            Graph mode <span className="muted">(seconds, no model)</span>
           </label>
+          <label className={mode === 'agent' ? 'on' : ''}>
+            <input type="radio" name="mode" checked={mode === 'agent'} disabled={agentOff} onChange={() => setMode('agent')} />
+            Agent mode{health?.agent.available ? <code>{health.agent.model}</code> : null} <span className="muted">(judges every section, 1–4 min)</span>
+          </label>
+          {hosted && (
+            <button type="button" className="link small" onClick={() => setShowWith((v) => !v)} aria-expanded={showWith}>
+              {showWith ? 'Docs in the same repository' : 'Docs in another repository?'}
+            </button>
+          )}
         </div>
+        {hosted && showWith && (
+          <div className="with-repos">
+            <label htmlFor="with-repos">Index together with</label>
+            <input
+              id="with-repos"
+              value={withRepos}
+              onChange={(e) => setWithRepos(e.target.value)}
+              placeholder="your-org/docs"
+              spellCheck={false}
+              aria-describedby="with-repos-help"
+            />
+            <span id="with-repos-help" className="muted small">
+              Repositories whose docs use this code (a docs site, an SDK). Indexed together so paths across them resolve; up to {health?.hosted?.limits?.maxRepos ?? 4} per
+              workspace.
+            </span>
+          </div>
+        )}
+        {hosted && (
+          <p className="note">
+            Works on any public Python repository on GitHub: the first check indexes it, which takes seconds for most projects. Examples run before and after the pull
+            request in the <a href="#/install">GitHub Action</a> and the CLI; this server shows the runs recorded for FalkorDB's pull requests.
+          </p>
+        )}
         {agentOff && !snapshot && (
           <p className="note">
-            Agent mode is off on this server: {health.agent.available ? '' : health.agent.reason}. Graph mode runs the real graph queries and example runs; agent traces
-            recorded earlier are listed below with their dates.
+            Agent mode is off on this server: {health.agent.available ? '' : health.agent.reason}. Graph mode runs the real graph queries; agent traces recorded earlier
+            are listed below with their dates.
           </p>
         )}
         {formError && <div className="banner err">{formError}</div>}
+        {hosted && (
+          <div className="elsewhere">
+            <span className="muted small">Other projects:</span>
+            {ELSEWHERE.map((u) => (
+              <button key={u} type="button" className="chip-btn" disabled={running} onClick={() => void start(u)}>
+                {u.replace('https://github.com/', '').replace('/pull/', '#')}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="preloaded">
           {prs.map((p) => (
             <button

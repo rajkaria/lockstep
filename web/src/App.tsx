@@ -5,6 +5,7 @@ import { CypherList, RepoChip, type PackageRepo } from './components';
 import { DocsPage } from './Docs';
 import { PACKAGE, PRODUCT } from './docs/manifest';
 import { num, seedRepoColors } from './format';
+import { InstallPage } from './Install';
 import { Landing } from './Landing';
 import { Footer, Header } from './layout';
 import { HOME_SECTIONS, parseRoute, type Route } from './route';
@@ -36,7 +37,8 @@ export function App() {
       .catch(() => undefined);
   }, []);
   useEffect(() => {
-    if (route.page !== 'docs') document.title = `${PRODUCT} — keep docs true to code`;
+    if (route.page === 'install') document.title = `Install ${PRODUCT}`;
+    else if (route.page !== 'docs') document.title = `${PRODUCT} — keep docs true to code`;
   }, [route]);
   // Section routes (#/use-cases) scroll once the landing is on screen.
   useEffect(() => {
@@ -56,7 +58,7 @@ export function App() {
     return (q: string) => map.get(q.split('.')[0]!);
   }, [facts]);
 
-  const current = route.page === 'docs' ? 'docs' : route.page === 'model' ? 'model' : route.page === 'home' ? route.section : undefined;
+  const current = route.page === 'docs' ? 'docs' : route.page === 'model' ? 'model' : route.page === 'install' ? 'install' : route.page === 'home' ? route.section : undefined;
   const banners = (
     <>
       {loadError && <div className="banner err">The API is unreachable: {loadError}</div>}
@@ -79,7 +81,7 @@ export function App() {
             demo={
               <>
                 {banners}
-                <TryIt health={health} packageRepo={packageRepo} />
+                <TryIt health={health} packageRepo={packageRepo} initialPr={route.pr} />
               </>
             }
             stats={<LiveStats facts={facts} health={health} />}
@@ -91,6 +93,7 @@ export function App() {
             <StoredCheck id={route.id} packageRepo={packageRepo} />
           </div>
         )}
+        {route.page === 'install' && <InstallPage initialRepo={route.repo} health={health} />}
         {route.page === 'model' && (
           <div className="wrap page-pad">
             <ModelPage />
@@ -104,7 +107,7 @@ export function App() {
             <span>
               {PRODUCT} {health?.version ?? ''} · graph <code>{health?.org ?? '…'}</code> on FalkorDB {health?.falkordb ?? ''}
             </span>
-            <span>Public repositories only · MIT licensed</span>
+            <span>Hosted: public repositories · CLI and Action: private ones too · MIT licensed</span>
           </>
         }
       />

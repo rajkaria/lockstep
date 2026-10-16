@@ -6,7 +6,7 @@ branding:
   color: green
 
 inputs:
-  with:
+  also-index:
     description: Other repositories to index together with this one, space- or comma-separated (e.g. your docs site `acme/docs`), so links across them resolve.
     default: ''
   anthropic-api-key:
@@ -37,7 +37,7 @@ inputs:
     description: Graph name on falkordb-url (default falkordb). Ignored without falkordb-url.
     default: ''
   reindex:
-    description: With falkordb-url, re-index this repository (and `with`) at the default branch before checking.
+    description: With falkordb-url, re-index this repository (and `also-index`) at the default branch before checking.
     default: 'false'
   github-token:
     description: Token to read the repository and post the comment. Private repositories work with the default token.
@@ -110,7 +110,7 @@ runs:
         FALKORDB_URL: ${{ inputs.falkordb-url }}
         STALEPROOF_ORG: ${{ inputs.org }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        WITH: ${{ inputs.with }}
+        WITH: ${{ inputs.also-index }}
         REPO: ${{ github.repository }}
       run: ${{ steps.cli.outputs.cli }} index "$REPO" $(echo "$WITH" | tr ',' ' ')
 
@@ -125,7 +125,7 @@ runs:
         ANTHROPIC_BASE_URL: ${{ inputs.base-url }}
         STALEPROOF_MODEL: ${{ inputs.model }}
         PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
-        WITH: ${{ inputs.with }}
+        WITH: ${{ inputs.also-index }}
         RUNS: ${{ inputs.runs }}
         FAIL_ON: ${{ inputs.fail-on }}
         CLI: ${{ steps.cli.outputs.cli }}
