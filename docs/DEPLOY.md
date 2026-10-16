@@ -32,7 +32,7 @@ A host that runs examples also needs `git`, `tar`, and `uv` or `python3`. With [
 
 ## Vercel
 
-The repository deploys to Vercel as is ([vercel.json](../vercel.json)): the web app is static (`web/dist`) and the API, MCP included, runs as a Vercel Function ([api/[...route].js](../api/[...route].js)). On Vercel, pull requests are read through the GitHub API (no `git`), repositories are downloaded as tarballs, `STALEPROOF_HOME` is `/tmp/staleproof`, and examples are not executed (no sandbox runtime): runs recorded by a local or container host are answered from the graph. The function runs in [hosted mode](#hosted-mode) unless `STALEPROOF_HOSTED=off`.
+The repository deploys to Vercel as is ([vercel.json](../vercel.json)): the web app is static (`web/dist`) and the API, MCP included, runs as one Vercel Function ([api/index.js](../api/index.js)); a rewrite in vercel.json sends every `/api/...` path to it. On Vercel, pull requests are read through the GitHub API (no `git`), repositories are downloaded as tarballs, `STALEPROOF_HOME` is `/tmp/staleproof`, and examples are not executed (no sandbox runtime): runs recorded by a local or container host are answered from the graph. The function runs in [hosted mode](#hosted-mode) unless `STALEPROOF_HOSTED=off`.
 
 1. Create a FalkorDB the function can reach ([FalkorDB Cloud](#falkordb-cloud)'s free tier works) and index into it from your machine:
    ```bash

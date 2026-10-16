@@ -1,6 +1,6 @@
 # HTTP API
 
-`staleproof serve` runs one HTTP server with a JSON API, Server-Sent Events (SSE) streams for live checks, audits and indexing, a README badge, MCP over Streamable HTTP, and the web app. This page lists every route with its parameters, response fields, status codes, error bodies and rate limits, shows how to read the check stream from code, and covers hosted mode, where any public repository is indexed on demand. It is for developers who build a client, a dashboard or an integration against a running server. The same `/api` routes answer on a Vercel deployment such as staleproof.dev, through the function in [api/[...route].js](../api/[...route].js).
+`staleproof serve` runs one HTTP server with a JSON API, Server-Sent Events (SSE) streams for live checks, audits and indexing, a README badge, MCP over Streamable HTTP, and the web app. This page lists every route with its parameters, response fields, status codes, error bodies and rate limits, shows how to read the check stream from code, and covers hosted mode, where any public repository is indexed on demand. It is for developers who build a client, a dashboard or an integration against a running server. The same `/api` routes answer on a Vercel deployment such as staleproof.dev, through the function in [api/index.js](../api/index.js).
 
 ## Start the server and call it
 
@@ -600,7 +600,7 @@ Snapshot mode serves static hosting, where Vercel serves `web/dist/snapshot.json
 
 ## On Vercel
 
-The function in [api/[...route].js](../api/[...route].js) wraps the same app, so every `/api` route above behaves the same, with these differences:
+The function in [api/index.js](../api/index.js) wraps the same app, so every `/api` route above behaves the same, with these differences:
 
 - **Hosted mode is on** unless `STALEPROOF_HOSTED=off`: any public repository is indexed on demand into its own workspace graph, and MCP answers at `/api/mcp`.
 - **No database**: it connects to FalkorDB on the first request. If that fails, every `/api` route answers `503 {"error": "the Staleproof API is not connected to FalkorDB (<message>); set FALKORDB_URL", "offline": true}`, and the next request tries again.

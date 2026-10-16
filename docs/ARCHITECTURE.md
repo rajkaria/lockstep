@@ -84,7 +84,7 @@ grammars/                tree-sitter-python.wasm
 scripts/                 falkordb-local.sh (FalkorDB without Docker), seed.sh (index + graph-mode checks + facts),
                          gen-docs.ts (generated docs), snapshot.ts (web/public/snapshot.json),
                          prerender.ts (the home page into web/dist/index.html)
-api/[...route].js        the Vercel Function wrapping server/app.ts
+api/index.js             the Vercel Function wrapping server/app.ts (vercel.json rewrites /api/* to it)
 action.yml               composite GitHub Action at the repository root (uses: rajkaria/staleproof@v1)
 examples/staleproof.yml    workflow using the Action
 test/                    vitest suite and the fixture organisation (test/fixtures/org)

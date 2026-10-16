@@ -1,4 +1,5 @@
-// Vercel Function: the Staleproof API (src/server/app.ts) behind /api/*, including MCP at /api/mcp.
+// Vercel Function: the Staleproof API (src/server/app.ts) behind /api/* (vercel.json rewrites every /api/... path
+// here; file routing alone matched one segment after /api), including MCP at /api/mcp.
 // The web UI is served statically from web/dist. Needs FALKORDB_URL pointing at a FalkorDB that
 // holds the org graph; without it the API answers 503 and the UI falls back to the bundled snapshot.
 // Hosted mode (default here; STALEPROOF_HOSTED=off disables it): any public repository is indexed
