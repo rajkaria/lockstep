@@ -33,6 +33,9 @@ import { impactTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 import { auditDocs } from './audit.js';
 import { auditMarkdown, auditText } from './format/audit.js';
+import { docsForTool } from './tools/docs-for.js';
+import { analyzeChanges, localChanges } from './pr/local.js';
+import { checkMarkdown } from './format/markdown.js';
 
 const program = new Command();
 
@@ -149,8 +152,8 @@ program
 
 program
   .command('check')
-  .description('Check a pull request against the org graph: impacted docs with evidence paths, clearance, ranking')
-  .argument('<pr-url>', 'https://github.com/<owner>/<repo>/pull/<n>')
+  .description('Check a pull request against the org graph: impacted docs with evidence paths, clearance, ranking. With no pull request: your working tree')
+  .argument('[pr-url]', 'https://github.com/<owner>/<repo>/pull/<n> (omit to check the uncommitted and unpushed changes of the checkout you are in)')
   .option('--no-agent', 'run the graph tools in a fixed order instead of the agent')
   .option('--model <id>', 'Claude model for the agent (env STALEPROOF_MODEL)')
   .option('--effort <level>', 'low | medium | high | xhigh | max (env STALEPROOF_EFFORT)')
@@ -162,7 +165,19 @@ program
   .option('--out <file>', 'write the markdown comment to a file')
   .option('--with <repos...>', 'repositories to index together with the pull request\'s on first use (e.g. a docs site)', [])
   .option('--no-index', 'fail instead of indexing the repository when the graph does not have it yet')
-  .action(async (prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean }) => {
+  .option('--dir <path>', 'without a pull request: the checkout to check (default: the current directory)')
+  .option('--base <ref>', 'without a pull request: compare with this commit (default: merge base with the remote default branch)')
+  .option('--repo <owner/name>', 'without a pull request: the GitHub repository the checkout is (default: from its origin remote)')
+  .option('--fail-on-predicted', 'exit 1 when an example is predicted to break (a pre-push hook or CI gate)')
+  .action(async (prUrl: string | undefined, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean; dir?: string; base?: string; repo?: string; failOnPredicted?: boolean }) => {
+    if (!prUrl) {
+      await checkLocal(opts);
+      return;
+    }
+    await checkPr(prUrl, opts);
+  });
+
+async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean }) {
     aboutRepo(parsePrUrl(prUrl).fullName);
     await withGraph(async (store, org) => {
       const config = settings();
@@ -226,6 +241,64 @@ program
         if (e.type === 'tool_result' && e.name === 'run_example' && !e.isError) console.log(`\n${runText(e.data as RunExampleData)}`);
       }
       console.log(dim(`\n${r.summary}\nStored as ${r.checkId}.`));
+    });
+}
+
+/** `staleproof check` with no pull request: the working tree, statically (nothing runs, nothing is written). */
+async function checkLocal(opts: { dir?: string; base?: string; repo?: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean; failOnPredicted?: boolean }) {
+  const local = await localChanges(opts.dir ?? process.cwd(), { base: opts.base, repo: opts.repo });
+  aboutRepo(local.repo);
+  await withGraph(async (store, org) => {
+    const config = settings();
+    const graph = store.org(org);
+    if (opts.index) {
+      const report = await ensureIndexed(graph, config, [local.repo, ...opts.with], (p) => log(`${p.phase.padEnd(9)} ${p.message}`));
+      if (report) log(`indexed ${report.repos.map((r) => `${r.repo}@${r.sha.slice(0, 7)}`).join(', ')} into graph "${org}" in ${(report.ms / 1000).toFixed(1)}s`);
+    }
+    const label = {
+      url: `https://github.com/${local.repo}/compare/${local.base}...${local.branch}`,
+      title: `Working tree of ${local.branch} against ${local.base.slice(0, 7)}`,
+    };
+    const r = await analyzeChanges(graph, config.home, local.repo, local.diff, label);
+    if (opts.json) console.log(JSON.stringify({ summary: r.summary, ...r.data }, null, 2));
+    else if (opts.format === 'markdown') {
+      const md = checkMarkdown({ impact: r.data.impact, summary: r.summary, cleared: r.data.cleared, org });
+      if (opts.out) await writeFile(opts.out, `${md}\n`);
+      else console.log(md);
+    } else {
+      console.log(impactText(r.data.impact));
+      console.log('');
+      console.log(clearanceText(r.data.cleared));
+      console.log(dim(`\n${r.summary}\nStatic check of the working tree: nothing was run or written to the graph. Push and open a pull request to run the examples before and after.`));
+    }
+    if (opts.failOnPredicted && r.data.impact.predicted.length) process.exitCode = 1;
+  });
+}
+
+program
+  .command('docs-for')
+  .description('Which docs depend on a symbol, with the path for each: what to update before you change it')
+  .argument('<symbol>', 'owner/repo:pkg.mod.Class.method, pkg.mod.Class.method, Class.method or a bare name')
+  .option('--repo <owner/name...>', 'only symbols defined in these repositories', [])
+  .option('--json', 'print JSON')
+  .action(async (symbol: string, opts: { repo: string[]; json?: boolean }) => {
+    if (opts.repo[0]) aboutRepo(opts.repo[0]);
+    else aboutRepo(symbol);
+    await withGraph(async (store, org) => {
+      const r = await docsForTool.run({ graph: store.org(org), config: settings(), log }, { symbol, repos: opts.repo.length ? opts.repo.map(parseRepoName) : undefined });
+      if (opts.json) {
+        console.log(JSON.stringify({ summary: r.summary, ...r.data }, null, 2));
+        return;
+      }
+      for (const s of r.data.symbols) console.log(`${s.qualname} ${dim(`${s.kind} · ${s.repo}`)}\n  ${dim(s.signature)}`);
+      if (r.data.symbols.length) console.log('');
+      for (const s of r.data.sections) {
+        console.log(`  ${s.heading} ${dim(`[${s.repo}] ${s.hops} hops, ${s.confidence}${s.examples.length ? `, ${s.examples.length} example(s)` : ''}`)}`);
+        console.log(`    ${dim('path:')} ${s.evidence.join(dim(' ← '))}`);
+        console.log(`    ${dim(s.url)}`);
+      }
+      for (const m of r.data.mismatched) console.log(`  ! ${m.example} line ${m.line}: ${m.detail}`);
+      console.log(dim(`\n${r.summary}`));
     });
   });
 

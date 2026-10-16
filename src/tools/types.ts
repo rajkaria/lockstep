@@ -32,6 +32,8 @@ export interface ToolContext {
   checkouts?: Record<string, string>;
   /** Re-run examples instead of answering from recorded runs (`run --fresh`). */
   freshRuns?: boolean;
+  /** A local server: tools may read a checkout on this machine (check_changes with dir). */
+  allowDir?: boolean;
 }
 
 export interface ToolDef<I = any, O = any> {

@@ -441,6 +441,82 @@ RETURN e.id AS example, e.url AS url, m.line AS line, m.kind AS kind, m.detail A
 ORDER BY example, line
 ```
 
+**`findSymbols`** — Symbols a name refers to: an id, a qualified name, a dotted suffix (Graph.query) or a bare name.
+
+```cypher
+MATCH (s:Symbol)
+WHERE s.status = 'live' AND s.kind <> 'module'
+  AND (s.id = $name OR s.qualname = $name OR s.qualname ENDS WITH $suffix OR s.name = $name)
+  AND (size($repos) = 0 OR s.repo IN $repos)
+RETURN s.id AS id, s.qualname AS qualname, s.name AS name, s.kind AS kind, s.repo AS repo, s.signature AS signature, s.path AS path, s.lineno AS lineno
+ORDER BY qualname
+LIMIT 50
+```
+
+**`docsForSymbol`** — Every doc section and example that reaches a symbol: symbol ← up to 3 callers (any repository) ← doc, with the path. Impact without a pull request.
+
+```cypher
+MATCH (s:Symbol)
+WHERE s.id IN $ids
+MATCH p = (s)<-[:CALLS*0..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
+WHERE (d:DocSection OR d:CodeExample) AND d.status = 'live'
+OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
+RETURN s.qualname AS changed, 'lookup' AS change, s.signature AS before, s.signature AS after,
+       t.qualname AS reached, labels(d)[0] AS kind, d.id AS doc, d.repo AS repo, d.path AS path,
+       coalesce(sec.id, d.id) AS section, coalesce(sec.heading_path, d.heading_path, d.path) AS heading,
+       d.url AS url, length(p) AS hops,
+       [n IN nodes(p) | coalesce(n.qualname, n.id)] AS evidence,
+       [x IN relationships(p) | coalesce(x.resolved, 'exact')] AS resolution
+ORDER BY hops, repo, doc
+```
+
+**`impactOfChanges`** — Impact of changes that are not a pull request yet (a working tree, an editor's edits): the impact walk from a list of changed symbols.
+
+```cypher
+UNWIND $changes AS ch
+MATCH (s:Symbol {id: ch.id})
+WHERE ch.kind <> 'added'
+MATCH p = (s)<-[:CALLS*0..3]-(t:Symbol)<-[:MENTIONS|USES]-(d)
+WHERE (d:DocSection OR d:CodeExample) AND d.status = 'live'
+OPTIONAL MATCH (d)-[:IN_SECTION]->(sec:DocSection)
+RETURN s.qualname AS changed, ch.kind AS change, ch.before AS before, ch.after AS after,
+       t.qualname AS reached, labels(d)[0] AS kind, d.id AS doc, d.repo AS repo, d.path AS path,
+       coalesce(sec.id, d.id) AS section, coalesce(sec.heading_path, d.heading_path, d.path) AS heading,
+       d.url AS url, length(p) AS hops,
+       [n IN nodes(p) | coalesce(n.qualname, n.id)] AS evidence,
+       [x IN relationships(p) | coalesce(x.resolved, 'exact')] AS resolution
+ORDER BY hops, repo, doc
+```
+
+**`predictedCallsOfChanges`** — Examples that call a changed symbol (removed, renamed, stopped exporting, re-signed) in changes that are not a pull request yet.
+
+```cypher
+UNWIND $changes AS ch
+MATCH (s:Symbol {id: ch.id})
+WHERE ch.kind IN ['removed', 'renamed', 'signature', 'export-removed']
+MATCH (e:CodeExample)-[u:USES]->(s)
+WHERE e.status = 'live' AND e.lang = 'python'
+OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
+RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
+       coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
+       s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+       ch.kind AS change, ch.before AS before, ch.after AS after, ch.renamed_to AS renamedTo
+ORDER BY example, line
+```
+
+**`clearanceOfChanges`** — Proof of absence for changes that are not a pull request yet: changed symbols no doc reaches within 3 call hops.
+
+```cypher
+UNWIND $changes AS ch
+MATCH (s:Symbol {id: ch.id})
+WHERE ch.kind <> 'added'
+OPTIONAL MATCH p = (s)<-[:CALLS*0..3]-(:Symbol)<-[:MENTIONS|USES]-()
+WITH s, ch, count(p) AS reach
+WHERE reach = 0
+RETURN s.qualname AS symbol, s.name AS name, s.repo AS repo, ch.kind AS change, s.visibility AS visibility
+ORDER BY symbol
+```
+
 #### Memory: decisions, verdicts, runs, checks
 
 **`cachedRun`** — An identical earlier run (same program, same commits): the graph remembers what already ran.

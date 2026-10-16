@@ -284,6 +284,15 @@ function SampleComment() {
   );
 }
 
+/** For AGENTS.md / CLAUDE.md: when a coding agent should call Staleproof. */
+export const AGENT_RULES = `## Docs stay true to code (Staleproof MCP)
+- Before changing a public function, class or method, call docs_for_symbol with its name:
+  update every doc section and example it lists in the same change.
+- Before committing, call check_changes with the files you edited: fix every example
+  it predicts to break (its call no longer fits the new signature).`;
+
+const PRE_PUSH = `printf '#!/bin/sh\\nnpx -y ${PACKAGE} check --fail-on-predicted\\n' > .git/hooks/pre-push && chmod +x .git/hooks/pre-push`;
+
 function AssistantInstall() {
   const url = `${origin()}/api/mcp`;
   const links = mcpLinks(url);
@@ -294,9 +303,10 @@ function AssistantInstall() {
           <span className="eyebrow">MCP</span>
           <h2>Ask your AI assistant</h2>
           <p>
-            The hosted MCP server needs nothing installed. Your assistant gets <code>check_pull_request</code> (the whole report in one call) and the graph tools
-            behind it: impact, clearance, read_section, decisions_for, rank_sections, propose_edit, record_verdict, write_decision and docs_patch. Any public repository
-            is indexed on first use.
+            The hosted MCP server needs nothing installed. Your assistant gets <code>check_pull_request</code> (the whole report in one call),{' '}
+            <code>docs_for_symbol</code> (which docs depend on a function before it changes it), <code>check_changes</code> (which docs its edits make false and which
+            examples they break, before anything is pushed), <code>audit_docs</code>, and the graph tools behind them: impact, clearance, read_section, decisions_for,
+            rank_sections, propose_edit, record_verdict, write_decision and docs_patch. Any public repository is indexed on first use.
           </p>
           <div className="mcp-buttons">
             <a className="btn btn-primary" href={links.cursor}>
@@ -333,6 +343,9 @@ function AssistantInstall() {
           <p className="muted small">
             Examples are not executed on the hosted server (it has no sandbox). For runs, use the local server: <code>claude mcp add staleproof -- npx -y {PACKAGE} mcp</code>.
           </p>
+          <h3>Make it a habit for your coding agent</h3>
+          <p className="small">Add this to the repository's AGENTS.md or CLAUDE.md, so docs are updated in the same change as the code:</p>
+          <CodeBlock code={AGENT_RULES} title="AGENTS.md" />
         </div>
         <div className="install-preview">
           <div className="chat-sample" aria-label="Example question">
@@ -362,6 +375,13 @@ function TerminalInstall() {
           </p>
           <CodeBlock code={`$ ${cmd}`} />
           <ul className="plain small">
+            <li>
+              Before you push: <code>npx -y {PACKAGE} check</code> with no pull request checks your working tree (uncommitted and unpushed changes) and lists the
+              examples your edits break. As a git hook: <code>{PRE_PUSH}</code>.
+            </li>
+            <li>
+              The whole repository, no pull request: <code>npx -y {PACKAGE} audit owner/name</code> (<a href="#/audit">or on the web</a>).
+            </li>
             <li>
               Docs in another repository: <code>--with your-org/docs</code>.
             </li>

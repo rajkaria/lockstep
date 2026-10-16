@@ -26,6 +26,7 @@ import { canonicalPrUrl, NotIndexedError } from '../pr/ingest.js';
 import { handleMcpRequest } from '../mcp/http.js';
 import { auditDocs, type AuditData } from '../audit.js';
 import { healthBadge } from './badge.js';
+import { docsForTool } from '../tools/docs-for.js';
 
 export const DEFAULT_PRELOADED = [
   'https://github.com/FalkorDB/falkordb-py/pull/262',
@@ -363,6 +364,24 @@ export function createApp(opts: AppOptions): Hono {
       }
       await chain;
     });
+  });
+
+  /** Which docs depend on a symbol (no pull request): `symbol` is an id, a qualified name or `Class.method`; `repo` picks the graph. */
+  app.get('/api/docs-for', async (c) => {
+    const symbol = c.req.query('symbol')?.trim();
+    if (!symbol) return c.json({ error: 'symbol required, e.g. ?symbol=Graph.query&repo=owner/name' }, 400);
+    const named = c.req.query('repo') ?? repoOfId(symbol);
+    let repo: string | undefined;
+    try {
+      repo = named ? parseRepoName(named) : undefined;
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    if (hosted && !repo) return c.json({ error: 'repo required (owner/name), or a symbol id that starts with owner/repo:' }, 400);
+    const g = repo ? await graphForRepo(repo) : graph;
+    if (!g) return c.json({ error: `${repo} is not indexed yet`, indexed: false }, 404);
+    const r = await docsForTool.run({ graph: g, config }, { symbol, repos: c.req.query('repo') && repo ? [repo] : undefined });
+    return c.json({ summary: r.summary, ...r.data });
   });
 
   /** README badge: docs health of an audited repository (grey until it has been audited). */

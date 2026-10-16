@@ -39,7 +39,7 @@ export function impactText(d: ImpactData, ranked?: RankedSection[]): string {
     }
   }
   if (d.mismatched?.length) {
-    out.push('', bold(`Already out of date before this PR (${d.mismatched.length})`));
+    out.push('', bold(`Already out of date before ${d.pr.state === 'local' ? 'these changes' : 'this PR'} (${d.mismatched.length})`));
     for (const m of d.mismatched) out.push(`  ${yellow('!')} ${m.example.split(':').slice(1).join(':')} ${dim(`line ${m.line}`)} ${m.detail}`);
   }
   return out.join('\n');

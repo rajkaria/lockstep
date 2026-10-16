@@ -111,6 +111,34 @@ Available to MCP clients.
 
 Cypher it runs: `impact`, `clearance`, `rankSections` ([full text](GRAPH-MODEL.md)).
 
+### `check_changes`
+
+Check edits that are not a pull request yet: which doc sections and examples they can make false (with the evidence path), which examples are predicted to break (their calls no longer fit the changed code), and which changed symbols no doc reaches. Send the new contents of the changed files (content null deletes a file); they are compared with the commit the graph indexed. Nothing is written to the graph. On a local server, pass dir (a git checkout) instead of files to check its working tree.
+
+Available to MCP clients.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `repo` | string | no | owner/name of the repository the files belong to (needed with files) |
+| `files` | object[] | no | Changed files: repository-relative path and full new content (null when deleted) |
+| `dir` | string | no | Local servers only: a git checkout whose working tree to check (default: the server's directory) |
+| `base` | string | no | With dir: the commit or ref to compare against (default: merge base with the remote default branch) |
+
+Cypher it runs: `impactOfChanges`, `predictedCallsOfChanges`, `clearanceOfChanges`, `mismatchesFor` ([full text](GRAPH-MODEL.md)).
+
+### `docs_for_symbol`
+
+Which doc sections and code examples depend on a symbol, in any repository, with the evidence path for each: symbol ← up to 3 callers ← doc. Call it before changing a function, class or method to know which docs to update in the same change. The symbol can be an id (owner/repo:pkg.mod.Class.method), a qualified name, a dotted suffix like Graph.query, or a bare name.
+
+Available to MCP clients.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `symbol` | string (non-empty) | yes | owner/repo:pkg.mod.Class.method, pkg.mod.Class.method, Class.method or method |
+| `repos` | string[] | no | Only symbols defined in these repositories (owner/name) |
+
+Cypher it runs: `docsForSymbol`, `findSymbols`, `mismatchesFor` ([full text](GRAPH-MODEL.md)).
+
 ### `audit_docs`
 
 Audit the docs of indexed repositories with no pull request: a 0-100 health score, every example line that no longer fits the code it calls (unknown keywords, wrong argument counts, names that no longer exist, found statically across repositories), API coverage (public symbols no doc names or calls, most used first) and the latest example runs at the indexed commits.

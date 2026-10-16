@@ -48,23 +48,25 @@ export function checkMarkdown(opts: {
   const touched = new Set(impact.pr.docsTouched.map((p) => `${impact.pr.repo}:${p}`));
   const onTouchedPage = (id: string) => touched.has(id.split(':').slice(0, 2).join(':'));
   const breaks = runs.filter((r) => r.verdict === 'breaks').length;
+  // `staleproof check` with no pull request reports on the working tree.
+  const subject = impact.pr.state === 'local' ? 'these changes' : 'this pull request';
   const predicted = impact.predicted ?? [];
   const predictedExamples = new Set(predicted.map((p) => p.example)).size;
   const elsewhere = impact.sections.filter((s) => !onTouchedPage(s.section.replace('#', ':'))).length;
   const n = impact.totalSections;
   const title = breaks
-    ? `this pull request breaks ${breaks} docs example${breaks === 1 ? '' : 's'}`
+    ? `${subject} break${subject === 'these changes' ? '' : 's'} ${breaks} docs example${breaks === 1 ? '' : 's'}`
     : predictedExamples
-      ? `this pull request is predicted to break ${predictedExamples} docs example${predictedExamples === 1 ? '' : 's'}`
+      ? `${subject} ${subject === 'these changes' ? 'are' : 'is'} predicted to break ${predictedExamples} docs example${predictedExamples === 1 ? '' : 's'}`
     : n && !impact.truncated && elsewhere === 0
       ? `the ${n === 1 ? 'doc section' : `${n} doc sections`} this pull request reaches ${n === 1 ? 'is' : 'are'} on pages it edits`
       : n
-        ? `${n} doc section${n === 1 ? '' : 's'} this pull request can make false`
-        : 'no docs reach the code this pull request changed';
+        ? `${n} doc section${n === 1 ? '' : 's'} ${subject} can make false`
+        : `no docs reach the code ${subject} changed`;
   const out: string[] = [COMMENT_MARKER, `### Staleproof: ${title}`, '', opts.summary, ''];
   if (predicted.length) {
     out.push(
-      '**Predicted to break** — the call as written no longer fits the code after this pull request (a static check, before anything runs):',
+      `**Predicted to break** — the call as written no longer fits the code after ${subject} (a static check, before anything runs):`,
       '',
       '| Example | Call | Why |',
       '|---|---|---|',
@@ -99,7 +101,7 @@ export function checkMarkdown(opts: {
     out.push('');
   }
   if (impact.mismatched?.length) {
-    out.push(`<details><summary>${impact.mismatched.length} impacted example line(s) already did not fit the code before this pull request</summary>`, '');
+    out.push(`<details><summary>${impact.mismatched.length} impacted example line(s) already did not fit the code before ${subject}</summary>`, '');
     for (const m of impact.mismatched) out.push(`- [${m.example.split(':').slice(1).join(':')} line ${m.line}](${m.url}): ${m.detail}`);
     out.push('', '</details>', '');
   }

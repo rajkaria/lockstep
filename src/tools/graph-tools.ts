@@ -268,7 +268,7 @@ export const clearanceTool: ToolDef<{ pr_url: string }, { cleared: ClearedSymbol
   },
 };
 
-async function countMatches(dir: string, name: string): Promise<number> {
+export async function countMatches(dir: string, name: string): Promise<number> {
   try {
     const { stdout } = await exec('git', ['grep', '-cw', name, '--', '*.md', '*.mdx'], { cwd: dir });
     return stdout
@@ -280,7 +280,7 @@ async function countMatches(dir: string, name: string): Promise<number> {
   }
 }
 
-function shellQuote(s: string): string {
+export function shellQuote(s: string): string {
   return /^[\w.-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 

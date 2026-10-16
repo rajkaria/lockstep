@@ -10,9 +10,10 @@ export function repoOfArgs(input: Record<string, unknown>): string | undefined {
       return undefined;
     }
   }
-  if (Array.isArray(input.repos) && typeof input.repos[0] === 'string') {
+  const named = typeof input.repo === 'string' ? input.repo : Array.isArray(input.repos) && typeof input.repos[0] === 'string' ? input.repos[0] : undefined;
+  if (named) {
     try {
-      return parseRepoName(input.repos[0]);
+      return parseRepoName(named);
     } catch {
       return undefined;
     }

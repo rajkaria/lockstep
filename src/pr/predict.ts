@@ -109,7 +109,25 @@ function matchingCalls(calls: PyCall[], row: Row): PyCall[] {
 
 /** Predicted breaks for every example that uses a symbol the pull request removed, renamed or re-signed. */
 export async function predictBreaks(tracer: Tracer, prUrl: string): Promise<PredictedBreak[]> {
-  const rows = (await tracer.run<Row>(Q.predictedCalls, { pr: prUrl })).rows;
+  return predictFromRows((await tracer.run<Row>(Q.predictedCalls, { pr: prUrl })).rows);
+}
+
+/** The same prediction for changes that are not a pull request (a working tree, an editor's buffers). */
+export async function predictBreaksForChanges(tracer: Tracer, changes: ChangeRow[]): Promise<PredictedBreak[]> {
+  if (!changes.length) return [];
+  return predictFromRows((await tracer.run<Row>(Q.predictedCallsOfChanges, { changes })).rows);
+}
+
+/** One changed symbol as the `*OfChanges` queries take it. */
+export interface ChangeRow {
+  id: string;
+  kind: string;
+  before: string;
+  after: string;
+  renamed_to: string;
+}
+
+async function predictFromRows(rows: Row[]): Promise<PredictedBreak[]> {
   const out: PredictedBreak[] = [];
   const parsed = new Map<string, Promise<PyCall[]>>();
   const arities = new Map<string, Promise<Arity | undefined>>();
