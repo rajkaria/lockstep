@@ -82,7 +82,7 @@ describe('checkMarkdown', () => {
     expect(md.split('\n')[1]).toBe('### Staleproof: no docs reach the code this pull request changed');
   });
 
-  it('says when the pull request edits the page of an example that breaks as written on the default branch', () => {
+  it('says when the pull request edits the page of an example', () => {
     const md = checkMarkdown({
       impact: { ...impact, pr: { ...impact.pr, repo: 'acme/docs', docsTouched: ['a.mdx'] } },
       summary: 's',
@@ -90,9 +90,9 @@ describe('checkMarkdown', () => {
       runs: [{ example: 'acme/docs:a.mdx:0', url: 'u', verdict: 'breaks', before: { status: 'pass', error: '', reason: '' }, after: { status: 'fail', error: 'E', reason: '' } }],
       org: 'acme',
     });
-    expect(md.split('\n')[1]).toBe("### Staleproof: 1 docs example breaks unless this pull request's doc edits fix it");
-    expect(md).toContain('**breaks**: passes before this PR, fails after, as written on the default branch; this PR edits the page |');
+    expect(md.split('\n')[1]).toBe('### Staleproof: this pull request breaks 1 docs example');
+    expect(md).toContain('**breaks**: passes before this PR, fails after (after: the page as this PR edits it) |');
     expect(md).toContain('(page edited in this PR)');
-    expect(md).toContain('This pull request also edits `a.mdx`: the sections and examples above are as they are on the default branch.');
+    expect(md).toContain('This pull request also edits `a.mdx`: examples on those pages are run after the change as the pull request leaves them;');
   });
 });

@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import { git } from '../indexer/repo.js';
+import { git, gitEnv } from '../indexer/repo.js';
 import { packageRoot } from '../pkg.js';
 
 export interface InstallTarget {
@@ -83,7 +83,8 @@ async function which(cmd: string): Promise<boolean> {
 async function archive(dir: string, sha: string, dest: string): Promise<void> {
   await mkdir(dest, { recursive: true });
   await new Promise<void>((resolve, reject) => {
-    const gitProc = spawn('git', ['archive', '--format=tar', sha], { cwd: dir });
+    // Blob-less clones fetch missing blobs here, so this git needs the token too (private repositories).
+    const gitProc = spawn('git', ['archive', '--format=tar', sha], { cwd: dir, env: gitEnv() });
     const tar = spawn('tar', ['-x', '-C', dest]);
     let err = '';
     gitProc.stderr.on('data', (d: Buffer) => (err += d.toString()));

@@ -44,18 +44,15 @@ export function checkMarkdown(opts: {
 }): string {
   const { impact } = opts;
   const runs = opts.runs ?? [];
-  // Pages the pull request edits itself: their examples were run as they are on the default branch.
+  // Pages the pull request edits itself: their after runs use the page as the pull request leaves it.
   const touched = new Set(impact.pr.docsTouched.map((p) => `${impact.pr.repo}:${p}`));
   const onTouchedPage = (id: string) => touched.has(id.split(':').slice(0, 2).join(':'));
-  const breaks = runs.filter((r) => r.verdict === 'breaks' && !onTouchedPage(r.example)).length;
-  const editedBreaks = runs.filter((r) => r.verdict === 'breaks' && onTouchedPage(r.example)).length;
+  const breaks = runs.filter((r) => r.verdict === 'breaks').length;
   const title = breaks
     ? `this pull request breaks ${breaks} docs example${breaks === 1 ? '' : 's'}`
-    : editedBreaks
-      ? `${editedBreaks} docs example${editedBreaks === 1 ? '' : 's'} break${editedBreaks === 1 ? 's' : ''} unless this pull request's doc edits fix ${editedBreaks === 1 ? 'it' : 'them'}`
-      : impact.totalSections
-        ? `${impact.totalSections} doc section${impact.totalSections === 1 ? '' : 's'} this pull request can make false`
-        : 'no docs reach the code this pull request changed';
+    : impact.totalSections
+      ? `${impact.totalSections} doc section${impact.totalSections === 1 ? '' : 's'} this pull request can make false`
+      : 'no docs reach the code this pull request changed';
   const out: string[] = [COMMENT_MARKER, `### Staleproof: ${title}`, '', opts.summary, ''];
   if (runs.length) {
     const short = (sha: string) => sha.slice(0, 7);
@@ -64,7 +61,7 @@ export function checkMarkdown(opts: {
       '|---|---|---|---|',
     );
     for (const r of runs) {
-      const result = onTouchedPage(r.example) && r.verdict === 'breaks' ? `${RESULT.breaks}, as written on the default branch; this PR edits the page` : RESULT[r.verdict];
+      const result = onTouchedPage(r.example) ? `${RESULT[r.verdict]} (after: the page as this PR edits it)` : RESULT[r.verdict];
       out.push(`| [${esc(r.example.split(':').slice(1).join(':'))}](${r.url}) | ${side(r.before)} | ${side(r.after)} | ${result} |`);
     }
     out.push('');
@@ -92,7 +89,9 @@ export function checkMarkdown(opts: {
     out.push('');
     if (opts.verdicts.some((v) => v.verdict === 'stale')) out.push('Proposed edits: `npx staleproof patch ' + impact.pr.url + '`', '');
   }
-  if (impact.pr.docsTouched.length) out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: the sections and examples above are as they are on the default branch.`, '');
+  if (impact.pr.docsTouched.length) {
+    out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: examples on those pages are run after the change as the pull request leaves them; the sections above are linked as they are on the default branch.`, '');
+  }
   if (opts.agentSummary) out.push(opts.agentSummary, '');
   out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${opts.org}\` · ${impact.pr.before.slice(0, 7)}..${impact.pr.after.slice(0, 7)}</sub>`);
   return out.join('\n');

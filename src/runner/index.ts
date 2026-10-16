@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import type { Config } from '../config.js';
 import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
-import { checkoutRepo } from '../indexer/repo.js';
+import { scanMarkdown } from '../indexer/markdown.js';
+import { checkoutRepo, git, gitAvailable } from '../indexer/repo.js';
+import { githubSource } from '../pr/github-diff.js';
 import { errorLine, extractTraceback, isFragmentFailure, prepareExample, type ExampleSource } from './prepare.js';
 import { ensureVenv, runInSandbox, sandboxAvailable, type InstallTarget } from './sandbox.js';
 import { ensureScratchDb, flushScratchDb } from './scratch.js';
@@ -199,4 +201,53 @@ function tail(s: string, n = 4000): string {
 
 export function venvRoot(config: Config): string {
   return join(config.home, 'venvs');
+}
+
+/**
+ * A file of `repo` at `sha` (undefined when the commit has no such file): from the local
+ * clone when git is here, else raw.githubusercontent.com. Throws when the commit is unknown.
+ */
+export async function readFileAt(config: Config, repo: string, sha: string, path: string, clone?: string): Promise<string | undefined> {
+  if (clone || (await gitAvailable())) {
+    const dir = clone ?? (await checkoutRepo(config.home, repo)).dir;
+    // A commit the clone doesn't have is an error, not a missing file.
+    await git(dir, ['cat-file', '-e', `${sha}^{commit}`]);
+    try {
+      return await git(dir, ['show', `${sha}:${path}`]);
+    } catch {
+      return undefined;
+    }
+  }
+  return githubSource(repo, { token: config.githubToken }).read(sha, path);
+}
+
+/**
+ * The example as the page reads at `sha` (a pull request that edits the page): found by
+ * its section and position in that section, else by its position on the page. `null`
+ * when the page at `sha` no longer has it; undefined when the page can't be read.
+ */
+export async function exampleAtCommit(config: Config, example: ExampleForRun, indexedSha: string, sha: string, clone?: string): Promise<ExampleForRun | null | undefined> {
+  let then: string | undefined;
+  let now: string | undefined;
+  try {
+    [then, now] = await Promise.all([readFileAt(config, example.repo, indexedSha, example.path, clone), readFileAt(config, example.repo, sha, example.path, clone)]);
+  } catch {
+    return undefined;
+  }
+  if (now === undefined) return then === undefined ? undefined : null;
+  if (then === undefined) return undefined;
+  const index = Number(example.id.split(':').at(-1));
+  const before = scanMarkdown(example.path, then).examples;
+  const after = scanMarkdown(example.path, now).examples;
+  const orig = before.find((e) => e.index === index);
+  if (!orig) return undefined;
+  const nth = before.filter((e) => e.sectionAnchor === orig.sectionAnchor).indexOf(orig);
+  const match = after.filter((e) => e.sectionAnchor === orig.sectionAnchor)[nth] ?? (after.length === before.length ? after.find((e) => e.index === index) : undefined);
+  if (!match) return null;
+  return {
+    ...example,
+    lang: match.lang,
+    code: match.code,
+    earlier: after.filter((e) => e.index < match.index).map((e) => ({ id: `${example.repo}:${example.path}:${e.index}`, lang: e.lang, code: e.code })),
+  };
 }

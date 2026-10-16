@@ -22,12 +22,17 @@ function gitAuthEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string
   };
 }
 
+/** The environment every git process gets: no prompts, and the token for github.com when there is one. */
+export function gitEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_TERMINAL_PROMPT: '0', ...gitAuthEnv() };
+}
+
 export async function git(cwd: string, args: string[], opts: { maxBuffer?: number } = {}): Promise<string> {
   try {
     const { stdout } = await exec('git', args, {
       cwd,
       maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...gitAuthEnv() },
+      env: gitEnv(),
     });
     return stdout;
   } catch (err) {

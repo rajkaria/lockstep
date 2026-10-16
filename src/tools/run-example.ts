@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import * as Q from '../graph/queries.js';
 import { parsePrUrl } from '../pr/github.js';
-import { installSet, loadExample, runExample, type RunRecord } from '../runner/index.js';
+import { exampleAtCommit, installSet, loadExample, runExample, type ExampleForRun, type RunRecord } from '../runner/index.js';
 import { result, Tracer, type ToolDef } from './types.js';
 
 export type RunVerdict = 'breaks' | 'fixes' | 'passes' | 'fails' | 'already-broken' | 'changed-failure' | 'skipped' | 'error';
@@ -11,6 +11,8 @@ export interface RunExampleData {
   url: string;
   verdict: RunVerdict;
   runs: RunRecord[];
+  /** The after run used the page as the pull request edits it. */
+  editedByPr?: boolean;
 }
 
 function failed(r: RunRecord): boolean {
@@ -47,11 +49,11 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
     const example = await loadExample(tracer.graph, input.example_id);
     if (!example) throw new Error(`no code example ${input.example_id}`);
     const prUrl = input.pr_url ? parsePrUrl(input.pr_url).url : undefined;
-    let pr: { repo: string; before: string; after: string } | undefined;
+    let pr: { repo: string; before: string; after: string; docs: string[] | null } | undefined;
     if (prUrl) {
       pr = (
-        await tracer.run<{ repo: string; before: string; after: string }>(
-          `MATCH (pr:PullRequest {url: $url}) RETURN pr.repo AS repo, pr.before_sha AS before, pr.after_sha AS after`,
+        await tracer.run<{ repo: string; before: string; after: string; docs: string[] | null }>(
+          `MATCH (pr:PullRequest {url: $url}) RETURN pr.repo AS repo, pr.before_sha AS before, pr.after_sha AS after, pr.docs_touched AS docs`,
           { url: prUrl },
         )
       ).rows[0];
@@ -59,10 +61,27 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
     }
     const repos = await installSet(tracer.graph, [...new Set([...example.usedRepos, ...(pr ? [pr.repo] : [])])]);
     const runs: RunRecord[] = [];
+    let editedByPr = false;
     if (pr) {
+      // A pull request that edits the example's page is judged by the page it leaves: the after run uses that version.
+      let after: ExampleForRun | null | undefined = example;
+      if (example.repo === pr.repo && (pr.docs ?? []).includes(example.path)) {
+        const indexed = repos.find((r) => r.repo === example.repo)?.sha ??
+          (await tracer.run<{ sha: string }>(`MATCH (r:Repo {name: $repo}) RETURN r.sha AS sha`, { repo: example.repo })).rows[0]?.sha;
+        const edited = indexed ? await exampleAtCommit(ctx.config, example, indexed, pr.after, ctx.checkouts?.[example.repo]).catch(() => undefined) : undefined;
+        if (edited !== undefined) {
+          after = edited;
+          editedByPr = edited === null || edited.code !== example.code;
+        }
+      }
       for (const side of ['before', 'after'] as const) {
+        const ex = side === 'after' ? after : example;
+        if (ex === null) {
+          runs.push({ id: `run-removed-${example.id}`, example: example.id, status: 'skipped', reason: 'this pull request removes the example from its page', stdout: '', durationMs: 0, stitched: [], installed: [], side, cached: false, createdAt: Date.now() });
+          break;
+        }
         runs.push(
-          await runExample(tracer.graph, ctx.config, example, repos, {
+          await runExample(tracer.graph, ctx.config, ex, repos, {
             shas: { [pr.repo]: side === 'before' ? pr.before : pr.after },
             side,
             prUrl,
@@ -97,11 +116,11 @@ export const runExampleTool: ToolDef<{ example_id: string; pr_url?: string }, Ru
                   : verdict === 'changed-failure'
                     ? `Fails before (${runs[0]!.error}) and after with a different error (${after.error}).`
                     : `Fails at the indexed commits: ${after.error}.`;
-    return result('run_example', tracer, summary + (runs.some((r) => r.cached) ? ' (recorded earlier; not re-run)' : ''), {
-      example: example.id,
-      url: example.url,
-      verdict,
-      runs,
-    });
+    return result(
+      'run_example',
+      tracer,
+      summary + (editedByPr ? ' The after run uses the page as this pull request edits it.' : '') + (runs.some((r) => r.cached) ? ' (recorded earlier; not re-run)' : ''),
+      { example: example.id, url: example.url, verdict, runs, editedByPr },
+    );
   },
 };
