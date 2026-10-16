@@ -22,7 +22,7 @@ import { ALL_TOOLS } from '../tools/index.js';
 import { HostedLimitError, Workspaces, type HostedEvent } from '../hosted/workspaces.js';
 import { RepoTooLargeError } from '../indexer/tarball.js';
 import { parseRepoName } from '../indexer/repo.js';
-import { NotIndexedError } from '../pr/ingest.js';
+import { canonicalPrUrl, NotIndexedError } from '../pr/ingest.js';
 import { handleMcpRequest } from '../mcp/http.js';
 
 export const DEFAULT_PRELOADED = [
@@ -287,6 +287,7 @@ export function createApp(opts: AppOptions): Hono {
         await mutex.run(async () => {
           const target = hosted ? await hosted.ensure(repo, { with: withRepos, onEvent: send }) : { graph, curated: true };
           const ctx = { graph: target.graph, config };
+          pr = await canonicalPrUrl(target.graph, pr);
           // Indexing came out of the same function-time budget.
           const budgetMs = config.checkBudgetMs ? Math.max(45_000, config.checkBudgetMs - (Date.now() - t0)) : undefined;
           if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send, budgetMs });
@@ -318,7 +319,7 @@ export function createApp(opts: AppOptions): Hono {
     }
     const g = await graphForRepo(pr.fullName);
     if (!g) return c.json({ error: `${pr.fullName} is not indexed` }, 404);
-    const patch = await buildDocsPatch({ graph: g, config }, pr.url);
+    const patch = await buildDocsPatch({ graph: g, config }, await canonicalPrUrl(g, pr.url));
     return c.json({ title: patch.title, body: patch.body, diff: patch.diff, files: patch.files.map((f) => ({ repo: f.repo, path: f.path, sections: f.sections })), verdicts: patch.verdicts, conflicts: patch.conflicts });
   });
 

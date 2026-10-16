@@ -9,6 +9,7 @@ import { buildDocsPatch } from '../patch.js';
 import { runGraphCheck } from '../agent/graph-check.js';
 import { checkReport } from '../format/report.js';
 import { ensureIndexed } from '../indexer/ensure.js';
+import { canonicalPrUrl } from '../pr/ingest.js';
 import { parsePrUrl } from '../pr/github.js';
 import { packageVersion } from '../pkg.js';
 import { ALL_TOOLS, inputJsonSchema } from '../tools/index.js';
@@ -144,7 +145,8 @@ export async function serveMcp(graph: OrgGraph, config: Config): Promise<void> {
     if (prUrl && ['check_pull_request', 'impact', 'clearance'].includes(tool.name)) {
       await ensureIndexed(graph, config, [parsePrUrl(prUrl).fullName], (p) => process.stderr.write(`staleproof: ${p.message}\n`));
     }
-    return { graph, config, prUrl };
+    if (prUrl) input.pr_url = await canonicalPrUrl(graph, prUrl);
+    return { graph, config, prUrl: input.pr_url as string | undefined };
   }, config);
   const transport = new StdioServerTransport();
   await server.connect(transport);

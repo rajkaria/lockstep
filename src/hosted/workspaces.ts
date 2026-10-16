@@ -120,7 +120,7 @@ export class Workspaces {
   /** The graph that holds `repo`, or undefined when nobody has indexed it. */
   async locate(repo: string): Promise<{ graph: OrgGraph; curated: boolean; entry?: WorkspaceRepo } | undefined> {
     const name = parseRepoName(repo);
-    const inCurated = await this.curated.run<{ n: string }>(`MATCH (r:Repo {name: $name}) RETURN r.name AS n`, { name });
+    const inCurated = await this.curated.run<{ n: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS n LIMIT 1`, { name });
     if (inCurated.rows.length) return { graph: this.curated, curated: true };
     const entry = await this.entry(name);
     if (!entry) return undefined;
@@ -183,8 +183,9 @@ export class Workspaces {
     repo: string,
     opts: { with?: string[]; refresh?: boolean; onEvent?: (e: HostedEvent) => void } = {},
   ): Promise<{ graph: OrgGraph; curated: boolean; report?: IndexReport }> {
-    const name = parseRepoName(repo);
-    const extra = (opts.with ?? []).map(parseRepoName).filter((r) => r.toLowerCase() !== name.toLowerCase());
+    // Hosted workspaces name repositories in lower case (GitHub names are case-insensitive); curated ones keep their spelling.
+    const name = parseRepoName(repo).toLowerCase();
+    const extra = (opts.with ?? []).map((r) => parseRepoName(r).toLowerCase()).filter((r) => r !== name);
     const found = await this.locate(name);
     if (found?.curated) {
       if (extra.length) throw new HostedLimitError(`${name} is in the curated "${found.graph.name}" graph, which the hosted service does not re-index; index other repositories on their own.`);

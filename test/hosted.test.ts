@@ -12,7 +12,7 @@ import { Workspaces, TRANSLATION_DIR, type HostedEvent } from '../src/hosted/wor
 import { indexOrg, listFiles } from '../src/indexer/index.js';
 import { downloadRepo, RepoTooLargeError, tarEntries } from '../src/indexer/tarball.js';
 import { repoOfArgs } from '../src/mcp/http.js';
-import { recordPullRequest } from '../src/pr/ingest.js';
+import { canonicalPrUrl, recordPullRequest } from '../src/pr/ingest.js';
 import { createApp } from '../src/server/app.js';
 import { fakePr, FIXTURE_REPOS, makeGitOrg, testConfig, testGraph } from './helpers.js';
 
@@ -141,6 +141,12 @@ describe('hosted workspaces (FalkorDB)', () => {
     expect(r2.graph.name).toBe(`${prefix}acme`);
     expect(again).toEqual([]);
     expect((await ws.locate('ACME/Mini-Client'))?.graph.name).toBe(`${prefix}acme`);
+    // GitHub names are case-insensitive: another spelling reuses the workspace and the same nodes.
+    const shouted: HostedEvent[] = [];
+    expect((await ws.ensure('ACME/Mini-Client', { onEvent: (e) => shouted.push(e) })).graph.name).toBe(`${prefix}acme`);
+    expect(shouted).toEqual([]);
+    expect(await canonicalPrUrl(r.graph, 'https://github.com/ACME/Mini-Client/pull/5')).toBe('https://github.com/acme/mini-client/pull/5');
+    expect(await canonicalPrUrl(curated, 'https://github.com/ACME/MINI-SDK/pull/5')).toBe('https://github.com/acme/mini-sdk/pull/5');
     const list = await ws.list();
     expect(list.find((w) => w.graph === `${prefix}acme`)?.repos.map((x) => x.name)).toEqual(['acme/mini-client', 'acme/mini-docs']);
   });

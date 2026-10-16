@@ -23,6 +23,17 @@ export interface IngestedPr {
 export class NotIndexedError extends Error {}
 
 /**
+ * The pull request URL with the repository named as the graph has it. GitHub names are
+ * case-insensitive, so `falkordb/FalkorDB-py#262` is the same pull request as
+ * `FalkorDB/falkordb-py#262`; every node is keyed by the indexed spelling.
+ */
+export async function canonicalPrUrl(graph: OrgGraph, prUrl: string): Promise<string> {
+  const ref = parsePrUrl(prUrl);
+  const row = (await graph.run<{ name: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name LIMIT 1`, { name: ref.fullName })).rows[0];
+  return row && row.name !== ref.fullName ? `https://github.com/${row.name}/pull/${ref.number}` : ref.url;
+}
+
+/**
  * Turn a pull request into graph facts: a PullRequest node, the symbols it
  * changed (CHANGED_IN with the kind of change), and — for symbols the PR removed
  * that the graph no longer has — recreated Symbol nodes linked to the docs that

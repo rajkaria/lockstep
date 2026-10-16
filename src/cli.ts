@@ -28,6 +28,7 @@ import { checkReport } from './format/report.js';
 import { ensureIndexed } from './indexer/ensure.js';
 import { openDocsPr } from './pr/open-pr.js';
 import { parsePrUrl } from './pr/github.js';
+import { canonicalPrUrl } from './pr/ingest.js';
 import { impactTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 
@@ -167,6 +168,7 @@ program
         const report = await ensureIndexed(ctx.graph, config, [parsePrUrl(prUrl).fullName, ...opts.with], (p) => log(`${p.phase.padEnd(9)} ${p.message}`));
         if (report) log(`indexed ${report.repos.map((r) => `${r.repo}@${r.sha.slice(0, 7)}`).join(', ')} into graph "${org}" in ${(report.ms / 1000).toFixed(1)}s`);
       }
+      prUrl = await canonicalPrUrl(ctx.graph, prUrl);
       if (opts.agent) {
         const model = new AnthropicModel({
           model: opts.model ?? config.model,

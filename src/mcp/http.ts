@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import type { GraphStore, OrgGraph } from '../graph/client.js';
 import type { Workspaces } from '../hosted/workspaces.js';
 import { parsePrUrl } from '../pr/github.js';
+import { canonicalPrUrl } from '../pr/ingest.js';
 import type { ToolContext, ToolDef } from '../tools/types.js';
 import { createMcpServer, MCP_INSTRUCTIONS, MCP_TOOLS } from './server.js';
 
@@ -55,10 +56,11 @@ export async function handleMcpRequest(request: Request, opts: McpHttpOptions): 
       if (tool.name === 'decisions_for' || tool.name === 'write_decision') return { graph, config, prUrl };
       throw new Error('name a repository: pass a pull request URL (pr_url) or ids that start with owner/repo:');
     }
-    if (INDEXING_TOOLS.has(tool.name)) return { graph: (await workspaces.ensure(repo)).graph, config, prUrl };
-    const found = await workspaces.locate(repo);
-    if (!found) throw new Error(`${repo} is not indexed yet: call check_pull_request with one of its pull requests first`);
-    return { graph: found.graph, config, prUrl };
+    const target = INDEXING_TOOLS.has(tool.name) ? (await workspaces.ensure(repo)).graph : (await workspaces.locate(repo))?.graph;
+    if (!target) throw new Error(`${repo} is not indexed yet: call check_pull_request with one of its pull requests first`);
+    // Nodes are keyed by the repository's indexed spelling; the tool reads pr_url from its input.
+    if (prUrl) input.pr_url = await canonicalPrUrl(target, prUrl);
+    return { graph: target, config, prUrl: input.pr_url as string | undefined };
   };
   const server = createMcpServer(resolve, config, {
     tools,
