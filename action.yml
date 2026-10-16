@@ -97,14 +97,19 @@ runs:
       env:
         VERSION: ${{ inputs.version }}
       run: |
-        if [ "$VERSION" = "source" ]; then
+        from_source() {
           cd "$GITHUB_ACTION_PATH"
           npm ci --ignore-scripts --no-audit --no-fund
           npx tsup >/dev/null
           echo "cli=node $GITHUB_ACTION_PATH/dist/cli.js" >> "$GITHUB_OUTPUT"
-        else
-          npm install -g "staleproof@$VERSION" --no-audit --no-fund >/dev/null
+        }
+        if [ "$VERSION" = "source" ]; then
+          from_source
+        elif npm install -g "staleproof@$VERSION" --no-audit --no-fund >/dev/null; then
           echo "cli=staleproof" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::staleproof@$VERSION is not on npm; building it from this action's source instead."
+          from_source
         fi
 
     - name: Re-index
