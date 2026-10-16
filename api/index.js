@@ -5,6 +5,7 @@
 // Hosted mode (default here; STALEPROOF_HOSTED=off disables it): any public repository is indexed
 // on demand into its own workspace graph.
 import { createApp, defaultModelFactory, GraphStore, loadConfig, setting, Workspaces } from '../dist/index.js';
+import { originalRequest } from './_original.js';
 
 let appPromise;
 
@@ -24,11 +25,12 @@ function app() {
 }
 
 async function handle(request) {
+  const req = originalRequest(request);
   try {
-    return await (await app()).fetch(request);
+    return await (await app()).fetch(req);
   } catch (err) {
     return Response.json(
-      { error: `the Staleproof API is not connected to FalkorDB (${err.message}); set FALKORDB_URL`, offline: true },
+      { error: `the Staleproof API is not connected to FalkorDB (${err.message}); set FALKORDB_URL`, offline: true, path: new URL(req.url).pathname },
       { status: 503 },
     );
   }
