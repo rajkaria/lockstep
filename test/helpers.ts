@@ -5,6 +5,9 @@ import type { Checkout } from '../src/indexer/repo.js';
 
 export const FIXTURES = join(import.meta.dirname, 'fixtures');
 
+/** Docs written for an older miniclient/minisdk: every example has lines that no longer fit (MISMATCH edges). */
+export const STALE_DOCS: Checkout = { repo: 'acme/stale-docs', dir: join(FIXTURES, 'drift', 'stale-docs'), sha: 'fixture' };
+
 export const FIXTURE_REPOS: Checkout[] = [
   { repo: 'acme/mini-client', dir: join(FIXTURES, 'org', 'mini-client'), sha: 'fixture' },
   { repo: 'acme/mini-sdk', dir: join(FIXTURES, 'org', 'mini-sdk'), sha: 'fixture' },

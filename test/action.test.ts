@@ -62,6 +62,18 @@ describe('GitHub Action', () => {
     expect(yml).toContain("grep -c '| \\*\\*breaks\\*\\*'");
   });
 
+  it('reads breaks and predicted from the counts line the report ends with', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const yml = await readFile(join(root, 'action.yml'), 'utf8');
+    expect(yml).toContain('<!-- staleproof:counts');
+    const counts = '<!-- staleproof:counts breaks=2 predicted=5 sections=9 mismatched=1 -->';
+    const sh = (expr: string) => execFileSync('bash', ['-c', `counts='${counts}'; echo "$counts" | sed -E '${expr}'`], { encoding: 'utf8' }).trim();
+    const breaksExpr = /breaks=\$\(echo "\$counts" \| sed -E '([^']+)'\)/.exec(yml)![1]!;
+    const predictedExpr = /predicted=\$\(echo "\$counts" \| sed -E '([^']+)'\)/.exec(yml)![1]!;
+    expect(sh(breaksExpr)).toBe('2');
+    expect(sh(predictedExpr)).toBe('5');
+  });
+
   it('the install workflow in examples/ uses the root action and needs no secrets', async () => {
     const wf = await readFile(join(root, 'examples', 'staleproof.yml'), 'utf8');
     expect(wf).toMatch(/uses: rajkaria\/staleproof@v\d/);

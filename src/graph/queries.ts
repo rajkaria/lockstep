@@ -234,6 +234,26 @@ export const impact = q('tool', 'impact', 'Every doc section and code example a 
   ORDER BY hops, repo, doc
 `);
 
+export const predictedCalls = q('tool', 'predictedCalls', 'Examples that call a symbol the pull request removed, renamed, stopped exporting or re-signed, with the call as written (checked against the new signature in code).', `
+  MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
+  WHERE c.kind IN ['removed', 'renamed', 'signature', 'export-removed']
+  MATCH (e:CodeExample)-[u:USES]->(s)
+  WHERE e.status = 'live' AND e.lang = 'python'
+  OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
+  RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
+         coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
+         s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+         c.kind AS change, c.before AS before, c.after AS after, c.renamed_to AS renamedTo
+  ORDER BY example, line
+`);
+
+export const mismatchesFor = q('tool', 'mismatchesFor', 'Example lines that already did not fit the code when indexed (MISMATCH edges), for the given examples.', `
+  MATCH (e:CodeExample)-[m:MISMATCH]->(s:Symbol)
+  WHERE e.id IN $ids AND e.status = 'live'
+  RETURN e.id AS example, e.url AS url, m.line AS line, m.kind AS kind, m.detail AS detail, m.text AS call
+  ORDER BY example, line
+`);
+
 export const clearance = q('tool', 'clearance', 'Proof of absence: changed symbols with no doc section or example within 3 call hops in any repository.', `
   MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
   WHERE c.kind <> 'added'
@@ -672,6 +692,8 @@ export const ALL_QUERIES: NamedQuery[] = [
   upsertUses,
   upsertMismatches,
   upsertLinks,
+  predictedCalls,
+  mismatchesFor,
   markGoneDocs,
   repoSymbols,
   callsFrom,

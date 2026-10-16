@@ -22,7 +22,7 @@ inputs:
     description: Graph mode runs up to this many affected examples before and after the pull request (0 to skip).
     default: '3'
   fail-on:
-    description: "`never` (default) or `breaks`: fail the job when an example passes before the pull request and fails after it."
+    description: "`never` (default); `breaks`: fail the job when an example passes before the pull request and fails after it; `predicted`: also fail when a static check predicts an example's call no longer fits the changed code."
     default: never
   comment:
     description: Post (and keep updating) one pull request comment. The report always goes to the job summary.
@@ -53,6 +53,9 @@ outputs:
   breaks:
     description: How many docs examples pass before the pull request and fail after it.
     value: ${{ steps.check.outputs.breaks }}
+  predicted:
+    description: How many docs examples a static check predicts the pull request breaks (their call no longer fits the changed code).
+    value: ${{ steps.check.outputs.predicted }}
 
 runs:
   using: composite
@@ -156,11 +159,19 @@ runs:
         $CLI check "$PR_URL" $mode --runs "$RUNS" --format markdown --out "$report" ${with_args[@]:+--with "${with_args[@]}"} || status=$?
         echo "report=$report" >> "$GITHUB_OUTPUT"
         breaks=0
+        predicted=0
         if [ -f "$report" ]; then
-          breaks=$(grep -c '| \*\*breaks\*\*' "$report" || true)
+          counts=$(grep -o '<!-- staleproof:counts [^>]*-->' "$report" | tail -1 || true)
+          if [ -n "$counts" ]; then
+            breaks=$(echo "$counts" | sed -E 's/.*breaks=([0-9]+).*/\1/')
+            predicted=$(echo "$counts" | sed -E 's/.*predicted=([0-9]+).*/\1/')
+          else
+            breaks=$(grep -c '| \*\*breaks\*\*' "$report" || true)
+          fi
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
         fi
         echo "breaks=$breaks" >> "$GITHUB_OUTPUT"
+        echo "predicted=$predicted" >> "$GITHUB_OUTPUT"
         if [ "$status" != "0" ] && [ ! -f "$report" ]; then
           echo "::error::staleproof check failed (exit $status); see the log above."
           exit "$status"
@@ -189,10 +200,19 @@ runs:
         echo "::warning::Could not comment on the pull request (pull requests from forks get a read-only token). The report is in the job summary."
 
     - name: Fail on broken examples
-      if: inputs.fail-on == 'breaks' && steps.check.outputs.breaks != '0' && steps.check.outputs.breaks != ''
+      if: (inputs.fail-on == 'breaks' || inputs.fail-on == 'predicted') && steps.check.outputs.breaks != '0' && steps.check.outputs.breaks != ''
       shell: bash
       env:
         BREAKS: ${{ steps.check.outputs.breaks }}
       run: |
         echo "::error::This pull request breaks $BREAKS docs example(s): they pass before it and fail after. See the report in the job summary."
+        exit 1
+
+    - name: Fail on predicted breaks
+      if: inputs.fail-on == 'predicted' && steps.check.outputs.predicted != '0' && steps.check.outputs.predicted != ''
+      shell: bash
+      env:
+        PREDICTED: ${{ steps.check.outputs.predicted }}
+      run: |
+        echo "::error::A static check predicts this pull request breaks $PREDICTED docs example(s): their calls no longer fit the changed code. See the report in the job summary."
         exit 1

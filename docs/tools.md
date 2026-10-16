@@ -123,7 +123,7 @@ Available to the agent, MCP clients and graph mode.
 | `max_hops` | integer 0–5 | no | Maximum call hops between the changed symbol and the doc (default 3) |
 | `offset` | integer ≥ 0 | no | Skip this many sections (paging: 40 per call; default 0) |
 
-Cypher it runs: `impact`, `prChanges`, `upsertPullRequest`, `upsertChangedIn`, `upsertMissingSymbols`, `lateLinkSections`, `lateLinkExamples` ([full text](GRAPH-MODEL.md)).
+Cypher it runs: `impact`, `prChanges`, `predictedCalls`, `mismatchesFor`, `upsertPullRequest`, `upsertChangedIn`, `upsertMissingSymbols`, `lateLinkSections`, `lateLinkExamples` ([full text](GRAPH-MODEL.md)).
 
 ### `clearance`
 

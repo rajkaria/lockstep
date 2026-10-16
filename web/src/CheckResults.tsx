@@ -4,6 +4,7 @@ import { PACKAGE } from './docs/manifest';
 import { ClearedList, SectionCard, TraceList, type PackageRepo } from './components';
 import { Icon } from './layout';
 import { replay, type CheckView, type IndexingView } from './state';
+import type { KnownMismatch, PredictedBreak } from './types';
 
 export function CheckResults({ view, packageRepo }: { view: CheckView; packageRepo: PackageRepo }) {
   const sections = useMemo(() => {
@@ -48,6 +49,7 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
             </div>
           )}
           {view.finished?.status === 'done' && view.impact && <InstallNudge repo={view.impact.pr.repo} />}
+          {view.impact?.predicted && view.impact.predicted.length > 0 && <PredictedList predicted={view.impact.predicted} />}
           {view.impact && (
             <>
               <h3>
@@ -67,10 +69,63 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
               {view.impact.truncated && <p className="muted">{view.impact.totalSections - view.impact.sections.length} more sections not shown.</p>}
             </>
           )}
+          {view.impact?.mismatched && view.impact.mismatched.length > 0 && <MismatchedList mismatched={view.impact.mismatched} />}
           {view.cleared && <ClearedList cleared={view.cleared} />}
         </div>
       </div>
     </section>
+  );
+}
+
+const shortExample = (id: string) => id.split(':').slice(1).join(':');
+
+/** Examples whose call no longer fits the changed code: known before anything runs. */
+function PredictedList({ predicted }: { predicted: PredictedBreak[] }) {
+  const examples = new Set(predicted.map((p) => p.example)).size;
+  return (
+    <div className="predicted" role="region" aria-label="Predicted to break">
+      <h3>
+        Predicted to break <span className="chip sev breaking">{examples} example{examples === 1 ? '' : 's'}</span>
+      </h3>
+      <p className="muted small">
+        A static check of each call against the code after the pull request: a removed or renamed name, a keyword the new signature lacks, a new required
+        argument. Running the example turns the prediction into proof.
+      </p>
+      <ul>
+        {predicted.map((p) => (
+          <li key={`${p.example}|${p.line}|${p.detail}`}>
+            <a href={p.url} target="_blank" rel="noreferrer">
+              <code>{shortExample(p.example)}</code> line {p.line}
+            </a>
+            <span className="predicted-call">
+              <code>{p.call}</code>
+            </span>
+            <span className="predicted-why">
+              {p.detail}
+              {p.confidence === 'by-name' && <span className="muted"> (matched by name)</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MismatchedList({ mismatched }: { mismatched: KnownMismatch[] }) {
+  return (
+    <details className="changed mismatched">
+      <summary>{mismatched.length} impacted example line(s) already did not fit the code before this pull request</summary>
+      <ul>
+        {mismatched.map((m) => (
+          <li key={`${m.example}|${m.line}|${m.detail}`}>
+            <a href={m.url} target="_blank" rel="noreferrer">
+              <code>{shortExample(m.example)}</code> line {m.line}
+            </a>
+            : {m.detail}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

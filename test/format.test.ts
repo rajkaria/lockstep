@@ -16,6 +16,8 @@ const impact: ImpactData = {
   offset: 0,
   truncated: false,
   counts: { breaking: 1, api: 0, behavior: 0 },
+  predicted: [],
+  mismatched: [],
 };
 
 describe('checkMarkdown', () => {
@@ -55,6 +57,7 @@ describe('checkMarkdown', () => {
         'Proposed edits: `npx staleproof patch https://github.com/acme/c/pull/1`',
         '',
         '<sub>[Staleproof](https://github.com/rajkaria/staleproof) · FalkorDB graph `acme` · aaaaaaa..bbbbbbb</sub>',
+        '<!-- staleproof:counts breaks=0 predicted=0 sections=1 mismatched=0 -->',
       ].join('\n'),
     );
   });

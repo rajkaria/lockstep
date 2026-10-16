@@ -192,7 +192,7 @@ describe('hosted workspaces (FalkorDB)', () => {
     expect(tools.map((t) => t.name)).not.toContain('run_example');
     const report = await client.callTool({ name: 'check_pull_request', arguments: { pr_url: pr.url } });
     const text = (report.content as { text: string }[])[0]!.text;
-    expect(text).toMatch(/^<!-- staleproof -->\n### Staleproof: \d+ doc sections? this pull request can make false/);
+    expect(text).toMatch(/^<!-- staleproof -->\n### Staleproof: (\d+ doc sections? this pull request can make false|this pull request is predicted to break 1 docs example)/);
     expect(text).toContain('acme/mini-docs');
     const section = await client.callTool({ name: 'read_section', arguments: { section_id: 'acme/unknown:x.md#y' } });
     expect(section.isError).toBe(true);

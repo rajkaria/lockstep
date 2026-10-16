@@ -1,10 +1,7 @@
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { OrgGraph } from '../src/graph/client.js';
 import { indexOrg, type IndexReport } from '../src/indexer/index.js';
-import { FIXTURES, FIXTURE_REPOS, testGraph } from './helpers.js';
-
-export const STALE_DOCS = { repo: 'acme/stale-docs', dir: join(FIXTURES, 'drift', 'stale-docs'), sha: 'fixture' };
+import { FIXTURE_REPOS, STALE_DOCS, testGraph } from './helpers.js';
 
 describe('MISMATCH edges (index time)', () => {
   let graph: OrgGraph;

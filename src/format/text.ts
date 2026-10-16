@@ -31,6 +31,17 @@ export function impactText(d: ImpactData, ranked?: RankedSection[]): string {
     out.push(`    ${dim(`${s.hops} hops, ${s.confidence}${s.examples.length ? `, ${s.examples.length} example(s)` : ''} · ${s.url}`)}`);
   }
   if (d.truncated) out.push(dim(`  … ${d.totalSections - d.sections.length} more`));
+  if (d.predicted?.length) {
+    out.push('', bold(`Predicted to break (${d.predicted.length}): the call no longer fits the changed code`));
+    for (const p of d.predicted) {
+      out.push(`  ${red('✗')} ${p.example.split(':').slice(1).join(':')} ${dim(`line ${p.line}`)} ${p.call}`);
+      out.push(`    ${p.detail}${p.confidence === 'by-name' ? dim(' (matched by name)') : ''}`);
+    }
+  }
+  if (d.mismatched?.length) {
+    out.push('', bold(`Already out of date before this PR (${d.mismatched.length})`));
+    for (const m of d.mismatched) out.push(`  ${yellow('!')} ${m.example.split(':').slice(1).join(':')} ${dim(`line ${m.line}`)} ${m.detail}`);
+  }
   return out.join('\n');
 }
 

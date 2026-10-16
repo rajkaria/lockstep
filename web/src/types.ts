@@ -61,6 +61,33 @@ export interface ImpactedSection {
   crossRepo: boolean;
 }
 
+export type MismatchKind = 'unknown-keyword' | 'too-many-arguments' | 'missing-argument' | 'missing-import' | 'missing-attribute' | 'removed';
+
+/** An example whose call the code after the pull request no longer accepts (static). */
+export interface PredictedBreak {
+  example: string;
+  url: string;
+  section: string;
+  repo: string;
+  path: string;
+  line: number;
+  symbol: string;
+  change: string;
+  kind: MismatchKind;
+  detail: string;
+  call: string;
+  confidence: 'exact' | 'by-name';
+}
+
+export interface KnownMismatch {
+  example: string;
+  url: string;
+  line: number;
+  kind: MismatchKind;
+  detail: string;
+  call: string;
+}
+
 export interface ImpactData {
   pr: { url: string; title: string; repo: string; state: string; before: string; after: string; docsTouched: string[] };
   changed: { symbol: string; change: string; before?: string; after?: string; renamedTo?: string }[];
@@ -68,6 +95,9 @@ export interface ImpactData {
   totalSections: number;
   truncated: boolean;
   counts?: Record<Severity, number>;
+  /** Older stored traces have neither. */
+  predicted?: PredictedBreak[];
+  mismatched?: KnownMismatch[];
 }
 
 export interface ClearedSymbol {

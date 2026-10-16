@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import * as Q from '../graph/queries.js';
 import { ingestPullRequest } from '../pr/ingest.js';
+import { knownMismatches, predictBreaks, type KnownMismatch, type PredictedBreak } from '../pr/predict.js';
 import { parsePrUrl } from '../pr/github.js';
 import { result, Tracer, type ToolContext, type ToolDef } from './types.js';
 
@@ -67,9 +68,24 @@ export interface ImpactData {
   truncated: boolean;
   /** Severity counts over all impacted sections (not only the ones shown). */
   counts: Record<Severity, number>;
+  /**
+   * Examples whose calls the code after the pull request no longer accepts (removed or
+   * renamed symbols, stopped exports, signatures that reject the call) — a static
+   * prediction, before anything runs. Over every impacted section, not only this page.
+   */
+  predicted: PredictedBreak[];
+  /** Impacted examples that already did not fit the code when the graph was indexed. */
+  mismatched: KnownMismatch[];
 }
 
 export const MAX_SECTIONS = 40;
+
+function predictedSentence(predicted: PredictedBreak[]): string {
+  const examples = [...new Set(predicted.map((p) => p.example.split(':').slice(1).join(':')))];
+  if (!examples.length) return '';
+  const n = examples.length;
+  return ` ${n} example${n === 1 ? ' is' : 's are'} predicted to break, the call no longer fitting the changed code (${examples.slice(0, 3).join(', ')}${n > 3 ? ', …' : ''}).`;
+}
 
 /** Ingest the PR once per check (idempotent anyway) and return its change set. */
 async function ensureIngested(ctx: ToolContext, tracer: Tracer, prUrl: string) {
@@ -145,7 +161,7 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
     max_hops: z.number().int().min(0).max(5).optional().describe('Maximum call hops between the changed symbol and the doc (default 3)'),
     offset: z.number().int().min(0).optional().describe(`Skip this many sections (paging: ${MAX_SECTIONS} per call; default 0)`),
   }),
-  queries: [Q.impact, Q.prChanges, Q.upsertPullRequest, Q.upsertChangedIn, Q.upsertMissingSymbols, Q.lateLinkSections, Q.lateLinkExamples],
+  queries: [Q.impact, Q.prChanges, Q.predictedCalls, Q.mismatchesFor, Q.upsertPullRequest, Q.upsertChangedIn, Q.upsertMissingSymbols, Q.lateLinkSections, Q.lateLinkExamples],
   async run(ctx, input) {
     const tracer = new Tracer(ctx.graph);
     const url = await ensureIngested(ctx, tracer, input.pr_url);
@@ -167,6 +183,11 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
     for (const s of sections) s.crossRepo = s.repo !== pr.repo;
     const counts = { breaking: 0, api: 0, behavior: 0 } as Record<Severity, number>;
     for (const s of sections) counts[s.severity]++;
+    const predicted = await predictBreaks(tracer, url);
+    const predictedIds = new Set(predicted.map((p) => p.example));
+    const mismatched = (await knownMismatches(tracer, [...new Set(sections.flatMap((s) => s.examples))])).filter(
+      (m) => !predictedIds.has(m.example) || !predicted.some((p) => p.example === m.example && p.detail === m.detail),
+    );
     const data: ImpactData = {
       pr: { url, title: pr.title, repo: pr.repo, state: pr.state, before: pr.before, after: pr.after, docsTouched: pr.docs ?? [] },
       changed: changes.rows.map((c) => ({ symbol: c.symbol, change: c.change, before: c.before || undefined, after: c.after || undefined, renamedTo: c.renamedTo || undefined })),
@@ -175,6 +196,8 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
       offset,
       truncated: sections.length > offset + page.length,
       counts,
+      predicted,
+      mismatched,
     };
     const crossRepo = sections.filter((s) => s.crossRepo).length;
     // Added symbols can't make an existing doc false; count them apart.
@@ -185,6 +208,8 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
         ? `${url} changed no Python symbols in ${pr.repo}; no docs can be falsified through code.`
         : `${changedCount} changed symbol${changedCount === 1 ? '' : 's'}${added ? ` (and ${added} added)` : ''} reach${changedCount === 1 ? 'es' : ''} ${sections.length} doc section${sections.length === 1 ? '' : 's'} ` +
           `(${counts.breaking} breaking, ${counts.api} signature, ${counts.behavior} behavior; ${crossRepo} in other repositories).` +
+          predictedSentence(predicted) +
+          (mismatched.length ? ` ${new Set(mismatched.map((m) => m.example)).size} impacted example(s) already did not fit the code before this pull request.` : '') +
           (sections.length > MAX_SECTIONS || offset > 0
             ? ` Showing ${page.length ? `${offset + 1}–${offset + page.length}` : 'none'} of ${sections.length}` +
               (data.truncated ? `; call impact again with offset=${offset + page.length} for the rest.` : '.')

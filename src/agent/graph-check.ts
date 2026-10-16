@@ -60,7 +60,13 @@ export async function runGraphCheck(
     const clearance = await call(clearanceTool, { pr_url: pr });
     const sectionIds = [...new Set(data.sections.map((s) => s.section).filter((s) => s.includes('#')))];
     if (sectionIds.length) await call(rankSectionsTool, { section_ids: sectionIds });
-    const examples = [...new Set(data.sections.filter((s) => s.confidence === 'exact').flatMap((s) => s.examples))].slice(0, opts.maxRuns ?? 3);
+    // Examples predicted to break run first: a run turns the prediction into proof.
+    const examples = [
+      ...new Set([
+        ...data.predicted.filter((p) => p.confidence === 'exact').map((p) => p.example),
+        ...data.sections.filter((s) => s.confidence === 'exact').flatMap((s) => s.examples),
+      ]),
+    ].slice(0, opts.maxRuns ?? 3);
     const verdicts: string[] = [];
     for (const ex of examples) {
       const r = await call(runExampleTool, { example_id: ex, pr_url: pr });

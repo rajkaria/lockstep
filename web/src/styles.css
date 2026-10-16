@@ -974,6 +974,41 @@ button.link:hover {
 .cleared {
   margin-top: 22px;
 }
+
+/* predicted breaks (static) */
+.predicted {
+  margin: 0 0 20px;
+  padding: 12px 14px 4px;
+  border: 1px solid color-mix(in srgb, var(--breaking) 40%, var(--border));
+  border-radius: var(--radius);
+  background: var(--breaking-bg);
+}
+.predicted h3 {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.predicted ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+  display: grid;
+  gap: 8px;
+}
+.predicted li {
+  display: grid;
+  gap: 2px;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.predicted-why {
+  color: var(--text-2);
+}
+.mismatched {
+  margin-top: 18px;
+}
 .grep {
   margin: 2px 0 6px;
 }

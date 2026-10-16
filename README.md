@@ -262,7 +262,7 @@ More, with workarounds: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 | Tool | Cypher it runs |
 |---|---|
-| `impact` | `impact`, `prChanges`, `upsertPullRequest`, `upsertChangedIn`, `upsertMissingSymbols`, `lateLinkSections`, `lateLinkExamples` |
+| `impact` | `impact`, `prChanges`, `predictedCalls`, `mismatchesFor`, `upsertPullRequest`, `upsertChangedIn`, `upsertMissingSymbols`, `lateLinkSections`, `lateLinkExamples` |
 | `clearance` | `clearance` |
 | `read_section` | `readSection` |
 | `run_example` | `exampleForRun`, `installSet`, `cachedRun`, `upsertRun`, `linkRunToPr` |
@@ -415,6 +415,30 @@ WITH p
 ORDER BY length(p)
 LIMIT 1
 RETURN [n IN nodes(p) | coalesce(n.qualname, n.id)] AS path
+```
+
+**`predictedCalls`** — Examples that call a symbol the pull request removed, renamed, stopped exporting or re-signed, with the call as written (checked against the new signature in code).
+
+```cypher
+MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
+WHERE c.kind IN ['removed', 'renamed', 'signature', 'export-removed']
+MATCH (e:CodeExample)-[u:USES]->(s)
+WHERE e.status = 'live' AND e.lang = 'python'
+OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
+RETURN e.id AS example, e.code AS code, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
+       coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
+       s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+       c.kind AS change, c.before AS before, c.after AS after, c.renamed_to AS renamedTo
+ORDER BY example, line
+```
+
+**`mismatchesFor`** — Example lines that already did not fit the code when indexed (MISMATCH edges), for the given examples.
+
+```cypher
+MATCH (e:CodeExample)-[m:MISMATCH]->(s:Symbol)
+WHERE e.id IN $ids AND e.status = 'live'
+RETURN e.id AS example, e.url AS url, m.line AS line, m.kind AS kind, m.detail AS detail, m.text AS call
+ORDER BY example, line
 ```
 
 #### Memory: decisions, verdicts, runs, checks
