@@ -205,7 +205,7 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
     const changedCount = changes.rows.length - added;
     const summary =
       changes.rows.length === 0
-        ? `${url} changed no Python symbols in ${pr.repo}; no docs can be falsified through code.`
+        ? `${url} changed no Python, TypeScript or JavaScript symbols in ${pr.repo}; no docs can be falsified through code.`
         : `${changedCount} changed symbol${changedCount === 1 ? '' : 's'}${added ? ` (and ${added} added)` : ''} reach${changedCount === 1 ? 'es' : ''} ${sections.length} doc section${sections.length === 1 ? '' : 's'} ` +
           `(${counts.breaking} breaking, ${counts.api} signature, ${counts.behavior} behavior; ${crossRepo} in other repositories).` +
           predictedSentence(predicted) +

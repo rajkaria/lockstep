@@ -88,7 +88,7 @@ export function AuditPage({ initialRepo, health }: { initialRepo?: string; healt
       <span className="eyebrow">Docs audit</span>
       <h1>How true are your docs right now?</h1>
       <p className="lede">
-        No pull request needed. {PRODUCT} indexes a public Python repository, checks every call in its docs examples against the code they reach — in that
+        No pull request needed. {PRODUCT} indexes a public Python, TypeScript or JavaScript repository, checks every call in its docs examples against the code they reach — in that
         repository or another — and lists the ones the code no longer accepts, with the line. Then it measures how much of the public API the docs cover.
       </p>
       <div className="demo-card">

@@ -187,7 +187,7 @@ export async function analyzeChanges(
   const examples = new Set(predicted.map((p) => p.example)).size;
   const summary =
     diff.symbols.length === 0
-      ? `These changes touch no Python symbol in ${canonical}; no docs can be falsified through the code.`
+      ? `These changes touch no Python, TypeScript or JavaScript symbol in ${canonical}; no docs can be falsified through the code.`
       : `${changedCount} changed symbol${changedCount === 1 ? '' : 's'} reach${changedCount === 1 ? 'es' : ''} ${sections.length} doc section${sections.length === 1 ? '' : 's'} ` +
         `(${counts.breaking} breaking, ${counts.api} signature, ${counts.behavior} behavior; ${sections.filter((s) => s.crossRepo).length} in other repositories).` +
         (examples ? ` ${examples} example${examples === 1 ? ' is' : 's are'} predicted to break, the call no longer fitting the changed code.` : '') +

@@ -69,7 +69,8 @@ export async function downloadRepo(
       if (entry.type !== 'file') continue;
       // Strip the archive's top directory (`<repo>-<sha>/`).
       const path = entry.path.split('/').slice(1).join('/');
-      if (!path || path.split('/').some((p) => p === '..' || p.startsWith('.')) || !take(path)) continue;
+      // Hidden paths are skipped, except the repository's own config file.
+      if (!path || (path !== '.staleproof.toml' && path.split('/').some((p) => p === '..' || p.startsWith('.'))) || !take(path)) continue;
       if (++files > limits.maxFiles) throw new RepoTooLargeError(tooLarge(repo, `more than ${limits.maxFiles} code and docs files`, limits));
       const out = join(staging, ...path.split('/'));
       await mkdir(dirname(out), { recursive: true });

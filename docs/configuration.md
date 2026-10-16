@@ -1,6 +1,6 @@
 # Configuration
 
-`staleproof` is configured by environment variables and a few command-line flags; there is no configuration file, and it does not load `.env` files. Nothing has to be set: with no variables, the CLI starts a local FalkorDB and names each graph after the repository's owner. This page lists every variable the code reads, with its default, its meaning and the commands that use it, then the global CLI options and their precedence, the files kept under `STALEPROOF_HOME`, and complete configurations for local development, FalkorDB Cloud with DeepSeek, CI and Vercel. It is for anyone setting up the CLI, the server, the GitHub Action or a deployment.
+`staleproof` is configured by environment variables and a few command-line flags; it has no configuration file of its own and does not load `.env` files. Nothing has to be set: with no variables, the CLI starts a local FalkorDB and names each graph after the repository's owner. A repository being indexed can carry a small file of its own, `.staleproof.toml`, to leave paths out or mark examples not to run. This page lists every variable the code reads, with its default, its meaning and the commands that use it, then the global CLI options and their precedence, the files kept under `STALEPROOF_HOME`, the repository configuration and example directives, and complete configurations for local development, FalkorDB Cloud with DeepSeek, CI and Vercel. It is for anyone setting up the CLI, the server, the GitHub Action or a deployment.
 
 ## The variables you usually set
 
@@ -85,7 +85,7 @@ The user name and password are URL-decoded, so percent-encode any reserved chara
 Without a token, GitHub allows 60 API requests per hour per IP address, and the error is `GitHub API rate limit reached (60 requests/hour without a token; set GITHUB_TOKEN to raise it). It resets in <n> min.`; a 404 adds `(a private repository needs GITHUB_TOKEN with read access)`.
 
 - **What uses the API**: ingesting a pull request (once per pull request; later checks reuse the graph). With git, that is one request for the metadata, cached on disk for merged pull requests. Without git, or with `STALEPROOF_INGEST=github`, it is up to five (metadata, the commit range, the changed files and the file list at both commits); file contents come from `raw.githubusercontent.com`, which the code treats as outside the API limit. Indexing uses no API request with git (it clones over HTTPS) or without a token (the tarball comes from `codeload.github.com`); a tarball download with a token is one API request.
-- **`patch --open-pr`** refuses to run without a token (`opening a pull request needs GITHUB_TOKEN`). The token must be able to fork the docs repository, push a branch to the fork and open a pull request; for a classic token that is the `public_repo` scope.
+- **`patch --open-pr`** refuses to run without a token (`opening a pull request needs GITHUB_TOKEN`). The token must be able to fork the docs repository, push a branch to the fork and open a pull request; for a classic token that is the `public_repo` scope. With `--in-repo` there is no fork: the token needs `contents: write` and `pull-requests: write` on the docs repository itself, which is what a GitHub Actions job token can be given for its own repository.
 - **A hosted server** downloads with its token, so it can index any repository that token reads, for whoever asks. Give it a fine-grained token limited to public repositories, read-only ([Deploy](DEPLOY.md#hosted-mode)).
 
 **`STALEPROOF_INGEST=github`** makes Staleproof work as it does where git is missing: `index` and indexing on first use download tarballs, and pull request ingestion reads commits through the GitHub API, the paths serverless hosts take automatically. Example runs still need git.
@@ -207,6 +207,48 @@ The other limits are flags only: `check --max-steps` (40), `check --no-agent --m
 - **`tarballs/`** can be deleted; it is only read while indexing.
 - **`cache/`** can be deleted; metadata is fetched again.
 - Each example run also uses a temporary directory, `$TMPDIR/staleproof-run-*`, removed when the run ends.
+
+## Repository configuration
+
+A repository can tell the indexer what to leave out, in `.staleproof.toml` at its root:
+
+```toml
+ignore = ["docs/legacy/**", "CHANGELOG.md"]   # never indexed
+skip-examples = ["docs/v1/**"]                # indexed and linked, never run or checked
+```
+
+or in the `[tool.staleproof]` table of its root `pyproject.toml`:
+
+```toml
+[tool.staleproof]
+ignore = ["docs/legacy/**"]
+skip-examples = ["docs/v1/**"]
+```
+
+| Key | Type | Effect |
+|---|---|---|
+| `ignore` | list of globs | Matching files are not indexed at all: no symbols, sections or examples. |
+| `skip-examples` | list of globs | Examples on matching pages, and matching example scripts, are indexed and linked to the code as usual, so a pull request check still lists them, but they are never run, statically checked, predicted to break or counted as mismatched by the audit (as if each had a `skip` directive). |
+
+- **Which file**: `.staleproof.toml` when it exists, even if empty; otherwise `[tool.staleproof]` when it sets either key. Unknown keys are ignored.
+- **Globs** are matched against repository-relative paths, gitignore style: `**` matches any number of directories, `*` anything within one path segment, `?` one character; a leading `./` or `/` is dropped; a pattern also matches everything under it, so `docs/v1` covers `docs/v1/guide.md` (but not `docs/v10/`).
+- **When**: read at index time. After editing it, index the repository again.
+- **Errors** stop the index: a key that is not a list of strings fails with `<file>: ignore must be a list of glob strings` (or `skip-examples`), and a file that is not valid TOML with the parser's message.
+- **On hosts without git** (tarball downloads: the hosted service, Vercel, `STALEPROOF_INGEST=github`), hidden paths are not extracted except a root `.staleproof.toml`, so both files are read there too.
+
+### Example directives
+
+One example at a time is marked in the docs themselves, with a comment on the line before it (blank lines in between are fine) or a word in its fence's info string:
+
+| Directive | Means |
+|---|---|
+| `<!-- staleproof: skip -->`, `{/* staleproof: skip */}` (MDX), fence word `skip` or `no-run` | Not runnable here (a long-running server, a cloud account): never run or statically checked |
+| `<!-- staleproof: expect-error -->`, fence word `expect-error` | Fails on purpose (it shows an error): never run or statically checked, because a failure proves nothing |
+| `<!-- pytest-codeblocks:skip -->`, `<!-- skip: next -->` (Sybil) | Read as `skip`, so docs already marked for those tools need no second marker |
+| `<!-- pytest-codeblocks:expect-exception -->` | Read as `expect-error` |
+| `.. staleproof: skip`, `.. staleproof: expect-error`, `.. skip: next` (reStructuredText) | The same, as a comment before the block |
+
+A marked example stays linked to the code it calls: a pull request check still lists its section, and its definitions still serve the examples after it on the page. `run_example` answers `Not run: the docs or the repository config mark this example skip.` (or `… failing on purpose (expect-error), so a run proves nothing.`) without running anything. [Indexing](indexing.md#example-directives) has every accepted spelling.
 
 ## Configurations that work together
 

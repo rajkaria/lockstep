@@ -1,6 +1,6 @@
 # Use cases
 
-Six ways teams use `staleproof`, each with the situation it fits, what it does there, the setup, what you get and its limits. Read the one closest to your team; every setup links to the reference page with the full options. The running examples are FalkorDB's client library (`FalkorDB/falkordb-py`), the SDK built on it (`FalkorDB/GraphRAG-SDK`) and its docs site (`FalkorDB/docs`).
+Nine ways teams use `staleproof`, each with the situation it fits, what it does there, the setup, what you get and its limits. Read the one closest to your team; every setup links to the reference page with the full options. The running examples are FalkorDB's client library (`FalkorDB/falkordb-py`), the SDK built on it (`FalkorDB/GraphRAG-SDK`) and its docs site (`FalkorDB/docs`).
 
 ## SDK and client-library teams with a separate docs site
 
@@ -27,7 +27,7 @@ A whole-word grep for the changed names finds none of those 43 sections and matc
 
 **Limits.**
 
-- Code repositories are parsed as Python only.
+- Code is read as Python, or TypeScript and JavaScript in published npm packages; only Python examples run.
 - Calls and doc links cross repositories only between repositories indexed in the same `index` command. Indexing or re-indexing one repository alone drops its cross-repository edges.
 - Example runs install today's third-party dependencies, and version skew between repositories (an SDK pinning an older client) is recorded as an install error, not a result.
 - Edges resolved by name rather than through types are labelled `by-name`; a path made of them is weaker evidence than an `exact` one.
@@ -98,10 +98,88 @@ jobs:
 
 - The action has run end to end on a private test repository with the one-click workflow (no inputs).
 - Graph mode samples: it runs at most 3 examples (the `runs` input), from exactly linked sections on the first impact page, and writes no verdicts.
-- With the default FalkorDB nothing carries over between runs: no decisions, verdict history or recorded runs. Set `falkordb-url` to keep them; a pull request is then diffed once, so later pushes reuse the first diff.
+- With the default FalkorDB nothing carries over between runs: no decisions, verdict history or recorded runs. Set `falkordb-url` to keep them; an open pull request is then diffed again whenever new commits are pushed.
 - Some rows overstate the change: moving a file reports its definitions as removed, and a module that stops importing a name from its own package reports a removed export, both labelled breaking.
 - Pull requests from forks get a read-only token and no secrets: the check runs in graph mode and its report goes to the job summary, but no comment is posted.
 - Both modes install and run code from the pull request on the runner (the examples), with a guarded environment; see the [security notes](github-action.md#security-notes).
+
+## A weekly docs audit
+
+**The situation.** Docs drift between releases too, not only in the pull request that changed the code: an SDK renames a parameter, a docs site in another repository keeps the old call, and nobody runs the page again. You want a standing report of what is wrong now, and a number that says whether it is getting better.
+
+**What it does.** The [docs audit](audit.md) checks every docs example against the code it calls, across repositories, without running it: unknown keywords, wrong argument counts, names that no longer exist. It adds the runs of up to 20 examples at the default branch and the share of the public API no doc covers, and scores it from 0 to 100. On a schedule the GitHub Action keeps one issue up to date with the report: opened when an example no longer fits or fails, updated on every run, closed once all is clear.
+
+**Setup.** Add [examples/staleproof-audit.yml](../examples/staleproof-audit.yml) as `.github/workflows/staleproof-audit.yml` (or tick the weekly audit option on [staleproof.dev/#/install](https://staleproof.dev/#/install)):
+
+```yaml
+name: Staleproof docs audit
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rajkaria/staleproof@v1
+        with:
+          also-index: FalkorDB/docs   # docs in another repository (optional)
+```
+
+To see a first report without CI, audit on [staleproof.dev/#/audit](https://staleproof.dev/#/audit) or run `npx -y staleproof audit <owner/repo>`. Put the badge the report prints in your README.
+
+**What you get.** Lines like these, each linked to the line in the docs (all found on the current docs of real projects; [more](audit.md#what-it-finds-on-real-repositories)):
+
+- the FalkorDB docs page `commands/graph.constraint-create.mdx` calls `client.create_constraint`, which `FalkorDB` does not have;
+- GraphRAG-SDK's `docs/api-reference.mdx` documents `VectorStore(index_name=..., similarity_function=...)`, parameters the constructor no longer has;
+- Flask's `docs/views.rst` calls `UserList.as_view()` without its required `name`.
+
+Then the failing runs, the most used undocumented API, and the score with each deduction.
+
+**Limits.**
+
+- Static checks judge only calls resolved through imports and types; a clean audit is not proof that every example works. The runs cover the rest, for Python.
+- TypeScript and JavaScript examples get name checks only, no argument checks, and are never run.
+- Coverage counts a symbol as documented when any doc names or calls it, however briefly.
+- The issue tracks examples that no longer fit or fail; low coverage lowers the score but opens no issue on its own.
+
+## Developers, before they push
+
+**The situation.** You are changing a function in a library whose docs, maybe in another repository, call it. You want to know which examples your change breaks before you push, not from a reviewer or a reader later.
+
+**What it does.** `staleproof check` with no pull request URL diffs your checkout's uncommitted and unpushed changes against its merge base, walks the graph from the changed symbols to every doc that reaches them, and predicts which examples break: a removed or renamed name, an import that stops existing, a call the new signature rejects. Nothing runs and nothing is written to the graph. `staleproof docs-for <symbol>` answers the question before you start: which docs depend on this function.
+
+**Setup.** Once, in the checkout (the first run indexes the repository; add `--with <owner/docs>` when the docs live elsewhere):
+
+```bash
+npx -y staleproof docs-for Graph.query --repo FalkorDB/falkordb-py
+npx -y staleproof check
+```
+
+As a pre-push hook that stops the push when an example is predicted to break:
+
+```bash
+printf '#!/bin/sh\nnpx -y staleproof check --fail-on-predicted\n' > .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+```
+
+**What you get.** The impacted sections with their evidence paths, then the examples predicted to break, each with its line and the reason, for example:
+
+```text
+Predicted to break (1): the call no longer fits the changed code
+  ✗ docs/getting-started.mdx:0 line 18 g.query
+    `Graph.query` requires `timeout`, which the example does not pass
+```
+
+(from the test suite's fixture organisation, after adding a required `timeout` to `Graph.query`), and the impacted lines that were already out of date. [CLI](cli.md#check-without-a-pull-request) has the full output.
+
+**Limits.**
+
+- It is static: it predicts breaks, it does not run examples. Open the pull request for the before/after runs.
+- The docs' repository must be in the graph with the code; index them together (`--with`) the first time.
+- Changes the static check cannot judge (a decorated function, a call with `**kwargs`) are listed as impact without a prediction.
 
 ## AI coding agents over MCP
 
@@ -137,12 +215,36 @@ Prompts to try, after pushing your branch and opening the pull request:
 
 **Limits.**
 
-- The tools take a GitHub pull request URL. Uncommitted or unpushed changes cannot be checked.
+- `check_pull_request` and the graph tools take a GitHub pull request URL; for edits not pushed yet, see [the next use case](#coding-agents-before-the-pull-request).
 - The hosted server reads public repositories only and does not offer `run_example`.
 - First-use indexing indexes the pull request's repository alone; index a docs site that lives elsewhere together with it first (`staleproof index <code repo> <docs repo>`).
 - `propose_edit` and `record_verdict` need `pr_url` over MCP; there is no pull request "under check" to default to.
-- One local MCP server serves one graph (`STALEPROOF_ORG`, else `falkordb`). Register a second server with another `STALEPROOF_ORG` for another graph.
+- One local MCP server serves the graph named by `STALEPROOF_ORG`, else the graph of the owner of the repository each call names. Register a second server with another `STALEPROOF_ORG` to pin another graph.
 - `run_example` installs repositories and runs docs code on the machine running the local MCP server. See the security notes in [MCP server](mcp.md).
+
+## Coding agents, before the pull request
+
+**The situation.** An AI coding agent edits your library. Docs should change in the same commit as the code, but the agent does not know which pages call the function it is changing, and nothing tells it until a human reviews the pull request.
+
+**What it does.** Two MCP tools work before there is a pull request. `docs_for_symbol` takes a function, class or method and returns every doc section and example that depends on it, with the evidence path, so the agent knows what to update. `check_changes` takes the files it edited (path and new content) and returns the docs they can make false and the examples predicted to break, compared with the commit the graph indexed; on a local server it can read the checkout's working tree instead. Neither writes anything.
+
+**Setup.** Add the MCP server ([hosted or local](mcp.md)), then put these rules in the repository's `AGENTS.md` or `CLAUDE.md` so the agent calls the tools unasked (the install page has them to copy):
+
+```markdown
+## Docs stay true to code (Staleproof MCP)
+- Before changing a public function, class or method, call docs_for_symbol with its name:
+  update every doc section and example it lists in the same change.
+- Before committing, call check_changes with the files you edited: fix every example
+  it predicts to break (its call no longer fits the new signature).
+```
+
+**What you get.** For a change that adds a required `timeout` to `Graph.query` in the fixture organisation: `docs_for_symbol` lists the 3 doc sections that reach it, and `check_changes` names the one example line that breaks (`` `Graph.query` requires `timeout`, which the example does not pass ``) with a link to it. [MCP server](mcp.md#before-a-pull-request) shows the calls.
+
+**Limits.**
+
+- `check_changes` is static: it predicts breaks and runs nothing.
+- The hosted server cannot read your disk: send `files` with `repo`. It reads public repositories only.
+- The rules are instructions to the agent, not enforcement; pair them with the [pre-push hook](#developers-before-they-push) or the GitHub Action.
 
 ## Platform teams with many repositories or organisations
 

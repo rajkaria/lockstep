@@ -1,6 +1,6 @@
 # HTTP API
 
-`staleproof serve` runs one HTTP server with a JSON API, Server-Sent Events (SSE) streams for live checks and indexing, MCP over Streamable HTTP, and the web app. This page lists every route with its parameters, response fields, status codes, error bodies and rate limits, shows how to read the check stream from code, and covers hosted mode, where any public repository is indexed on demand. It is for developers who build a client, a dashboard or an integration against a running server. The same `/api` routes answer on a Vercel deployment such as staleproof.dev, through the function in [api/[...route].js](../api/[...route].js).
+`staleproof serve` runs one HTTP server with a JSON API, Server-Sent Events (SSE) streams for live checks, audits and indexing, a README badge, MCP over Streamable HTTP, and the web app. This page lists every route with its parameters, response fields, status codes, error bodies and rate limits, shows how to read the check stream from code, and covers hosted mode, where any public repository is indexed on demand. It is for developers who build a client, a dashboard or an integration against a running server. The same `/api` routes answer on a Vercel deployment such as staleproof.dev, through the function in [api/[...route].js](../api/[...route].js).
 
 ## Start the server and call it
 
@@ -38,7 +38,11 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 | `POST /api/index` | Hosted mode: index repositories into one workspace and stream the progress (SSE) | yes, `index` bucket |
 | `GET /api/repos` | Which graph holds a repository, and whether it is indexed | no |
 | `GET /api/workspaces` | Hosted mode: every workspace and its repositories | no |
-| `POST /api/mcp` | MCP over Streamable HTTP | no |
+| `GET /api/audit` | The docs audit of an indexed repository, as JSON | no |
+| `POST /api/audit` | Audit a repository and stream the progress (SSE); hosted, index it first | yes, `audit` bucket |
+| `GET /api/badge/:owner/:name.svg` | The README badge: the repository's docs health score | no |
+| `GET /api/docs-for` | Which docs depend on a symbol, with the evidence path for each | no |
+| `POST /api/mcp` | MCP over Streamable HTTP | yes, `mcp` bucket (10 times the others) |
 | `GET /api/sections` | The text and examples of one doc section | no |
 | `GET /api/patch` | The docs patch for a checked pull request | no |
 | `POST /api/decisions` | Record a maintainer decision | yes, `write` bucket |
@@ -58,12 +62,14 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 
 ## Rate limits
 
-`POST` routes other than `/api/mcp` are limited to 30 requests per client per hour. GET routes are not limited.
+`POST` routes are limited to 30 requests per client per hour, and `POST /api/mcp` to 300 (a client sends a few requests per question). GET routes are not limited.
 
 | Bucket | Routes | Limit |
 |---|---|---|
 | `check:<client>` | `POST /api/check` | 30 per sliding hour |
 | `index:<client>` | `POST /api/index` | 30 per sliding hour |
+| `audit:<client>` | `POST /api/audit` | 30 per sliding hour |
+| `mcp:<client>` | `POST /api/mcp` | 300 per sliding hour; over it, a JSON-RPC error `rate limited: try again later` with status 429 |
 | `write:<client>` | `POST /api/decisions` and `POST /api/verdicts/:id/review`, together | 30 per sliding hour |
 
 - **The client key** is the `X-Real-IP` header if present (Vercel sets it), else `Fly-Client-IP`, else the last entry of `X-Forwarded-For` (the one the nearest proxy appended), else the constant `local`. Behind no proxy, every caller shares the `local` bucket.
@@ -75,7 +81,7 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 
 ## One check at a time
 
-A server runs one check at a time, agent or graph mode, and in hosted mode one indexing run at a time with them. Further `POST /api/check` and `POST /api/index` requests wait in arrival order; a check that has to wait first receives a `queued` event. `GET /api/health` reports `busy: true` while one runs. Example runs are also serialised, process-wide, because they share the scratch database. Calls to `POST /api/mcp` do not wait in this queue.
+A server runs one check at a time, agent or graph mode, and in hosted mode one indexing run at a time with them. Further `POST /api/check`, `POST /api/index` and (hosted) `POST /api/audit` requests wait in arrival order; a request that has to wait first receives a `queued` event. `GET /api/health` reports `busy: true` while one runs. Example runs are also serialised, process-wide, because they share the scratch database. Calls to `POST /api/mcp` do not wait in this queue.
 
 Closing the connection does not cancel a check. It runs to the end and is stored on its `Check` node; read it later with `GET /api/checks/:id`.
 
@@ -90,7 +96,7 @@ curl -s http://127.0.0.1:8080/api/health
 A server without model credentials and without hosted mode answers:
 
 ```json
-{"ok": true, "version": "0.2.0", "org": "falkordb", "falkordb": "4.22.0", "agent": {"available": false, "reason": "the server has no model API credentials (ANTHROPIC_API_KEY)"}, "busy": false, "hosted": {"enabled": false}}
+{"ok": true, "version": "0.3.0", "org": "falkordb", "falkordb": "4.22.0", "agent": {"available": false, "reason": "the server has no model API credentials (ANTHROPIC_API_KEY)"}, "busy": false, "hosted": {"enabled": false}}
 ```
 
 | Field | Type | Meaning |
@@ -196,7 +202,7 @@ What each mode does (definitions in [Agent mode and graph mode](concepts.md#agen
 - **Agent mode**: the model chooses every tool call and records a verdict or an edit for each impacted section. The server gives it at most 40 model turns and, if `STALEPROOF_CHECK_BUDGET_MS` is set, a wall-clock budget (240 s by default on Vercel, none elsewhere). Neither can be changed per request.
 - **Graph mode**: no model. The tools run in a fixed order: `impact` (3 hops), `clearance`, `rank_sections` on the first impact page, then `run_example` before and after the PR for at most 3 exactly-linked examples on that page. In a hosted workspace it runs no examples (the summary says `Example runs not requested.`). It writes no verdicts.
 
-The first check of a pull request ingests it (GitHub metadata and the symbol-level diff); later checks reuse what the graph stored. In hosted mode, a repository that no graph holds (or whose workspace is more than 7 days old, or that lacks a `with` repository) is indexed first, inside the same stream: `index_started`, `index_progress` and `index_finished` events come before `check_started`. Without hosted mode nothing is indexed, and a repository missing from the graph ends the stream with an `error` event. Indexing comes out of the server's time budget (`STALEPROOF_CHECK_BUDGET_MS`, when set): the agent gets what remains, but at least 45 seconds.
+The first check of a pull request ingests it (GitHub metadata and the symbol-level diff); later checks reuse what the graph stored, except that an open pull request whose head moved since (new pushes, or merged since) is read again first. A merged pull request is never re-read. In hosted mode, a repository that no graph holds (or whose workspace is more than 7 days old, or that lacks a `with` repository) is indexed first, inside the same stream: `index_started`, `index_progress` and `index_finished` events come before `check_started`. Without hosted mode nothing is indexed, and a repository missing from the graph ends the stream with an `error` event. Indexing comes out of the server's time budget (`STALEPROOF_CHECK_BUDGET_MS`, when set): the agent gets what remains, but at least 45 seconds.
 
 Responses before the stream starts:
 
@@ -312,6 +318,78 @@ curl -s https://staleproof.dev/api/workspaces
 
 `200 {workspaces: [{graph, curated, repos: [{name, sha, indexedAt, lastUsed}]}]}`. Without hosted mode it answers `{"workspaces": []}`. For the curated graph `lastUsed` is the time it was indexed.
 
+## GET /api/audit
+
+The [docs audit](audit.md) of one indexed repository: health score, the example lines that no longer fit the code, API coverage and the runs recorded at the indexed commits.
+
+| Query parameter | Required | Meaning |
+|---|---|---|
+| `repo` | yes | `owner/name` or a GitHub URL. In hosted mode, the graph that holds it |
+| `fresh` | no | `1` recomputes the audit instead of answering from the 10-minute cache |
+
+```bash
+curl -s 'http://127.0.0.1:8080/api/audit?repo=FalkorDB/falkordb-py'
+```
+
+`200 {summary, org, repos, outdatedIndex, score, grade, deductions, examples, mismatches, coverage, undocumented, runs, runCounts, generatedAt}`: the summary sentence, then the audit's data ([the JSON shape](audit.md#the-cli)). Audits are cached per graph and repository for 10 minutes, shared with the badge. It runs no examples.
+
+| Status | Body | When |
+|---|---|---|
+| 400 | `{"error": "not a GitHub repository: ..."}` | `repo` missing or malformed |
+| 404 | `{"error": "<owner/repo> is not indexed yet: POST /api/audit {\"repo\": \"owner/name\"} indexes and audits it", "indexed": false}` | hosted mode, no graph holds the repository |
+| 404 | `{"error": "<owner/repo> is not indexed yet: staleproof index <owner/repo>", "indexed": false}` | without hosted mode, the graph does not hold it |
+
+## POST /api/audit
+
+Audit one repository and stream the progress as Server-Sent Events. In hosted mode the repository is indexed first when no graph holds it (or its workspace is more than 7 days old, or was indexed by an older Staleproof), together with the `with` repositories. The [audit page](audit.md#on-the-web) calls it.
+
+| Body field | Type | Required | Meaning |
+|---|---|---|---|
+| `repo` | string | yes | The repository to audit |
+| `with` | string[] | no | Hosted mode: repositories to index together with it, such as its docs site |
+
+```bash
+curl -N -X POST https://staleproof.dev/api/audit \
+  -H 'content-type: application/json' \
+  -d '{"repo": "encode/httpx"}'
+```
+
+Before the stream: `400 {"error": "not a GitHub repository: ..."}` for a bad `repo` or `with` entry, `429 {"error": "rate limited: try again later"}` over the `audit` limit. Then `200 text/event-stream`; every message has the event name `trace`:
+
+| `type` | Sent | Fields |
+|---|---|---|
+| `queued` | first, when another check or indexing run is in progress (hosted mode then waits for it before indexing) | — |
+| `index_started`, `index_progress`, `index_finished` | hosted mode, while the repository is indexed ([Trace events](#trace-events)) | as for `POST /api/check` |
+| `audit` | once, at the end | `graph`, `summary`, `data` (the audit, as `GET /api/audit` returns it without `summary`) |
+| `error` | instead of `audit` | `message`, for example `<owner/repo> is not indexed in the "<graph>" graph: staleproof index <owner/repo>` (without hosted mode, nothing is indexed) or a [hosted limit](troubleshooting.md#hosted-service) |
+
+The audit is always computed fresh and replaces the cached one, so the badge shows it at once. The stream closes after `audit` or `error`.
+
+## GET /api/badge/:owner/:name.svg
+
+The README badge: `docs health | <score> <grade>` in the shields.io flat style, coloured by score ([colours](audit.md#the-readme-badge)). The `.svg` suffix is optional.
+
+```markdown
+[![docs health](https://staleproof.dev/api/badge/<owner>/<name>.svg)](https://staleproof.dev/#/audit?repo=<owner>%2F<name>)
+```
+
+It always answers `200` with `content-type: image/svg+xml; charset=utf-8`. For an indexed repository it computes the audit (cached 10 minutes) and sends `cache-control: public, max-age=3600, s-maxage=3600`. For a repository this server has not indexed, or a malformed name, it sends a grey `docs health | not audited` badge with `max-age=300`: audit the repository once (the page, `POST /api/audit` or the CLI against this server's graph) and the next request after the cache expires shows the score.
+
+## GET /api/docs-for
+
+Which doc sections and examples depend on a symbol, with the evidence path for each: the CLI's [`docs-for`](cli.md#docs-for) and the MCP tool [`docs_for_symbol`](tools.md#docs_for_symbol) over HTTP.
+
+| Query parameter | Required | Meaning |
+|---|---|---|
+| `symbol` | yes | A Symbol id (`owner/repo:qualname`), a qualified name, a dotted suffix such as `Graph.query`, or a bare name |
+| `repo` | hosted mode, unless `symbol` is an id | `owner/name`: picks the graph and only looks at symbols defined in that repository |
+
+```bash
+curl -sG http://127.0.0.1:8080/api/docs-for --data-urlencode 'symbol=Graph.ro_query' --data-urlencode 'repo=FalkorDB/falkordb-py'
+```
+
+`200 {summary, query, symbols, ambiguous, sections, mismatched}` ([the result](tools.md#docs_for_symbol-result)). Errors: `400 {"error": "symbol required, e.g. ?symbol=Graph.query&repo=owner/name"}`; in hosted mode `400 {"error": "repo required (owner/name), or a symbol id that starts with owner/repo:"}` and `404 {"error": "<owner/repo> is not indexed yet", "indexed": false}`; a malformed `repo` answers 400. An unknown symbol is not an error: the summary says no live symbol has that name.
+
 ## POST /api/mcp
 
 The MCP tools over Streamable HTTP, for any MCP client that takes a URL ([MCP server](mcp.md)). The endpoint is stateless: every request gets a fresh MCP server, no session id is issued, and responses are JSON rather than SSE. `GET` and `DELETE` answer `405` with `Allow: POST` and a JSON-RPC error, `Method not allowed: POST JSON-RPC messages to this endpoint`.
@@ -322,9 +400,9 @@ curl -s -X POST http://127.0.0.1:8080/api/mcp \
   -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
 ```
 
-- **Without hosted mode** every tool runs on the server's one graph, and nothing is indexed on first use: index the repository with the CLI first.
-- **In hosted mode** each call goes to the graph of the repository it names (`pr_url`, or the `owner/repo:` prefix of an id), and `check_pull_request`, `impact` and `clearance` index that repository first when no graph has it. `run_example` is not offered, and the server's instructions say that examples are not executed there.
-- It is not rate limited, needs no authentication, and does not wait in the one-check-at-a-time queue.
+- **Without hosted mode** every tool runs on the server's one graph; `check_pull_request`, `impact`, `clearance`, `check_changes`, `docs_for_symbol` and `audit_docs` index the repository they name into it when it is missing, like the stdio server. `check_changes` takes `files` here: only the stdio server reads a checkout (`dir`).
+- **In hosted mode** each call goes to the graph of the repository it names (`pr_url`, `repo`, the first of `repos`, or the `owner/repo:` prefix of an id), and `check_pull_request`, `impact`, `clearance`, `check_changes`, `docs_for_symbol` and `audit_docs` index that repository first when no graph has it. `run_example` is not offered, and the server's instructions say that examples are not executed there.
+- It is rate limited to 300 requests per client per hour (the `mcp` bucket), needs no authentication, and does not wait in the one-check-at-a-time queue.
 
 ## GET /api/sections
 
@@ -422,7 +500,7 @@ The query catalogue the web app's model page shows.
 curl -s http://127.0.0.1:8080/api/model
 ```
 
-`200 {queries: [{name, group, purpose, cypher}], tools: [{name, description, queries}]}`. `queries` is every named Cypher statement (`group` is `schema`, `index`, `tool`, `memory` or `report`); `tools` lists the nine tools of the agent and MCP (`check_pull_request` and `docs_patch`, which only MCP has, are not included), each with the names of the queries it can run. The same statements are in [Graph model and Cypher](GRAPH-MODEL.md).
+`200 {queries: [{name, group, purpose, cypher}], tools: [{name, description, queries}]}`. `queries` is every named Cypher statement (`group` is `schema`, `index`, `tool`, `memory` or `report`); `tools` lists the nine tools of the agent and MCP (`check_pull_request`, `check_changes`, `docs_for_symbol`, `audit_docs` and `docs_patch`, which only MCP has, are not included), each with the names of the queries it can run. The same statements are in [Graph model and Cypher](GRAPH-MODEL.md).
 
 ## Static routes
 
@@ -430,7 +508,7 @@ When the package's built web app (`web/dist`) exists, as it does in the npm pack
 
 | Path | Answer |
 |---|---|
-| `GET /` and any other GET path not listed here | `index.html`: the web app. Its pages are hash routes such as `#/`, `#/check/<id>`, `#/model` and `#/docs/<slug>` |
+| `GET /` and any other GET path not listed here | `index.html`: the web app. Its pages are hash routes such as `#/`, `#/check/<id>`, `#/audit?repo=<owner/name>`, `#/model` and `#/docs/<slug>` |
 | `/assets/*` | the app's JavaScript and CSS |
 | `/favicon.svg` | the icon |
 | `/llms.txt` | an index of the documentation for LLMs ([llmstxt.org](https://llmstxt.org) format), `text/plain; charset=utf-8` |

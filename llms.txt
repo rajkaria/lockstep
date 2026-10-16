@@ -1,43 +1,44 @@
 # Staleproof
 
-> Staleproof keeps a software organisation’s documentation true to its code. For a GitHub pull request it walks a FalkorDB graph of code (Python symbols and call edges across repositories), docs (Markdown/MDX sections and code examples), maintainers’ decisions and past verdicts; runs the impacted docs examples before and after the change in a sandbox; and proposes the docs fix with the graph path behind each paragraph. Open source (MIT), published on npm as `staleproof`.
+> Staleproof keeps a software organisation’s documentation true to its code. For a GitHub pull request it walks a FalkorDB graph of code (Python, TypeScript and JavaScript symbols and call edges across repositories), docs (Markdown, MDX and reStructuredText sections and code examples), maintainers’ decisions and past verdicts; flags the examples whose calls no longer fit the changed code; runs the impacted docs examples before and after the change in a sandbox; and proposes the docs fix with the graph path behind each paragraph. With no pull request it audits the docs (a health score, examples that no longer fit the code, API coverage) and checks a working tree before it is pushed. Open source (MIT), published on npm as `staleproof`.
 
 Quick facts for assistants:
 
-- Run: `npx -y staleproof <command>` (Node 20+). Commands: `db start|stop|status`, `index <owner/repo...>`, `check <pr-url> [--no-agent] [--with <repo...>]`, `run <example-id> --pr <url>`, `decide <text> --governs <id...>`, `verdict accept|reject <id>`, `patch <pr-url> [--open-pr]`, `mcp`, `serve [--hosted]`, `facts`.
-- No install: paste a pull request URL on https://staleproof.dev (any public repository, indexed on first use; no example runs there). GitHub Action: `uses: rajkaria/staleproof@v1` with no inputs or secrets.
-- MCP, hosted: `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp`. Local: `claude mcp add staleproof -- npx -y staleproof mcp`. Tools: check_pull_request (the whole report in one call), impact, clearance, read_section, run_example (local only), decisions_for, rank_sections, propose_edit, record_verdict, write_decision, docs_patch.
+- Run: `npx -y staleproof <command>` (Node 20+). Commands: `db start|stop|status`, `index <owner/repo...>`, `check <pr-url> [--no-agent] [--with <repo...>]`, `check` with no pull request (the working tree; `--fail-on-predicted` for a pre-push hook), `audit [owner/repo...] [--run <n>] [--format text|markdown|json] [--fail-under <score>]`, `docs-for <symbol>`, `run <example-id> --pr <url>`, `decide <text> --governs <id...>`, `verdict accept|reject <id>`, `patch <pr-url> [--open-pr]`, `mcp`, `serve [--hosted]`, `facts`.
+- No install: paste a pull request URL on https://staleproof.dev (any public repository, indexed on first use; no example runs there), or audit a repository at https://staleproof.dev/#/audit. GitHub Action: `uses: rajkaria/staleproof@v1` with no inputs or secrets; on a schedule it audits the docs and keeps one issue up to date.
+- MCP, hosted: `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp`. Local: `claude mcp add staleproof -- npx -y staleproof mcp`. Tools: check_pull_request (the whole report in one call), check_changes (edits before a pull request), docs_for_symbol (the docs that depend on a symbol), audit_docs (the docs audit), impact, clearance, read_section, run_example (local only), decisions_for, rank_sections, propose_edit, record_verdict, write_decision, docs_patch.
 - Needs a FalkorDB server (`FALKORDB_URL`, default `falkor://localhost:6379`); the CLI starts a local one when none is configured, and `check` indexes the pull request's repository on first use. Agent mode needs `ANTHROPIC_API_KEY` (Claude, or an Anthropic-compatible provider via `ANTHROPIC_BASE_URL`); without it, `--no-agent` (graph mode) runs the same tools in a fixed order with no model.
 - Ids: Symbol `owner/repo:qualname`; DocSection `owner/repo:path#anchor`; CodeExample `owner/repo:path:index`.
-- Limits: code repositories are parsed as Python; docs can be any Markdown/MDX; GitHub repositories only, private ones with `GITHUB_TOKEN` (the hosted site reads public ones only).
+- Limits: code is read as Python, or TypeScript and JavaScript in npm packages; docs as Markdown, MDX or reStructuredText; only Python examples run or get argument checks; GitHub repositories only, private ones with `GITHUB_TOKEN` (the hosted site reads public ones only).
 
 ## Start here
 
 - [Introduction](docs/README.md): What Staleproof is, the problem it solves, and a map of the documentation.
 - [Quickstart](docs/getting-started.md): Three ways to start (website, GitHub Action, one command), then a walkthrough: local FalkorDB, index, check, patch, serve, MCP.
 - [Install](docs/install.md): Every way to use Staleproof, from no install to one command: the website, the GitHub Action, hosted and local MCP, the CLI.
-- [Use cases](docs/use-cases.md): Who uses Staleproof and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, AI coding agents, multi-repo platforms.
+- [Use cases](docs/use-cases.md): Who uses Staleproof and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, checks before a push, AI coding agents, a weekly docs audit, multi-repo platforms.
+- [Docs audit](docs/audit.md): How true the docs are with no pull request: example lines that no longer fit the code, example runs, API coverage, a 0-100 health score, the README badge and a weekly audit in CI.
 
 ## Integrate
 
 - [CLI](docs/cli.md): Every staleproof command and option, with examples and what each prints.
-- [GitHub Action](docs/github-action.md): Zero-config Action: a comment on every pull request with the docs it can make false and the examples run before and after; inputs, outputs, permissions, the comment format.
+- [GitHub Action](docs/github-action.md): Zero-config Action: a comment on every pull request with the docs it can make false, the examples predicted to break and the examples run before and after; a scheduled docs audit with one issue; inputs, outputs, permissions, the comment format.
 - [MCP server](docs/mcp.md): Give Claude Code, Claude Desktop, claude.ai, Cursor, VS Code or any MCP client the Staleproof tools: hosted over HTTP, or local over stdio.
-- [HTTP API](docs/http-api.md): Every endpoint of staleproof serve: health, stats, streaming checks over SSE, indexing on demand, MCP over HTTP, traces, patches, decisions, verdict review.
+- [HTTP API](docs/http-api.md): Every endpoint of staleproof serve: health, stats, streaming checks over SSE, indexing on demand, docs audits and badges, docs for a symbol, MCP over HTTP, traces, patches, decisions, verdict review.
 - [Node.js library](docs/library.md): Use Staleproof from TypeScript: index, check with or without a model, build patches, embed the API or the MCP server.
 
 ## How it works
 
-- [Core concepts](docs/concepts.md): Impact, evidence paths, severity, clearance, verdicts, decisions, runs, checks, agent mode and graph mode, ids.
-- [Indexing](docs/indexing.md): What the indexer reads, how calls are resolved across repositories, how docs and examples are linked to code, and re-index semantics.
+- [Core concepts](docs/concepts.md): Impact, evidence paths, severity, clearance, static checks and predicted breaks, the audit, verdicts, decisions, runs, checks, agent mode and graph mode, ids.
+- [Indexing](docs/indexing.md): What the indexer reads (Python, TypeScript and JavaScript; Markdown, MDX and reStructuredText), how calls are resolved across repositories, how docs and examples are linked to and checked against code, example directives, and re-index semantics.
 - [Example runner](docs/example-runner.md): How docs examples run before and after a pull request: virtualenvs per commit, the sandbox, the scratch FalkorDB, skip rules, run outcomes.
 - [Decisions and memory](docs/memory.md): Maintainer decisions, supersession, verdict review and what every check writes back to the graph.
 - [The agent](docs/agent.md): The agent loop, its system prompt and stop condition, model providers (Claude or Anthropic-compatible), budgets, and graph mode.
 
 ## Reference
 
-- [Tools reference](docs/tools.md): The eleven tools the agent and MCP clients call: parameters, results, errors and the Cypher each one runs.
-- [Configuration](docs/configuration.md): Every environment variable and global CLI option, with defaults.
+- [Tools reference](docs/tools.md): The fourteen tools the agent and MCP clients call: parameters, results, errors and the Cypher each one runs.
+- [Configuration](docs/configuration.md): Every environment variable and global CLI option, with defaults, and the per-repository .staleproof.toml.
 - [Graph model and Cypher](docs/GRAPH-MODEL.md): Every Cypher statement Staleproof sends to FalkorDB, named and explained, generated from the code.
 - [Facts from the graph](docs/FACTS.md): Every number Staleproof quotes about FalkorDB’s repositories, computed from the graph.
 - [Architecture](docs/ARCHITECTURE.md): Source layout and a check end to end, for contributors.

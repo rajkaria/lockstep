@@ -1,19 +1,23 @@
 # Core concepts
 
-This page defines the vocabulary the rest of the documentation uses: the graph and its ids, how a pull request becomes symbol-level changes, impact and its evidence paths, clearance, ranking, example runs, verdicts, decisions, memory, checks, the two check modes and the docs patch. Every other page links here for definitions, so each term has its own heading. The running examples are three pull requests on FalkorDB's Python client, checked against FalkorDB's three repositories (`FalkorDB/falkordb-py`, `FalkorDB/GraphRAG-SDK`, `FalkorDB/docs`).
+This page defines the vocabulary the rest of the documentation uses: the graph and its ids, how a pull request becomes symbol-level changes, impact and its evidence paths, clearance, static checks, predicted breaks and the audit, ranking, example runs, verdicts, decisions, memory, checks, the two check modes and the docs patch. Every other page links here for definitions, so each term has its own heading. The running examples are three pull requests on FalkorDB's Python client, checked against FalkorDB's three repositories (`FalkorDB/falkordb-py`, `FalkorDB/GraphRAG-SDK`, `FalkorDB/docs`).
 
 ## In one line each
 
 | Term | Plain meaning |
 |---|---|
 | [The graph](#the-graph) | One FalkorDB graph per organisation: code, docs, pull requests and everything checks conclude |
-| [Change kinds](#change-kinds) | What a pull request did to each Python definition: removed, renamed, signature, modified, added, export-removed |
+| [Change kinds](#change-kinds) | What a pull request did to each definition: removed, renamed, signature, modified, added, export-removed |
 | [Severity](#severity) | `breaking`, `api` or `behavior`, derived from the change kind |
 | [Impact](#impact) | The doc sections and examples a pull request can make false |
 | [Evidence path](#evidence-path) | The path in the graph from a changed symbol to a doc, written node by node |
 | [Hops](#hops) | The number of edges on an evidence path |
 | [Resolution](#resolution) and [confidence](#confidence) | How each edge was resolved (`exact`, `by-name`, `late`) and what that makes the whole path |
 | [Clearance](#clearance) | The changed symbols that no doc reaches; the graph proves the absence |
+| [Static checks](#static-checks) | Example lines that no longer fit the code they call, found without running them (`MISMATCH` edges) |
+| [Predicted breaks](#predicted-breaks) | Example lines a change will break, found from the old and new signatures before anything runs |
+| [Checks before a pull request](#checks-before-a-pull-request) | The same walk from a working tree, an editor's files or one symbol |
+| [The audit](#the-audit) | How true the docs are with no change at all: a 0-100 health score |
 | [Ranking](#ranking) | PageRank over the links between doc pages, so the most central page comes first |
 | [Runs](#runs) | One execution of a docs example in the sandbox, and the before/after outcome |
 | [Verdicts](#verdicts) | The conclusion about one section for one pull request |
@@ -49,16 +53,16 @@ The code and docs half of the graph, which the [impact](#impact) walk follows fr
 
 ### Repo, File and Symbol
 
-- **Repo**: one per indexed GitHub repository: `name`, `url`, `sha` (the indexed commit), `indexed_at`, and `packages` (the top-level Python packages it defines, empty for a docs-only repository).
-- **File**: one per indexed file (Python, Markdown/MDX, example script), with its `kind`.
-- **Symbol**: one per Python definition: `kind` is `module`, `class`, `function` or `method` (a `def` directly inside a class body; a `def` nested in a method is a `function`). It carries `qualname`, `name`, `signature`, the first line of its docstring, `decorators`, `visibility` (`special` for `__x__`, `private` for a leading `_`, else `public`) and `status`.
+- **Repo**: one per indexed GitHub repository: `name`, `url`, `sha` (the indexed commit), `indexed_at`, `index_version` (the index format, 3 since Staleproof 0.3), and `packages` (the top-level modules it defines: Python packages, and `js-<name>` for npm packages; empty for a docs-only repository).
+- **File**: one per indexed file (Python, TypeScript or JavaScript, a doc page, an example script), with its `kind`.
+- **Symbol**: one per definition in Python, TypeScript or JavaScript: `kind` is `module`, `class`, `function` or `method` (a `def` directly inside a class body; a `def` nested in a method is a `function`). It carries `qualname`, `name`, `signature`, the first line of its docstring, `decorators`, `visibility` (`special` for `__x__` and constructors, `private` for a leading `_` and for TypeScript's private or unexported declarations, else `public`), `exported` (whether the repository's packages export it; [Indexing](indexing.md#symbols)) and `status`.
 
 `status` is `live`, `gone` (the definition disappeared on a re-index; never deleted) or `removed` (recreated from a pull request that removed it; see [Pull request ingestion](#pull-request-ingestion)).
 
 ### DocSection and CodeExample
 
-- **DocSection**: one per heading of a Markdown or MDX page, from the heading line to the next heading of any level. Text before the first heading is a level-0 section with an empty anchor. It stores `heading_path` (the ancestor headings joined with `>`, for example `falkordb-py > Usage > Asynchronous Example`), `anchor`, `body` (the section's Markdown, up to 8000 characters), the code identifiers named in its inline code (`idents`) and a GitHub `url` pinned to the indexed commit.
-- **CodeExample**: one per fenced code block in a page (any language), plus one per example script in a code repository (`examples/*.py` and similar). It stores `lang`, `code`, `kind` (`fenced` or `script`) and `idents`.
+- **DocSection**: one per heading of a Markdown or MDX page (or title of a reStructuredText page), from the heading line to the next heading of any level. Text before the first heading is a level-0 section with an empty anchor. It stores `heading_path` (the ancestor headings joined with `>`, for example `falkordb-py > Usage > Asynchronous Example`), `anchor`, `body` (the section's Markdown, up to 8000 characters), the code identifiers named in its inline code (`idents`) and a GitHub `url` pinned to the indexed commit.
+- **CodeExample**: one per code block in a page (any language), plus one per example script in a code repository (`examples/*.py`, `examples/*.js` and similar). It stores `lang`, `code`, `kind` (`fenced` or `script`), `idents` and `directive` (empty, `skip` or `expect-error`; [directives](indexing.md#example-directives)).
 
 How pages are split and linked is in [Indexing](indexing.md).
 
@@ -89,6 +93,7 @@ The anchor is the heading's slug (lowercase, punctuation removed, spaces turned 
 | `MENTIONS {resolved, span}` | DocSection → Symbol | Indexing; `late` ones by pull request ingestion |
 | `USES {resolved, line, text}` | CodeExample → Symbol | Indexing; `late` ones by pull request ingestion |
 | `IN_SECTION` | CodeExample → DocSection | Indexing |
+| `MISMATCH {kind, name, detail, line, text}` | CodeExample → Symbol | Indexing: an example line that no longer fits the code ([Static checks](#static-checks)) |
 | `LINKS_TO` | DocSection → DocSection | Indexing |
 | `DEPENDS_ON {spec}` | Repo → Repo | Indexing |
 | `CHANGED_IN {kind, before, after, renamed_to}` | Symbol → PullRequest | Pull request ingestion |
@@ -99,11 +104,11 @@ The anchor is the heading's slug (lowercase, punctuation removed, spaces turned 
 
 ## Pull request ingestion
 
-The first time any tool or check looks at a pull request, it is ingested: its metadata is read from the GitHub API, the two commits are compared, and the result is written to the graph. Re-checking a pull request never re-diffs it; ingestion happens once per pull request.
+The first time any tool or check looks at a pull request, it is ingested: its metadata is read from the GitHub API, the two commits are compared, and the result is written to the graph. Later tools reuse the stored diff. A check of a pull request that is still open (`staleproof check`, `POST /api/check`, the MCP tool `check_pull_request`) first asks GitHub for its head: when new commits were pushed or it was merged since, the old diff is dropped and the pull request is ingested again. A merged pull request never changes, and when GitHub cannot be reached the stored diff stays.
 
 - **Which repositories**: the pull request's repository must be indexed in the graph. `staleproof check`, the MCP tools `check_pull_request`, `impact` and `clearance` (stdio and hosted) and a hosted server's checks index it first when it is missing. Elsewhere (`check --no-index`, `run --pr`, `serve` without `--hosted`, the library) the error is `<owner/repo> is not indexed in the "<graph>" graph. Run: staleproof index <owner/repo> (plus the repositories that document it).`
 - **Which commits**: for a merged pull request, the merge commit's first parent (before) and the merge commit (after). For an open or closed-unmerged one, the merge base of base and head (before) and the head (after).
-- **Which files**: only files the indexer classifies as Python library code are diffed. Markdown files the pull request itself edits are recorded as `docs_touched` and shown as "This PR already edits: …".
+- **Which files**: only files the indexer classifies as library code (Python, and TypeScript or JavaScript in a published npm package) are diffed. Markdown files the pull request itself edits are recorded as `docs_touched` and shown as "This PR already edits: …".
 - **How**: with `git` in a local clone; on hosts without `git` (serverless), or with `STALEPROOF_INGEST=github`, through the GitHub API.
 
 Each changed definition is attached to the `PullRequest` node with a `CHANGED_IN` edge that records the [change kind](#change-kinds) and the signatures before and after.
@@ -183,9 +188,46 @@ An impacted section's `confidence` summarises the edges on its evidence path: `l
 
 Clearance is the list of changed symbols (other than `added`) that reach no doc section or example within 3 call hops in any repository. The graph proves the absence: there is no path. Reviewers can skip those changes as far as the docs are concerned.
 
-Each cleared symbol comes with a check you can run yourself: a `git grep -nw <name> -- '*.md' '*.mdx'` command, and `textMatches`, the number of matching lines across the local clones of every repository that has doc sections. A cleared symbol with text matches shares a name with text in the docs, but no path in the graph resolves to it; that is the case worth a second look. On hosts without local clones (serverless), `textMatches` is 0.
+Each cleared symbol comes with a check you can run yourself: a `git grep -nw <name> -- '*.md' '*.mdx' '*.rst'` command, and `textMatches`, the number of matching lines across the local clones of every repository that has doc sections. A cleared symbol with text matches shares a name with text in the docs, but no path in the graph resolves to it; that is the case worth a second look. On hosts without local clones (serverless), `textMatches` is 0.
 
 The query counts bound paths (`OPTIONAL MATCH p = … WITH count(p) AS reach WHERE reach = 0`) rather than using a negated pattern: on FalkorDB 4.18 the anonymous variable-length form could miss callers reachable along two routes of different lengths. [test/traversal.test.ts](../test/traversal.test.ts) reproduces that shape.
+
+## Static checks and the audit
+
+Impact says which docs a change can make false; a run proves it. Between the two, the graph can already tell, without running anything, when an example's call does not fit the code it reaches. This works on hosts with no sandbox (the hosted service), for examples that could never run (they need an API key or a placeholder host), and before a pull request exists.
+
+### Static checks
+
+At index time, every call and import in a docs example is checked against what it resolves to, in any repository indexed with it: a keyword the function does not take, too many positional arguments, a required argument left out (Python only), a name the package does not export, a method the class does not have (Python, TypeScript and JavaScript). Each line that does not fit is a `MISMATCH` edge from the example to the symbol, with the doc line and a sentence such as `` `Client` has no parameter `hostname` ``. A check is made only where the source settles it: exact resolutions, signatures no unknown decorator wraps, classes and modules whose members are all visible, calls without `*args`/`**kwargs` splats. [Indexing](indexing.md#static-checks-of-examples) has every rule, and [example directives](indexing.md#example-directives) exempt examples that fail on purpose.
+
+`MISMATCH` edges describe the docs as indexed: drift that already exists, whatever the next pull request does. Impact reports the impacted ones as "already out of date before this pull request".
+
+### Predicted breaks
+
+For a pull request, the same check runs on the change itself. For every example that uses a changed symbol, Staleproof compares the call as written with the code before and after:
+
+| Change | Predicted break when |
+|---|---|
+| `removed`, `renamed` | The example calls the symbol (for a `late` link, a call of that name must appear in the example) |
+| `export-removed` | The example imports the name from the module that stopped exporting it |
+| `signature` | The call fit the old signature and does not fit the new one: an unknown keyword, too many positional arguments, a new required argument. Python only, exact links only, and only when the decorators keep the signature |
+
+A call that never fit is not predicted to break: it was already broken, and shows as already out of date instead. Each prediction carries the doc line, the call, a reason such as `` `Graph.query` requires `timeout`, which the example does not pass `` and its confidence: `exact` when the example reached the symbol through imports and types, `by-name` for a removed symbol linked by name ([Resolution](#resolution)). Examples marked `skip` or `expect-error` are never predicted.
+
+Predictions appear in the `impact` result (`predicted`), at the top of the pull request comment, in the terminal output and on the web page; graph mode runs the predicted examples first, so a run can turn a prediction into proof; and the GitHub Action can fail on them (`fail-on: predicted`).
+
+### Checks before a pull request
+
+The impact walk does not need a pull request, only changed symbols:
+
+- **A working tree**: `staleproof check` with no URL diffs the checkout's uncommitted and unpushed changes against its merge base ([CLI](cli.md#check-without-a-pull-request)); the MCP tool `check_changes` does the same for files an editor or agent sends, compared with the commit the graph indexed.
+- **One symbol**: `staleproof docs-for <symbol>` and the MCP tool `docs_for_symbol` walk from a symbol you are about to change to every doc that depends on it.
+
+Both give impact, predicted breaks and lines already out of date, and write nothing to the graph: no pull request, no check, no run.
+
+### The audit
+
+With no change at all, the [audit](audit.md) reports how true the docs are now: every `MISMATCH` line, the example runs recorded at the indexed commits, and API coverage (the share of exported symbols some doc names or calls), combined into a health score from 0 to 100 with a grade. It is a CLI command, a web page with a README badge, an HTTP route, an MCP tool and the GitHub Action's scheduled mode.
 
 ## Ranking
 
@@ -278,7 +320,7 @@ Both modes use the same tools over the same graph and are stored the same way. T
 | Tool order | Varies per pull request (#262: impact → read_section → decisions_for → run_example → record_verdict) | impact → clearance → rank_sections → run_example, for up to 3 examples |
 | Needs | Model API credentials (Claude, or an Anthropic-compatible provider) | Only FalkorDB |
 | Impacted sections covered | All of them: after any `impact` call the loop collects every page itself, and the model pages through them | A sample: it ranks the first page (40 sections) |
-| Example runs | Whichever the model chooses | A sample: at most 3 (`--runs`) examples from `exact` sections on the first page |
+| Example runs | Whichever the model chooses | A sample: at most 3 (`--runs`) examples, those predicted to break first, then examples from `exact` sections on the first page |
 | Reads decisions and earlier verdicts | Yes, through `decisions_for` | No |
 | Writes verdicts and edits | Yes; every impacted section needs one before the check is `done` | No |
 | "Since the last check" summary | In the first message to the model | Not computed |
@@ -299,10 +341,11 @@ The checks of falkordb-py #262, #267 and #276 ended with `ok` verdicts only: the
 ## Known limits
 
 - **Index together.** Cross-repository edges exist only between repositories indexed in the same `index` command.
-- **Late links do not survive a re-index.** A pull request is ingested once, so the `late` links made for symbols it removed are lost when the docs repository holding them is re-indexed.
+- **Late links do not survive a re-index.** A pull request is ingested once (again only when an open one moves), so the `late` links made for symbols it removed are lost when the docs repository holding them is re-indexed.
 - **`export-removed` can be a false positive.** Any module that stops importing a name from its own package counts, including the removal of an unused import, and it is classed as `breaking`.
 - **Moved files are not renames.** Moving or renaming a file reports each of its definitions as `removed` plus `added`.
-- **Only Python library files are diffed.** Changes to example scripts, tests and docs are not symbol changes.
+- **Only library files are diffed** (Python, and TypeScript or JavaScript in published npm packages). Changes to example scripts, tests and docs are not symbol changes.
+- **Static checks and predictions are conservative.** They judge only what the source settles, so their silence is not proof; TypeScript and JavaScript calls get no argument checks.
 - **Long sections always conflict in the patch.** A section longer than 8,000 characters is stored truncated, so its text never matches the file and the edit is reported as a conflict.
 
 ## Related

@@ -13,9 +13,14 @@ export const cyan = c(36);
 
 const SEV = { breaking: red('BREAKING'), api: yellow('SIGNATURE'), behavior: dim('BEHAVIOR') } as const;
 
+/** A commit as shown in reports: 7 characters, or the working tree when there is no commit. */
+export function commitLabel(sha: string): string {
+  return sha === 'WORKTREE' ? 'working tree' : sha.slice(0, 7);
+}
+
 export function impactText(d: ImpactData, ranked?: RankedSection[]): string {
   const out: string[] = [];
-  out.push(bold(`${d.pr.title}`), dim(`${d.pr.url} (${d.pr.state}, ${d.pr.before.slice(0, 7)}..${d.pr.after.slice(0, 7)})`), '');
+  out.push(bold(`${d.pr.title}`), dim(`${d.pr.url} (${d.pr.state}, ${commitLabel(d.pr.before)}..${commitLabel(d.pr.after)})`), '');
   out.push(bold(`Changed symbols (${d.changed.length})`));
   for (const ch of d.changed) {
     out.push(`  ${ch.change.padEnd(14)} ${ch.symbol}${ch.renamedTo ? ` → ${ch.renamedTo}` : ''}`);

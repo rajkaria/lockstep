@@ -49,9 +49,9 @@ Docs examples connect to `localhost:6379` without a password, so the scratch ser
 
 #### Broken installation
 
-`tree-sitter-python.wasm not found (expected in <package>/grammars/)`
+`tree-sitter-python.wasm not found (expected in <package>/grammars/)` (or `tree-sitter-typescript.wasm`, `tree-sitter-tsx.wasm`)
 
-The Python grammar is missing from the package, which happens with a partial install or a copied `dist/` without `grammars/`. Reinstall the package; in a custom image, copy `grammars/` and `python/` next to `dist/`.
+A grammar is missing from the package, which happens with a partial install or a copied `dist/` without `grammars/`. Reinstall the package; in a custom image, copy `grammars/` and `python/` next to `dist/`.
 
 #### Local FalkorDB does not start
 
@@ -95,6 +95,12 @@ Without git, or with `STALEPROOF_INGEST=github`, repositories are downloaded as 
 | `GitHub: the archive of <owner/repo> carries no commit id` | The archive had no pax header with the commit; nothing was indexed |
 | `<owner/repo> is too large to index from an archive here (<what>; the limit is 150 MB and <n> files). Run Staleproof where git is installed (npx -y staleproof check <pr-url>, which clones instead) or in the GitHub Action.` | The archive is over 150 MB, or it has more than 4000 files the indexer reads (3000 on a hosted server). The CLI writes the same text, so where git is available, install it and index again |
 
+#### Repository configuration error
+
+`.staleproof.toml: ignore must be a list of glob strings` (or `skip-examples`, or `pyproject.toml: …`)
+
+The repository's [configuration](configuration.md#repository-configuration) has a key with the wrong type, for example `ignore = "docs/old"` instead of `ignore = ["docs/old"]`. A file that is not valid TOML stops the index with the TOML parser's message. Fix the file in the repository and index again.
+
 ### Pull requests and GitHub
 
 #### Not a pull request URL
@@ -132,6 +138,28 @@ GitHub answered 404: the pull request number is wrong, the repository is private
 `merge commit <sha> has no parent`
 
 The merge commit GitHub reports for the pull request has no parent to compare against. This is unusual; check the pull request on GitHub.
+
+### Before a pull request
+
+| Message | Meaning |
+|---|---|
+| `cannot tell which GitHub repository <dir> is (origin: <url>); pass --repo owner/name` | `staleproof check` without a pull request (or `check_changes` with `dir`) could not read a github.com `origin` remote (`origin: none` when there is none). Pass `--repo` (`repo` over MCP) |
+| `<owner/repo> is not indexed in the "<graph>" graph: staleproof index <owner/repo>` | The working tree's repository is not in the graph and indexing on first use is off (`--no-index`) or not available |
+| `repo (owner/name) is required with files` | `check_changes` with `files` but no `repo` |
+| `send the changed files: files: [{path, content}] with repo (this server cannot read your disk)` | `check_changes` with `dir` (or with neither) on the hosted server or `staleproof serve`: only the stdio server reads a checkout |
+| `No live symbol in the "<graph>" graph is named <symbol>.` | `docs-for` (or `docs_for_symbol`) found nothing: check the spelling, the graph (`--repo` or `--org`; a bare name with neither uses `falkordb`), and that the repository is indexed |
+| `git <arguments> failed in <directory>: …` | The directory is not a git checkout, or `--base` names a ref that does not exist there ([git failed](#git-failed)) |
+
+### Docs audit
+
+| Message | Meaning |
+|---|---|
+| `not indexed in the "<graph>" graph: <repos>` | `audit --no-index`, or `audit_docs`, for repositories the graph does not hold. Drop `--no-index`, or index them |
+| `unknown --format <x> (text, markdown or json)`, `--run must be a whole number, got <x>`, `--limit must be a whole number, got <x>`, `--fail-under must be a score from 0 to 100, got <x>` | A bad option value; nothing ran |
+| `health score <s> is below --fail-under <n>`, `<n> example(s) no longer fit the code (--fail-on-mismatch)` | Not errors: the reason `audit` exits 1 after printing the report |
+| `… Indexed by an older Staleproof: examples are not checked against the code until the repositories are indexed again (staleproof index).` | The graph was written before Staleproof 0.3, so it has no `MISMATCH` edges or export flags and the audit cannot judge the examples. Index the repositories again |
+| A grey `docs health: not audited` badge | The server behind the badge URL has not indexed the repository. Audit it there once ([the page](https://staleproof.dev/#/audit)); the badge is cached for 5 minutes |
+| `Could not open the audit issue (the job needs issues: write). The report is in the job summary.` | The GitHub Action's workflow lacks `permissions: issues: write` |
 
 ### Agent and models
 
@@ -262,6 +290,9 @@ The patch description lists them under "Not applied (file changed since indexing
 - `opening a pull request needs GITHUB_TOKEN`: set `GITHUB_TOKEN` or `GH_TOKEN`.
 - `the patch is empty: no proposed edits to open a pull request for`: there is nothing to open.
 - `fork <owner/name> did not become available`: GitHub did not finish creating the fork within 30 polls 2 seconds apart. Run the command again; the existing fork is reused.
+- `--upstream and --in-repo are different targets: pick one`: pass one of them.
+- `no pull request opened: no proposed edit is in a repository this token may write to`: with `--in-repo --only <repos>`, every proposed edit is in another repository. Open those with `patch --open-pr` from an account that can write to them.
+- `Could not open the docs fix pull request (the job needs contents: write and pull-requests: write).`: the GitHub Action's `open-docs-pr` step, without those permissions (or on a branch the token cannot push to).
 
 ### Hosted service
 
@@ -276,8 +307,8 @@ These come from a server in hosted mode (staleproof.dev, `serve --hosted`): as a
 | `gh-<owner> is being indexed by another request; try again in a minute` | Another request held the workspace's lock for more than 150 seconds |
 | `<owner/repo> is in the curated "<graph>" graph, which the hosted service does not re-index; index other repositories on their own.` | `with` named repositories for a repository of the curated graph |
 | `<owner/repo> is too large to index from an archive here (...)` | The archive is over 150 MB or has more than 3000 files the indexer reads ([above](#tarball-download-failed)) |
-| `name a repository: pass a pull request URL (pr_url) or ids that start with owner/repo:` | MCP: the call names no repository, so the hosted server cannot pick a graph |
-| `<owner/repo> is not indexed yet: call check_pull_request with one of its pull requests first` | MCP: a tool other than `check_pull_request`, `impact` and `clearance` (for example `read_section` or `docs_patch`) for a repository no workspace holds |
+| `name a repository: pass a pull request URL (pr_url), repo or repos ("owner/name"), or ids that start with owner/repo:` | MCP: the call names no repository, so the hosted server cannot pick a graph |
+| `<owner/repo> is not indexed yet: call check_pull_request with one of its pull requests first` | MCP: a tool that does not index on first use (for example `read_section` or `docs_patch`; the indexing ones are `check_pull_request`, `impact`, `clearance`, `check_changes`, `docs_for_symbol` and `audit_docs`) for a repository no workspace holds |
 | `404 this server indexes from the CLI only: staleproof index <owner/repo>...` | `POST /api/index` on a server that is not in hosted mode |
 
 ### Server and web app
@@ -287,6 +318,8 @@ These come from a server in hosted mode (staleproof.dev, `serve --hosted`): as a
 | `429 rate limited: try again later` | Over 30 POST requests from one client in the last hour ([rate limits](http-api.md#rate-limits)) |
 | `404 no such check`, `no such section`, `no such verdict` | The id is unknown in this graph (in hosted mode, in every graph); check `--org` |
 | `404 <owner/repo> is not indexed` | Hosted mode: `GET /api/patch` or `POST /api/decisions` for a repository no graph holds |
+| `404 <owner/repo> is not indexed yet: POST /api/audit {"repo": "owner/name"} indexes and audits it` | `GET /api/audit` for a repository no graph holds (without hosted mode: `…: staleproof index <owner/repo>`) |
+| `400 symbol required, e.g. ?symbol=Graph.query&repo=owner/name`, `400 repo required (owner/name), or a symbol id that starts with owner/repo:` | `GET /api/docs-for` without `symbol`, or in hosted mode without a repository |
 | `400 id required` | `GET /api/sections` without `id`. `GET /api/patch` without `pr` answers `400 not a GitHub pull request URL: ""…` |
 | `400 status must be accepted or rejected` | The review body needs `status` |
 | `400 decision text is limited to 500 characters` | The HTTP API caps decision text; the CLI `decide` does not |
@@ -318,10 +351,13 @@ Stated plainly; most are "not yet" rather than "never".
 
 **What is analysed**
 
-- **Python code only.** Code repositories are parsed as Python. Docs can be any Markdown or MDX. JavaScript and other non-Python examples are indexed but not linked to code and not run; notebooks and `.rst` files are not indexed.
+- **Python, TypeScript and JavaScript code.** Python is read anywhere in a repository; TypeScript and JavaScript only inside a published npm package (a `package.json` with a `name`, not `private`). Other languages are not parsed, and notebooks are not read.
+- **TypeScript and JavaScript get name checks, not argument checks.** JavaScript accepts any argument count, so their examples are flagged only for names a package does not export and methods a class does not have, and a signature change predicts no JavaScript break. JavaScript and TypeScript examples are linked and checked but never run.
+- **reStructuredText is scanned, not built.** Titles, code directives (`code-block`, `testcode`, `doctest`, …), `::` literal blocks, `>>>` doctests, API roles and `:doc:`/`:ref:` links are read. `.. include::`, autodoc output (`.. autofunction::` and the like), substitutions and Sphinx extensions are not expanded, and `:ref:` resolves only to labels on the same page.
+- **Static checks follow exact resolutions only.** An example call is judged only when it resolved through imports and types, to a function whose signature no unknown decorator wraps, on a class or module whose members are all visible, without `*args`/`**kwargs` splats. The rest is silent, so no mismatch and no predicted break is not proof that an example works; runs are.
 - **Static call resolution.** Calls are resolved through imports, re-exports, attribute types, return annotations and base classes. Where the types do not say, a method call falls back to a by-name edge when 1 to 4 functions of that name exist in repositories the module imports; such edges are labelled `by-name` everywhere. Generic names (`get`, `run`, `close`, ...) are never matched by name.
 - **Cross-repository resolution needs the repositories indexed together.** Edges between repositories are resolved only within one `index` command. Indexing a repository alone (including indexing on first use without `--with`, and the Action's `reindex` without `also-index`) drops its cross-repository edges until the organisation is indexed together again.
-- **Re-index semantics.** A re-index re-resolves calls and doc links and marks vanished symbols and sections `gone`. It also removes the late links that pull request ingestion created for removed symbols, and already-ingested pull requests are not ingested again. The Action's `reindex` uses the remote default branch head, not the base branch.
+- **Re-index semantics.** A re-index re-resolves calls and doc links and marks vanished symbols and sections `gone`. It also removes the late links that pull request ingestion created for removed symbols, and already-ingested pull requests are not ingested again (unless an open one moves). The Action's `reindex` uses the remote default branch head, not the base branch.
 - **Change detection.** `export-removed` is reported for any module that stops importing a name from its own package, not only `__init__.py`, so it can flag internal refactors. A moved or renamed file is reported as every definition removed and added, because renames are paired only within the same parent.
 - **Private repositories need a token.** The CLI, a server you run and the GitHub Action read private GitHub repositories with `GITHUB_TOKEN` (the Action's default token reads its own repository). The hosted site, staleproof.dev, indexes public repositories only. Nothing outside GitHub is read.
 
@@ -335,11 +371,12 @@ Stated plainly; most are "not yet" rather than "never".
 **Checks and patches**
 
 - **Proposed edits are tested on fixtures, not shown on the live graph.** The agent proposing a docs fix with its evidence path is tested on the project's fixture organisation. On FalkorDB's own repositories, every verdict on falkordb-py #262, #267 and #276 is `ok`: those pull requests fixed code, and no edit was proposed.
-- **Model paths.** The agent was written for Claude; the Claude API path is tested against a local fake API only. It has run on `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API. The GitHub Action and the Docker image are written but have not been exercised on a live repository or built.
+- **Model paths.** The agent was written for Claude; the Claude API path is tested against a local fake API only. It has run on `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API. The GitHub Action's pull request check has run end to end on a private test repository; the Docker image is written but has not been built.
 - **An agent may edit an already-broken example only when it proved it.** Besides what a pull request falsified, the agent may fix an example that it ran and that fails both before and after the pull request, saying so in the reason and citing both runs. The path guard still applies: no edit without a path from the pull request's changes to the section.
 - **Sections over 8,000 characters always conflict in the patch**, because their stored text is truncated.
-- **The hosted service runs no examples.** Checks on staleproof.dev and its MCP endpoint report impact, clearance and ranking; runs come from the GitHub Action, the CLI or a local MCP server.
-- **Pull requests are ingested once per graph.** A later check reuses the stored diff; nothing in the CLI forces re-ingestion (the library's `ingestPullRequest` does). The GitHub Action's default FalkorDB starts empty on every run, so there each run diffs the pull request afresh.
+- **The hosted service runs no examples.** Checks and audits on staleproof.dev and its MCP endpoint report impact, predicted breaks, clearance, ranking and the static checks; runs come from the GitHub Action, the CLI or a local MCP server.
+- **Checks before a pull request are static.** `check` without a URL, `check_changes` and `docs-for` predict and trace; they run no example and record nothing.
+- **Pull requests are re-read only when they move.** A later check reuses the stored diff unless the pull request is open and its head changed (or it was merged since); `impact` and the other tools alone never re-read it. The library's `ingestPullRequest` always re-ingests. The GitHub Action's default FalkorDB starts empty on every run, so there each run diffs the pull request afresh.
 - **Verdicts written over MCP** have no check id, so no check counts them.
 - **Verdict ids are not printed** in the CLI's text output or in the pull request comment; they are in the trace (`check --json`, `GET /api/checks/<id>`).
 - **The HTTP API has no authentication**, and its rate limit is in memory, per process.
@@ -348,7 +385,7 @@ Stated plainly; most are "not yet" rather than "never".
 
 ### Which languages does it support?
 
-Code repositories in Python; docs in Markdown and MDX from any repository; Python examples are linked to code and run. Other languages are on the roadmap ([VISION.md](../VISION.md) names TypeScript next), not in the code.
+Code in Python, and TypeScript and JavaScript in published npm packages; docs in Markdown, MDX and reStructuredText (Sphinx) from any repository. Python examples are linked to code, checked against its signatures and run; JavaScript and TypeScript examples are linked and checked for names that do not exist, but not run. Other languages are not parsed.
 
 ### Do I need an LLM API key?
 
@@ -368,7 +405,7 @@ In agent mode: the system prompt, the tool definitions, the pull request URL, a 
 
 ### Does it open pull requests on its own?
 
-No. A check writes verdicts and proposed edits to the graph only. `staleproof patch` prints the diff and the description; `patch --open-pr` opens the pull request, and only when you pass that flag: in your fork by default, against the original repository only with `--upstream`. The GitHub Action posts or updates one comment and never opens a pull request.
+No. A check writes verdicts and proposed edits to the graph only. `staleproof patch` prints the diff and the description; `patch --open-pr` opens the pull request, and only when you pass that flag: in your fork by default, against the original repository with `--upstream`, or as a branch of the docs repository itself with `--in-repo`. The GitHub Action posts or updates one comment, keeps one audit issue in audit mode, and opens a docs fix pull request into the checked pull request's branch only with `open-docs-pr: 'true'`.
 
 ### How long does a check take?
 
@@ -401,9 +438,17 @@ The [library](library.md#run-your-own-cypher) shows how to run it from Node.js.
 
 Because the question is a graph traversal. Impact is a variable-length path from a changed symbol through callers in any repository to a doc section; clearance is the same pattern counted to zero, a proof that no doc is reachable; decisions govern symbols transitively through `CALLS*0..2` and resolve through `SUPERSEDES` chains; ranking runs PageRank over the docs' links. FalkorDB runs the impact query in about 1 to 2 ms server-side, and its multiple graphs per server give one graph per organisation. Every statement is in [Graph model and Cypher](GRAPH-MODEL.md).
 
-### Why did a re-check not notice new commits on the pull request?
+### Does a re-check notice new commits on the pull request?
 
-A pull request is ingested on its first check and reused afterwards, so later commits are not diffed again. The CLI has no option to force it; call `ingestPullRequest` from the [library](library.md#pull-requests), which always re-ingests. The GitHub Action with its default FalkorDB is not affected: each run starts from an empty graph. Example runs are likewise answered from recorded runs of the same program and commits; `staleproof run --fresh` re-runs one.
+Yes, since 0.3.0. Before a check (`staleproof check`, `POST /api/check`, MCP `check_pull_request`) of an open pull request, Staleproof compares its head with the one it ingested; when it moved, the old diff is dropped and the current one is read, and the CLI logs `<pr> has new commits since it was last checked: reading its current diff`. `impact` and the other tools on their own reuse the stored diff, so start with a check. A merged pull request is never re-read. Example runs are still answered from recorded runs of the same program and commits; `staleproof run --fresh` re-runs one.
+
+### Can I check changes before opening a pull request?
+
+Yes, statically. `staleproof check` with no URL checks the working tree of the checkout you are in, and `--fail-on-predicted` makes it a pre-push hook; `staleproof docs-for <symbol>` lists the docs that depend on a function before you change it; over MCP, `check_changes` takes edited files and `docs_for_symbol` a symbol. They predict which examples break; running examples before and after needs the pull request ([CLI](cli.md#check-without-a-pull-request)).
+
+### Why is an example I know is wrong not flagged?
+
+The static checks report only what the source settles: a call reached by name rather than through imports and types, a function behind an unknown decorator, a class with an external base or a `__getattr__`, or a call with `*args`/`**kwargs` is left alone, and JavaScript calls get no argument checks ([the rules](indexing.md#static-checks-of-examples)). Run the example (`staleproof run <example-id>`, or `audit --run <n>`) to prove it, and check that it is not marked `skip` or matched by `skip-examples`.
 
 ## Related
 

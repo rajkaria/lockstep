@@ -1,4 +1,5 @@
 import type { VerdictRow } from '../patch.js';
+import { commitLabel } from './text.js';
 import type { ExampleRunRow } from './report.js';
 import type { ClearedSymbol, ImpactData, RankedSection } from '../tools/graph-tools.js';
 
@@ -59,7 +60,7 @@ export function checkMarkdown(opts: {
     : predictedExamples
       ? `${subject} ${subject === 'these changes' ? 'are' : 'is'} predicted to break ${predictedExamples} docs example${predictedExamples === 1 ? '' : 's'}`
     : n && !impact.truncated && elsewhere === 0
-      ? `the ${n === 1 ? 'doc section' : `${n} doc sections`} this pull request reaches ${n === 1 ? 'is' : 'are'} on pages it edits`
+      ? `the ${n === 1 ? 'doc section' : `${n} doc sections`} ${subject} reach${subject === 'these changes' ? '' : 'es'} ${n === 1 ? 'is' : 'are'} on pages ${subject === 'these changes' ? 'they edit' : 'it edits'}`
       : n
         ? `${n} doc section${n === 1 ? '' : 's'} ${subject} can make false`
         : `no docs reach the code ${subject} changed`;
@@ -120,7 +121,7 @@ export function checkMarkdown(opts: {
     out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: examples on those pages are run after the change as the pull request leaves them; the sections above are linked as they are on the default branch.`, '');
   }
   if (opts.agentSummary) out.push(opts.agentSummary, '');
-  out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${opts.org}\` · ${impact.pr.before.slice(0, 7)}..${impact.pr.after.slice(0, 7)}</sub>`);
+  out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${opts.org}\` · ${commitLabel(impact.pr.before)}..${commitLabel(impact.pr.after)}</sub>`);
   // Machine-readable counts for CI (the GitHub Action's outputs and fail-on).
   out.push(`<!-- staleproof:counts breaks=${breaks} predicted=${predictedExamples} sections=${n} mismatched=${impact.mismatched?.length ?? 0} -->`);
   return out.join('\n');

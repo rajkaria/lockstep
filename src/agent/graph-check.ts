@@ -61,12 +61,19 @@ export async function runGraphCheck(
     const sectionIds = [...new Set(data.sections.map((s) => s.section).filter((s) => s.includes('#')))];
     if (sectionIds.length) await call(rankSectionsTool, { section_ids: sectionIds });
     // Examples predicted to break run first: a run turns the prediction into proof.
-    const examples = [
+    const candidates = [
       ...new Set([
         ...data.predicted.filter((p) => p.confidence === 'exact').map((p) => p.example),
         ...data.sections.filter((s) => s.confidence === 'exact').flatMap((s) => s.examples),
       ]),
-    ].slice(0, opts.maxRuns ?? 3);
+    ];
+    // Examples the docs mark skip or expect-error never run: don't spend a run slot on them.
+    const marked = new Set(
+      candidates.length
+        ? (await ctx.graph.run<{ id: string }>(`MATCH (e:CodeExample) WHERE e.id IN $ids AND coalesce(e.directive, '') <> '' RETURN e.id AS id`, { ids: candidates })).rows.map((r) => r.id)
+        : [],
+    );
+    const examples = candidates.filter((e) => !marked.has(e)).slice(0, opts.maxRuns ?? 3);
     const verdicts: string[] = [];
     for (const ex of examples) {
       const r = await call(runExampleTool, { example_id: ex, pr_url: pr });

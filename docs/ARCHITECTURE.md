@@ -6,9 +6,10 @@ This page is for contributors: where each part of the code lives, what happens d
 
 ```text
 src/
-  cli.ts                 index | check | run | decide | verdict | patch | mcp | serve | facts | db
+  cli.ts                 index | check | docs-for | audit | run | decide | verdict | patch | mcp | serve | facts | db
   index.ts               the library's exports
   config.ts              environment → Config
+  audit.ts               the docs audit: mismatches, API coverage, runs at the indexed commits, the score (audit_docs)
   pkg.ts                 package root and version
   graph/client.ts        FalkorDB connection; one graph per org; every query can be traced
   graph/queries.ts       every Cypher statement, named (the README's Cypher section and GRAPH-MODEL.md are generated from it)
@@ -17,15 +18,22 @@ src/
                          module names), tarball.ts (download a GitHub tarball and extract what the indexer reads,
                          commit from the pax header; for hosts without git), ensure.ts (clone or download; index
                          on first use), files.ts, treesitter.ts and python.ts (tree-sitter Python extractor),
-                         resolve.ts (org-wide symbol table and call resolver), markdown.ts (Markdown/MDX scanner),
-                         docs.ts (MENTIONS/USES/LINKS_TO), deps.ts (DEPENDS_ON), write.ts, index.ts (indexOrg)
+                         typescript.ts and tsmodules.ts (TypeScript/JavaScript into the same module shape; npm
+                         packages as js-<name> modules), resolve.ts (org-wide symbol table, call resolver, static
+                         checks of examples, exported API), signature.ts (argument checks against a signature),
+                         markdown.ts (Markdown/MDX scanner, example directives), rst.ts (reStructuredText scanner),
+                         repo-config.ts (.staleproof.toml), docs.ts (MENTIONS/USES/LINKS_TO/MISMATCH),
+                         deps.ts (DEPENDS_ON), write.ts, index.ts (indexOrg)
   hosted/workspaces.ts   hosted mode: a workspace graph per repository owner (gh-<owner>) indexed on demand from
                          tarballs; the registry graph, cross-instance locks, size limits, least-recently-used
                          eviction and daily budgets
   pr/                    github.ts (PR metadata), changes.ts (symbol-level diff between the PR's commits),
                          github-diff.ts (the same diff through the GitHub API when there is no git),
-                         ingest.ts, open-pr.ts (the docs PR in a fork)
+                         ingest.ts (and re-reading an open PR that moved), open-pr.ts (the docs PR in a fork, upstream
+                         or the docs repository itself), predict.ts (predicted breaks), local.ts (a working tree or
+                         an editor's files as changes; check_changes)
   tools/                 graph-tools.ts (impact, clearance, rank_sections, read_section), run-example.ts,
+                         docs-for.ts (docs_for_symbol),
                          memory-tools.ts (decisions, verdicts, review, "since the last check"), types.ts
                          (ToolResult, Tracer, unknown-parameter check), index.ts (tool sets, JSON schemas)
   runner/                index.ts (runExample, Run nodes, one run at a time), prepare.ts (skip rules, fragment
@@ -35,26 +43,30 @@ src/
   agent/                 loop.ts (runAgentCheck), prompt.ts, model.ts (ModelClient), anthropic.ts (Claude and
                          Anthropic-compatible providers), scripted.ts (ScriptedModel), graph-check.ts (graph mode),
                          trace.ts (trace events)
-  mcp/server.ts          MCP server over the tools, plus check_pull_request and docs_patch; stdio transport
+  mcp/server.ts          MCP server over the tools, plus check_pull_request, check_changes, docs_for_symbol, audit_docs
+                         and docs_patch; stdio transport
                          (indexes a pull request's repository on first use)
   mcp/http.ts            MCP over Streamable HTTP, stateless; in hosted mode routed to the graph of the repository
                          each call names, without run_example
-  server/app.ts          HTTP API (+ SSE), hosted routes (/api/index, /api/repos, /api/workspaces), /api/mcp,
+  server/app.ts          HTTP API (+ SSE), hosted routes (/api/index, /api/repos, /api/workspaces), /api/audit,
+                         /api/docs-for, /api/badge (server/badge.ts), /api/mcp,
                          the static web UI and the docs as plain text
   patch.ts               verdicts → unified diff + PR description with evidence
   facts.ts               FACTS.md from the graph
-  format/                text.ts (terminal output), markdown.ts (the PR comment's Markdown), report.ts (the
+  format/                text.ts (terminal output), markdown.ts (the PR comment's Markdown), audit.ts (the audit as
+                         text and Markdown), report.ts (the
                          report from the graph: impact, clearance, ranking, verdicts and the example runs before
                          and after; what the Action posts and check_pull_request returns)
 web/
   index.html, vite.config.ts   Vite + React; the build also emits the docs as plain text (llms.ts)
   llms.ts                /llms.txt, /llms-full.txt, /docs/<slug>.md, robots.txt, sitemap.xml
   src/main.tsx, App.tsx  entry and routes (home, a stored check, the query catalogue, docs)
-  src/route.ts           hash routes: #/, #/<home section>, #/try?pr=<url>, #/check/<id>, #/install, #/model,
+  src/route.ts           hash routes: #/, #/<home section>, #/try?pr=<url>, #/check/<id>, #/audit?repo=<repo>, #/install, #/model,
                          #/docs/<slug>/<anchor>
   src/layout.tsx         header, footer, icons, code blocks
   src/Landing.tsx        the home page's content (also prerendered)
   src/TryIt.tsx          the live demo: paste a PR, watch the check stream in, recent checks
+  src/Audit.tsx          the docs audit page: score, mismatches, coverage, the badge
   src/Install.tsx, install-links.ts   the install page: the prefilled workflow link, MCP buttons and commands
   src/CheckResults.tsx   a check's findings: changed symbols, sections, runs, verdicts; a stored check replayed
   src/components.tsx     evidence paths, Cypher lists, the trace, runs, diffs, the decision form

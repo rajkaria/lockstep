@@ -58,10 +58,14 @@ the sections the graph reaches (≤ 3 call hops, any repository):
 
 ## How it works, in plain words
 
-1. **Index.** Clone the organisation's repositories into one graph: Python functions and the calls between them —
-   resolved across repositories — plus every docs section and code example, linked to the code it mentions or calls.
+1. **Index.** Clone the organisation's repositories into one graph: Python, TypeScript and JavaScript functions and the
+   calls between them — resolved across repositories — plus every docs section and code example (Markdown, MDX or
+   Sphinx reStructuredText), linked to the code it mentions or calls, and every example call checked against the
+   signature it reaches.
 2. **Impact.** From each function the PR changed, walk back up to three callers, in any repository, to the docs that
-   mention or run them. Each hit carries its **evidence path**: the chain from the change to the paragraph.
+   mention or run them. Each hit carries its **evidence path**: the chain from the change to the paragraph. An example
+   whose call no longer fits the changed code (a removed name, a new required argument) is **predicted to break**
+   before anything runs.
 3. **Clearance.** The changed functions that no doc reaches are listed as *cleared* — a proof of absence over the
    graph, with the `git grep` a reviewer can run to double-check it.
 4. **Prove.** Run each affected example at the commit before the PR and at the PR, in a sandbox. *Passes before, fails
@@ -78,11 +82,51 @@ Two ways to run a check:
 | Covers | Every impacted section gets a verdict or an edit | A sample: findings, ranking and a few runs; no verdicts |
 | Needs | `ANTHROPIC_API_KEY` | Nothing but FalkorDB |
 
+## Without a pull request
+
+The same graph answers before a pull request exists, and with no change at all.
+
+**Audit the docs as they are.** `staleproof audit` checks every call in every docs example against the code it
+reaches, in its own repository or another, without running it; adds the example runs and how much of the public API
+the docs cover; and scores the docs from 0 to 100. On current repositories it finds lines like these:
+
+- FalkorDB's docs page `commands/graph.constraint-create.mdx` calls `client.create_constraint`, which `FalkorDB`
+  doesn't have; the run fails with `AttributeError: 'FalkorDB' object has no attribute 'create_constraint'`.
+- GraphRAG-SDK's `docs/api-reference.mdx` documents `VectorStore(index_name=..., similarity_function=...)`,
+  parameters the constructor no longer has.
+- Flask's `docs/views.rst` calls `UserList.as_view()` without its required `name`.
+- httpx's docs pass `extensions=` to `httpx.get`, which no longer accepts it.
+
+```bash
+npx -y staleproof audit FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+```
+
+The same audit runs on the web at [staleproof.dev/#/audit](https://staleproof.dev/#/audit) for any public
+repository, with a README badge (the curated FalkorDB graph behind the demo was indexed before 0.3, so its audit has
+no example checks until it is indexed again; any other repository is indexed fresh); the GitHub Action runs it weekly and keeps one issue up to date
+([`examples/staleproof-audit.yml`](examples/staleproof-audit.yml)). [docs/audit.md](docs/audit.md) has the checks and
+the score.
+
+**Check before you push.** `staleproof check` with no URL checks your uncommitted and unpushed changes against the
+graph and lists the examples they break, with the line and the reason. From the test fixtures, after adding a
+required `timeout` to `Graph.query`:
+
+```text
+Predicted to break (1): the call no longer fits the changed code
+  ✗ docs/getting-started.mdx:0 line 18 g.query
+    `Graph.query` requires `timeout`, which the example does not pass
+```
+
+`--fail-on-predicted` makes it a pre-push hook, and `staleproof docs-for <symbol>` lists the docs that depend on a
+function before you touch it. Coding agents get both over MCP (`docs_for_symbol`, `check_changes`), with rules for
+`AGENTS.md` on the [install page](https://staleproof.dev/#/install). Nothing runs and nothing is written; open the
+pull request for the before/after runs.
+
 ## Quickstart
 
 Three ways to start:
 
-- **No install.** Paste a pull request URL of any public Python repository on [staleproof.dev](https://staleproof.dev).
+- **No install.** Paste a pull request URL of any public Python, TypeScript or JavaScript repository on [staleproof.dev](https://staleproof.dev).
   It is indexed on the fly and checked in graph mode; examples are not run on the hosted service.
 - **One click.** On [staleproof.dev/#/install](https://staleproof.dev/#/install), type your repository and commit the
   workflow GitHub opens (or copy [`examples/staleproof.yml`](examples/staleproof.yml)). Every pull request then gets
@@ -104,6 +148,13 @@ npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
 npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267
 
+# Before a PR: which docs your working tree breaks (exit 1 on a predicted break), and the docs for one symbol
+npx -y staleproof check --fail-on-predicted
+npx -y staleproof docs-for Graph.query --repo FalkorDB/falkordb-py
+
+# No PR at all: audit the docs (health score, examples that no longer fit, API coverage)
+npx -y staleproof audit FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+
 # Run one docs example before and after a PR
 npx -y staleproof run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267
 
@@ -123,17 +174,18 @@ The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
 
 | Integration | One line | Guide |
 |---|---|---|
-| Website | Paste a pull request URL on [staleproof.dev](https://staleproof.dev) — no install, any public repository | [docs/install.md](docs/install.md) |
-| CLI | `npx -y staleproof <command>` — index, check, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
-| GitHub Action | `uses: rajkaria/staleproof@v1` — zero config: a comment on every PR with the docs it can make false and the examples run before and after ([`examples/staleproof.yml`](examples/staleproof.yml)) | [docs/github-action.md](docs/github-action.md) |
+| Website | Paste a pull request URL on [staleproof.dev](https://staleproof.dev), or audit a repository at [#/audit](https://staleproof.dev/#/audit) — no install, any public repository | [docs/install.md](docs/install.md) |
+| CLI | `npx -y staleproof <command>` — index, check (a PR or your working tree), audit, docs-for, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
+| GitHub Action | `uses: rajkaria/staleproof@v1` — zero config: a comment on every PR with the docs it can make false, the examples predicted to break and the examples run before and after ([`examples/staleproof.yml`](examples/staleproof.yml)); on a schedule, a docs audit kept in one issue | [docs/github-action.md](docs/github-action.md) |
 | MCP, hosted | `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` — nothing to install | [docs/mcp.md](docs/mcp.md) |
 | MCP, local (Claude Code) | `claude mcp add staleproof -- npx -y staleproof mcp` — runs examples too | [docs/mcp.md](docs/mcp.md) |
-| HTTP API | `staleproof serve`: JSON API with checks streamed over server-sent events | [docs/http-api.md](docs/http-api.md) |
+| HTTP API | `staleproof serve`: JSON API with checks and audits streamed over server-sent events, and the README badge | [docs/http-api.md](docs/http-api.md) |
 | Node.js library | `import { runGraphCheck } from 'staleproof'` | [docs/library.md](docs/library.md) |
 | Self-host | Vercel + FalkorDB Cloud (the live demo), Docker Compose, or a plain VM | [docs/DEPLOY.md](docs/DEPLOY.md) |
 
 Who it is for: SDK and client-library teams whose docs live in another repository, DevRel and docs teams after a
-release, maintainers reviewing pull requests, AI coding agents, and platform teams with many repositories —
+release (and every week, with the audit), maintainers reviewing pull requests, developers and AI coding agents before
+they push, and platform teams with many repositories —
 [docs/use-cases.md](docs/use-cases.md).
 
 ## Documentation
@@ -143,9 +195,8 @@ release, maintainers reviewing pull requests, AI coding agents, and platform tea
 | [Introduction](docs/README.md) | [CLI](docs/cli.md) | [Core concepts](docs/concepts.md) | [Tools](docs/tools.md) | [Deploy](docs/DEPLOY.md) |
 | [Quickstart](docs/getting-started.md) | [GitHub Action](docs/github-action.md) | [Indexing](docs/indexing.md) | [Configuration](docs/configuration.md) | [Troubleshooting and FAQ](docs/troubleshooting.md) |
 | [Install](docs/install.md) | [MCP server](docs/mcp.md) | [Example runner](docs/example-runner.md) | [Graph model and Cypher](docs/GRAPH-MODEL.md) | |
-| [Use cases](docs/use-cases.md) | | | | |
-| | [HTTP API](docs/http-api.md) | [Decisions and memory](docs/memory.md) | [Facts from the graph](docs/FACTS.md) | |
-| | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
+| [Use cases](docs/use-cases.md) | [HTTP API](docs/http-api.md) | [Decisions and memory](docs/memory.md) | [Facts from the graph](docs/FACTS.md) | |
+| [Docs audit](docs/audit.md) | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
 
 **For LLMs and coding assistants:** [`llms.txt`](llms.txt) indexes every page. The live site serves the same docs as
 plain text — [`/llms.txt`](https://staleproof.dev/llms.txt),
@@ -207,7 +258,8 @@ GitHub (repositories) ──index──▶ FalkorDB: one graph per organisation 
 | `record_verdict` | ok / governed / skipped, with the reason |
 
 `write_decision` (humans record decisions; future checks cite them) and `docs_patch` are available over MCP, the CLI
-and the web demo. MCP clients also get `check_pull_request`, the whole report for a pull request in one call.
+and the web demo. MCP clients also get `check_pull_request`, the whole report for a pull request in one call;
+`check_changes` and `docs_for_symbol`, for edits before there is a pull request; and `audit_docs`, the docs audit.
 Parameters, results and errors for each: [docs/tools.md](docs/tools.md).
 
 ## Status
@@ -215,6 +267,7 @@ Parameters, results and errors for each: [docs/tools.md](docs/tools.md).
 | Status | What |
 |---|---|
 | **Built and run** (against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
+| **Static checks and the audit** | Example calls checked against the code at index time, on the current FalkorDB docs, GraphRAG-SDK, Flask (Sphinx docs) and httpx: the findings [above](#without-a-pull-request). Predicted breaks in PR checks, `check` on a working tree, `docs-for`, and the audit's CLI, badge, HTTP API and MCP tool are covered by `npm run verify` on the fixture organisations (Python, TypeScript, reStructuredText); the Action's audit mode has run on GitHub, and for it and `open-docs-pr` the tests check the commands, flags and report lines the steps use. |
 | **Agent mode, run with a real model** | `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API ([how](docs/agent.md)), on the CLI and the live site. Each PR got a different tool order: #262 impact → read_section → decisions_for → run_example → record_verdict (5 calls, 1 verdict); #267 15 calls, 3 verdicts, each citing its before/after runs; #276 38 calls paging through 43 sections, all with verdicts. The first #276 run stopped at 40 turns with 21 sections open: `impact` capped results at 40 and the model's invented paging arguments were dropped silently; `impact` now pages, unknown arguments are an error, and the loop tracks every impacted section itself. Every verdict on these four PRs is `ok` — they are fixes, and FalkorDB updates its docs in the same PR — so the live graph holds no proposed edit; edits and the docs patch are exercised on the test fixture organisation. |
 | **Live** | [staleproof.dev](https://staleproof.dev) (same deployment: [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app)) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Hosted workspaces: any public repository is indexed on first use into a workspace graph of its own (`gh-<owner>`), with size limits and least-recently-used eviction; MCP over HTTP at `https://staleproof.dev/api/mcp`. Published on npm as [`staleproof`](https://www.npmjs.com/package/staleproof). |
 | **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
@@ -226,8 +279,14 @@ Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeD
 
 ## Limits, stated plainly
 
-- **Python code only.** Docs can be any Markdown/MDX; code repositories are parsed as Python. JavaScript examples in
-  the docs are indexed but not linked or run.
+- **Python, TypeScript and JavaScript.** Python is read anywhere; TypeScript and JavaScript inside published npm
+  packages. Docs can be Markdown, MDX or reStructuredText; Sphinx is scanned, not built, so `.. include::`, autodoc
+  output and Sphinx extensions are not expanded, and `:ref:` resolves within one page.
+- **Only Python examples run and get argument checks.** JavaScript accepts any argument count, so JavaScript and
+  TypeScript examples are linked and checked only for names that do not exist, and are never run.
+- **Static checks follow exact resolutions only.** A call reached by name, a function behind an unknown decorator, a
+  dynamic class or a `*args`/`**kwargs` call is never judged: no mismatch and no predicted break is not proof that an
+  example works. The runs are.
 - **Call resolution is static.** Dynamic dispatch the types don't reveal falls back to by-name edges inside repositories
   the module imports (labelled `by-name` everywhere they appear), or to no edge.
 - **Index an organisation's repositories together.** Calls between repositories resolve only among repositories passed
@@ -236,7 +295,7 @@ Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeD
 - **Change detection is per definition.** A moved file reads as every definition removed and added again;
   `export-removed` also fires when any module stops importing a name from its own package; a section longer than 8,000
   characters always shows as a conflict in the docs patch.
-- **Graph mode samples.** It ranks the first page of impact and runs at most three examples; the agent covers every
+- **Graph mode samples.** It ranks the first page of impact and runs at most three examples (predicted breaks first); the agent covers every
   impacted section. Graph mode is what the Action runs without a key, and what the hosted site runs (without
   examples).
 - **The sandbox is a guard, not a security boundary.** The example process refuses network connections and DNS at the

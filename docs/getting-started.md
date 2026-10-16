@@ -1,12 +1,12 @@
 # Quickstart
 
-From nothing to a checked pull request. First the three ways to start: no install on the website, one click for the GitHub Action, or one command. Then the full walkthrough: start FalkorDB, index FalkorDB's three public repositories, check a real pull request with and without a model, run one docs example before and after it, build the patch, open the web UI and connect Claude Code; then your own repositories. Every command here is copy-pasteable; you need no account other than an optional model API key.
+From nothing to a checked pull request. First the three ways to start: no install on the website, one click for the GitHub Action, or one command. Then the full walkthrough: start FalkorDB, index FalkorDB's three public repositories, check a real pull request with and without a model, run one docs example before and after it, build the patch, check your own changes before there is a pull request, open the web UI and connect Claude Code; then your own repositories. Every command here is copy-pasteable; you need no account other than an optional model API key.
 
 ## Three ways to start
 
 ### No install: the website
 
-Open [staleproof.dev](https://staleproof.dev) and paste the URL of a pull request in any public Python repository on GitHub. The first check of a repository downloads and indexes it on the fly, then checks the pull request in graph mode: the doc sections it can make false with the evidence path for each, the changed symbols no doc reaches, and the ranking. Examples are not run on the hosted service, which has no sandbox. A docs site that lives in another repository can be named next to it, so both are indexed together.
+Open [staleproof.dev](https://staleproof.dev) and paste the URL of a pull request in any public Python, TypeScript or JavaScript repository on GitHub. The first check of a repository downloads and indexes it on the fly, then checks the pull request in graph mode: the doc sections it can make false with the evidence path for each, the changed symbols no doc reaches, and the ranking. Examples are not run on the hosted service, which has no sandbox. A docs site that lives in another repository can be named next to it, so both are indexed together.
 
 ### One click: the GitHub Action
 
@@ -80,7 +80,7 @@ Leave the scratch server local (the default) or point `STALEPROOF_SCRATCH_URL` a
 npx -y staleproof index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
-This clones the three repositories (the client library, the SDK built on it, and the docs site), parses their Python code and Markdown/MDX docs, resolves calls across all three, and writes the graph `falkordb`: a command that names a repository uses the graph of its owner, lowercased, unless `--org` or `STALEPROOF_ORG` names another. Progress goes to stderr; at the end it prints one line per repository with its commit, symbol and call counts, one line per docs repository with sections, examples and links, and the dependencies it found between the repositories (for example `FalkorDB/GraphRAG-SDK → FalkorDB/falkordb-py (declares falkordb)`).
+This clones the three repositories (the client library, the SDK built on it, and the docs site), parses their Python code and Markdown/MDX docs, resolves calls across all three, checks every docs example against the code it calls, and writes the graph `falkordb`: a command that names a repository uses the graph of its owner, lowercased, unless `--org` or `STALEPROOF_ORG` names another. Progress goes to stderr; at the end it prints one line per repository with its commit, symbol and call counts, one line per docs repository with sections, examples and links, and the dependencies it found between the repositories (for example `FalkorDB/GraphRAG-SDK → FalkorDB/falkordb-py (declares falkordb)`).
 
 Index related repositories in one command: calls and doc links resolve across repositories only within a single `index` run. Re-running the same command later is safe; it updates the graph in place and marks what disappeared as gone instead of deleting it.
 
@@ -166,7 +166,19 @@ npx -y staleproof patch <pr-url> --out docs-fix.diff
 npx -y staleproof patch <pr-url> --open-pr
 ```
 
-## 7. Open the web UI
+## 7. No pull request yet?
+
+Two commands work before anything is pushed, and one with no change at all. In a checkout of a repository the graph holds (or will index on first use):
+
+```bash
+npx -y staleproof docs-for Graph.query --repo FalkorDB/falkordb-py   # which docs depend on it, before you change it
+npx -y staleproof check                                              # which docs your uncommitted and unpushed changes make false
+npx -y staleproof audit FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs   # how true the docs are right now
+```
+
+`check` with no URL lists the impacted sections and the examples predicted to break, each with its line and the reason, without running anything; add `--fail-on-predicted` to use it as a pre-push hook ([CLI](cli.md#check-without-a-pull-request)). `audit` scores the docs from 0 to 100 and lists every example line that no longer fits the code ([Docs audit](audit.md)).
+
+## 8. Open the web UI
 
 ```bash
 npx -y staleproof serve
@@ -174,20 +186,22 @@ npx -y staleproof serve
 
 Open `http://127.0.0.1:8080`. Paste a pull request URL, pick agent mode (when the server has model credentials) or graph mode, and watch the trace stream in. The startup line on stderr says which graph is served and whether agent mode is on. Use `--port` and `--host` to change the address. The same process serves the [HTTP API](http-api.md) and MCP over HTTP at `/api/mcp`. With `--hosted`, it indexes any public repository on demand into a graph of its own, as staleproof.dev does.
 
-## 8. Add it to Claude Code
+## 9. Add it to Claude Code
 
 ```bash
 claude mcp add staleproof -- npx -y staleproof mcp
 ```
 
-Claude Code now has the eleven tools, on the graph `falkordb` you indexed (the stdio server uses `STALEPROOF_ORG` when set, else the graph of the repository's owner, like the CLI). Ask it, for example: "What docs can https://github.com/FalkorDB/falkordb-py/pull/267 make false? Show the evidence path for each." It answers with `check_pull_request`, or step by step with `impact`, `read_section` and `run_example`. To skip the local setup, add the hosted server instead: `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` (no example runs there). [MCP server](mcp.md) covers other clients and a full session.
+Claude Code now has the fourteen tools, on the graph `falkordb` you indexed (the stdio server uses `STALEPROOF_ORG` when set, else the graph of the repository's owner, like the CLI). Ask it, for example: "What docs can https://github.com/FalkorDB/falkordb-py/pull/267 make false? Show the evidence path for each." It answers with `check_pull_request`, or step by step with `impact`, `read_section` and `run_example`; before a pull request, it can call `docs_for_symbol` and `check_changes` on what it is editing. To skip the local setup, add the hosted server instead: `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` (no example runs there). [MCP server](mcp.md) covers other clients and a full session.
 
 ## Index your own repositories
 
 ### What works
 
 - **Code repositories in Python.** Every `.py` file is parsed, except tests (`test/`, `tests/`, `testing/`, `test_*.py`, `*_test.py`, `conftest.py`), `setup.py`, and files under `scripts/`, `benchmarks/` or `docs/`. Python files under `example/`, `examples/`, `sample/`, `samples/`, `tutorial/`, `tutorials/`, `notebook/` or `notebooks/` become runnable example scripts.
-- **Docs in Markdown or MDX.** Every `.md` and `.mdx` file in any indexed repository, except housekeeping files (`CHANGELOG`, `CONTRIBUTING`, `LICENSE` and similar). A docs site can be its own repository with no code at all. Notebooks and `.rst` files are not read.
+- **TypeScript and JavaScript libraries.** The source of every published npm package in the repository (a `package.json` with a `name`, not `private`; monorepos too), except tests and build tooling. JavaScript and TypeScript examples in the docs, and `examples/*.js` or `*.ts` scripts, are linked to it and checked for names that do not exist; they are not run.
+- **Docs in Markdown, MDX or reStructuredText.** Every `.md`, `.mdx` and `.rst` file in any indexed repository, except housekeeping files (`CHANGELOG`, `CONTRIBUTING`, `LICENSE` and similar). Sphinx docs work: code blocks, doctests, `:func:`/`:meth:`/`:class:` roles and `:doc:`/`:ref:` links. A docs site can be its own repository with no code at all. Notebooks are not read.
+- **Examples you do not want run** can be marked in the docs (`<!-- staleproof: skip -->`) or in a `.staleproof.toml` ([Configuration](configuration.md#repository-configuration)).
 - **GitHub repositories, public or private.** The CLI, a server you run and the GitHub Action read private repositories with `GITHUB_TOKEN` (or `GH_TOKEN`) set to a token that can read them; the Action's default token reads its own repository. The hosted site, staleproof.dev, indexes public repositories only.
 
 [Indexing](indexing.md) has the full rules.

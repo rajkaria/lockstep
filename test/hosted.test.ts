@@ -245,3 +245,25 @@ describe('hosted workspaces (FalkorDB)', () => {
     expect(repoOfArgs({ text: 'no ids' })).toBeUndefined();
   });
 });
+
+describe('tarball extraction keeps the repository config', () => {
+  it('extracts a root .staleproof.toml but no other hidden path', async () => {
+    const { mkdtemp, writeFile, mkdir, readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const dir = await mkdtemp(join(tmpdir(), 'staleproof-cfg-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+    await writeFile(join(dir, '.staleproof.toml'), 'ignore = ["docs/old.md"]\n');
+    await mkdir(join(dir, '.github'), { recursive: true });
+    await writeFile(join(dir, '.github', 'notes.md'), '# hidden\n');
+    await writeFile(join(dir, 'README.md'), '# Readme\n');
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'add', '-A'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'x'], { cwd: dir });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    const body = archive(dir, sha);
+    const fetchImpl = (async () => new Response(new Uint8Array(body))) as unknown as typeof fetch;
+    const home = await mkdtemp(join(tmpdir(), 'staleproof-cfg-home-'));
+    const co = await downloadRepo(home, 'acme/cfg', 'HEAD', { fetchImpl });
+    const top = await readdir(co.dir);
+    expect(top.sort()).toEqual(['.staleproof.toml', 'README.md']);
+  });
+});

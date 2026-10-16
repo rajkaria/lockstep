@@ -1,6 +1,6 @@
 # Tools reference
 
-This page is the reference for the eleven tools that read and write the graph: the eight the agent chooses between, `write_decision` for people, and `check_pull_request` and `docs_patch` for MCP clients. It covers how every tool reports its work, who can call which tool, the ids they take, the usual order of calls for one pull request, and how errors come back; then each tool's parameters (generated from the code) and the shape of its result, its summary text, its side effects and the errors it raises. It is for MCP client authors, library users and anyone reading a trace.
+This page is the reference for the fourteen tools that read and write the graph: the eight the agent chooses between, `write_decision` for people, and `check_pull_request`, `check_changes`, `docs_for_symbol`, `audit_docs` and `docs_patch` for MCP clients. It covers how every tool reports its work, who can call which tool, the ids they take, the usual order of calls for one pull request, and how errors come back; then each tool's parameters (generated from the code) and the shape of its result, its summary text, its side effects and the errors it raises. It is for MCP client authors, library users and anyone reading a trace.
 
 ## How tools work
 
@@ -36,6 +36,9 @@ How the result reaches you depends on the caller:
 | Tool | Agent | Graph mode | MCP | CLI | HTTP API |
 |---|---|---|---|---|---|
 | `check_pull_request` | no | it runs graph mode | yes | `check --no-agent --format markdown` (the same report) | `POST /api/mcp` |
+| `check_changes` | no | no | yes (`dir` on the stdio server only) | `check` with no pull request (the same analysis of a working tree) | `POST /api/mcp` (with `files`) |
+| `docs_for_symbol` | no | no | yes | `docs-for` | `GET /api/docs-for` |
+| `audit_docs` | no | no | yes | `audit` (which can also run examples first) | `GET /api/audit`, `POST /api/audit` |
 | `impact` | yes | yes | yes | `check`, `run --pr` | inside `POST /api/check` |
 | `clearance` | yes | yes | yes | `check` | inside `POST /api/check` |
 | `read_section` | yes | no | yes | no | `GET /api/sections?id=` |
@@ -73,6 +76,8 @@ An MCP client usually starts with `check_pull_request`, which runs `impact`, `cl
 6. `docs_patch` (MCP) or `staleproof patch` for the diff.
 
 `clearance` (what no doc reaches) and `rank_sections` (which page matters most) are optional. For falkordb-py#262 the agent's order was impact → read_section → decisions_for → run_example → record_verdict.
+
+Before a pull request exists, an MCP client calls `docs_for_symbol` with the function it is about to change (to know which docs to update in the same change), then `check_changes` with the files it edited (to see which examples its edits break). With no change at all, `audit_docs` reports how the docs stand. These three write nothing to the graph.
 
 ## Errors
 
@@ -310,6 +315,56 @@ Side effects: a graph-mode check ([`runGraphCheck`](agent.md#graph-mode)): the p
 
 Errors: those of `impact`, and on a hosted server the [hosted limits](troubleshooting.md#hosted-service).
 
+### `check_changes` result
+
+| Field | Meaning |
+|---|---|
+| `impact` | The shape of the [`impact` result](#impact-result), for the edits: `pr` describes them (`state: 'local'`, `url` a GitHub compare or tree link, `title` such as `2 edited files on acme/mini-client@a6214ef` or `Working tree of main against a6214ef`), `changed[]` the symbol-level changes, `sections[]` every impacted section (not paged), `predicted[]` and `mismatched[]` |
+| `cleared[]` | Changed symbols no doc reaches within 3 call hops, as in the [`clearance` result](#clearance-result) |
+
+With `files`, each file's new content is compared with the same path at the commit the graph indexed (`base` overrides it), read from a local clone when the server has one, else from `raw.githubusercontent.com`; `content: null` deletes the file, and a path not in that commit is a new file. With `dir` (stdio server only), the checkout's working tree is compared with `base`, else its merge base with the remote default branch, as `staleproof check` without a pull request does.
+
+Summary: `<n> changed symbol(s) reach(es) <N> doc section(s) (<b> breaking, <a> signature, <c> behavior; <x> in other repositories).`, then ` <k> example(s) is/are predicted to break, the call no longer fitting the changed code.` and ` <m> changed symbol(s) reach(es) no doc.` when they apply; or `These changes touch no Python symbol in <repo>; no docs can be falsified through the code.`
+
+Side effects: none; it writes nothing to the graph (a server may index the repository first when the graph lacks it).
+
+Errors: `repo (owner/name) is required with files`; `<repo> is not indexed in the "<graph>" graph`; `send the changed files: files: [{path, content}] with repo (this server cannot read your disk)` (`dir`, or neither, on an HTTP server); `cannot tell which GitHub repository <dir> is (origin: <url>); pass --repo owner/name`; git errors for a `dir` that is not a checkout; `GitHub raw <path>@<sha7> failed: <status>`.
+
+### `docs_for_symbol` result
+
+| Field | Meaning |
+|---|---|
+| `query` | The symbol as given |
+| `symbols[]` | The symbols looked up, at most 5: `id`, `qualname`, `kind`, `repo`, `signature`, `url` (on the default branch) |
+| `ambiguous` | True when the name matched several symbols and none exactly; narrow it with a qualified name or `repos` |
+| `sections[]` | Every doc section or example script that reaches one of them: `section`, `heading`, `repo`, `url`, `evidence` (symbol first, doc last), `hops`, `confidence`, `examples` (ids of the examples on the path), `symbols` (which of the looked-up symbols reach it) |
+| `mismatched[]` | Lines in those examples that already do not fit the code: `example`, `url`, `line`, `kind`, `detail`, `call` |
+
+An id or qualified name that matches exactly wins over suffix and bare-name matches. Sections are ordered by hops, then repository and id.
+
+Summary: `<n> doc section(s) reach(es) <qualname> (<d> name or call it directly; <r> repositor(y|ies)).`, followed by ` <m> line(s) in those examples already do not fit the code.` and ` The name is ambiguous: pass a qualified name or repos to narrow it.` when they apply; `No doc section or example reaches <qualname> within 3 call hops: changing it cannot make a doc false through the code.`; or `No live symbol in the "<graph>" graph is named <symbol>.` (not an error). For several symbols, `<qualname>` reads `<n> symbols named <symbol>` (with `(of <total>)` when more matched). No side effects.
+
+### `audit_docs` result
+
+The [docs audit](audit.md) of the given repositories, or of every repository in the graph.
+
+| Field | Meaning |
+|---|---|
+| `org`, `repos[]` | The graph, and each audited repository: `name`, `sha`, `symbols`, `sections`, `indexVersion` |
+| `outdatedIndex` | True when a repository was indexed by a Staleproof older than 0.3 (no `MISMATCH` edges or export flags) |
+| `score`, `grade` | 0-100 and `A`-`F` ([the formula](audit.md#the-score)) |
+| `deductions[]` | `points` and `why` for each deduction |
+| `examples` | `total`, `python`, `linked` (calling at least one indexed symbol), `mismatched` (with at least one `MISMATCH` line) |
+| `mismatches[]` | Every example line that no longer fits the code: `example`, `url` (to the line), `repo`, `path`, `heading`, `line`, `kind`, `detail`, `call`, `symbol` |
+| `coverage` | `api` (public symbols), `documented`, `percent` |
+| `undocumented[]` | The most used public symbols no doc names or calls, at most `limit`: `qualname`, `repo`, `kind`, `signature`, `url`, `callers`, `crossRepoCallers` |
+| `runs[]`, `runCounts` | The latest run of each example at the indexed commits (`example`, `url`, `status`, `error`, `reason`), and the counts `pass`, `fail` (with timeouts), `skipped`, `error` |
+| `generatedAt` | Milliseconds since the epoch |
+
+Summary: `Docs health <score>/100 (<grade>) for <repo or "<n> repositories">.`, then `<m> of <linked> examples that call the code no longer fit it (<lines> lines).` (or `All <linked> examples that call the code fit it.`), `<documented> of <api> public symbols (<percent>%) are named or called by a doc.`, `<f> of <ran> examples run at the indexed commits fail.` when runs are recorded, and the older-index sentence when `outdatedIndex`.
+
+Side effects: none; over MCP it runs no example. Errors: `not indexed in the "<graph>" graph: <repos>` for a named repository the graph does not hold (the stdio server indexes it first).
+
 ### `impact` result
 
 | Field | Meaning |
@@ -321,6 +376,8 @@ Errors: those of `impact`, and on a hosted server the [hosted limits](troublesho
 | `offset` | Index of the first section on this page |
 | `truncated` | True when more sections follow this page |
 | `counts` | `breaking`, `api`, `behavior`: sections per severity, over all pages |
+| `predicted[]` | Over all pages, the example lines [predicted to break](concepts.md#predicted-breaks): `example`, `url` (to the line), `section`, `repo`, `path`, `line` (in the doc file), `symbol`, `change`, `kind` (`removed`, `missing-import`, `unknown-keyword`, `too-many-arguments` or `missing-argument`), `detail`, `call` (as written) and `confidence` (`exact`, or `by-name` for a removed symbol linked by name) |
+| `mismatched[]` | Impacted example lines that already did not fit the code when it was indexed (`MISMATCH` edges), except those the predictions already report: `example`, `url`, `line`, `kind`, `detail`, `call` |
 
 Each impacted section:
 
@@ -337,7 +394,7 @@ Each impacted section:
 | `examples[]` | Ids of the section's code examples the walk reached |
 | `crossRepo` | True when the section is in a different repository from the pull request |
 
-Summary: `<n> changed symbols (and <m> added) reach <N> doc sections (<b> breaking, <a> signature, <c> behavior; <x> in other repositories).` The added count appears only when there are added symbols, and the wording agrees in number (`1 changed symbol reaches 1 doc section`). With more than 40 sections, or an `offset`, it continues `Showing <i>–<j> of <N>; call impact again with offset=<k> for the rest.` (or ends `Showing <i>–<j> of <N>.` on the last page). A pull request that changed no Python symbol gives `<url> changed no Python symbols in <repo>; no docs can be falsified through code.`
+Summary: `<n> changed symbols (and <m> added) reach <N> doc sections (<b> breaking, <a> signature, <c> behavior; <x> in other repositories).` The added count appears only when there are added symbols, and the wording agrees in number (`1 changed symbol reaches 1 doc section`). With predictions it continues ` <k> examples are predicted to break, the call no longer fitting the changed code (<id>, <id>, <id>, …).`, and with lines already out of date ` <m> impacted example(s) already did not fit the code before this pull request.` With more than 40 sections, or an `offset`, it continues `Showing <i>–<j> of <N>; call impact again with offset=<k> for the rest.` (or ends `Showing <i>–<j> of <N>.` on the last page). A pull request that changed no symbol of the indexed code (Python, TypeScript or JavaScript) gives `<url> changed no Python symbols in <repo>; no docs can be falsified through code.`
 
 Side effects: the first call for a pull request ingests it: the `PullRequest` node, `CHANGED_IN` edges, removed symbols recreated with `late` links ([Pull request ingestion](concepts.md#pull-request-ingestion)). With `git`, ingestion also fetches the pull request's repository and checks out its default branch in the local clone; the GitHub metadata of a merged pull request is cached under `STALEPROOF_HOME/cache`.
 
@@ -356,7 +413,7 @@ Errors:
 | `cleared[]` | Changed symbols (not `added`) with no doc within 3 call hops: `symbol` (qualified name), `name`, `repo`, `change`, `visibility`, `textMatches`, `grep` |
 | `docsRepos[]` | The repositories that have doc sections, which `textMatches` searched |
 
-`textMatches` is the number of lines matching `git grep -cw <name> -- '*.md' '*.mdx'` in the local clones of `docsRepos` (0 for repositories with no local clone, so always 0 on serverless hosts). `grep` is the command to check it yourself: `git grep -nw <name> -- '*.md' '*.mdx'`.
+`textMatches` is the number of lines matching `git grep -cw <name> -- '*.md' '*.mdx' '*.rst'` in the local clones of `docsRepos` (0 for repositories with no local clone, so always 0 on serverless hosts). `grep` is the command to check it yourself: `git grep -nw <name> -- '*.md' '*.mdx' '*.rst'`.
 
 Summary, one of:
 

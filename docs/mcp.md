@@ -1,6 +1,6 @@
 # MCP server
 
-Staleproof's tools over the Model Context Protocol, so Claude Code, Claude Desktop, claude.ai, Cursor, VS Code or any MCP client can ask what a pull request can make false, run the affected examples, record verdicts and get the docs patch. Use the hosted server with nothing installed, or run `staleproof mcp` on your machine over stdio. This page covers both, what the server exposes, how results and errors look, a worked session and security notes.
+Staleproof's tools over the Model Context Protocol, so Claude Code, Claude Desktop, claude.ai, Cursor, VS Code or any MCP client can ask what a pull request can make false, run the affected examples, record verdicts and get the docs patch; and, before there is a pull request, which docs depend on a function it is about to change, which docs its edits make false, and how the docs stand overall. Use the hosted server with nothing installed, or run `staleproof mcp` on your machine over stdio. This page covers both, what the server exposes, how results and errors look, a worked session and security notes.
 
 ## Hosted: nothing to install
 
@@ -18,9 +18,10 @@ Then ask, for example: "Which docs can https://github.com/FalkorDB/falkordb-py/p
 
 On the hosted server:
 
-- **Any public repository is indexed on first use.** `check_pull_request`, `impact` and `clearance` index the pull request's repository when no graph has it, into the workspace graph of its owner (`gh-<owner>`), and index it again at its default branch head once that is more than 7 days old. FalkorDB's own repositories answer from the curated `falkordb` graph. The limits are in [Deploy](DEPLOY.md#hosted-mode).
-- **Every other tool goes to the graph of the repository it names**: the `owner/repo:` prefix of its ids. A repository that is not indexed yet fails with `<owner/repo> is not indexed yet: call check_pull_request with one of its pull requests first`. A call that names no repository fails with `name a repository: pass a pull request URL (pr_url) or ids that start with owner/repo:`, except `decisions_for` and `write_decision`, which then use the curated graph.
+- **Any public repository is indexed on first use.** `check_pull_request`, `impact` and `clearance` index the pull request's repository when no graph has it, into the workspace graph of its owner (`gh-<owner>`), and so do `check_changes` (its `repo`), `docs_for_symbol` (the first of `repos`, or the `owner/repo:` prefix of the symbol id) and `audit_docs` (the first of `repos`). A workspace is indexed again at its default branch head once it is more than 7 days old, or when an older Staleproof indexed it. FalkorDB's own repositories answer from the curated `falkordb` graph. The limits are in [Deploy](DEPLOY.md#hosted-mode).
+- **Every other tool goes to the graph of the repository it names**: the `owner/repo:` prefix of its ids. A repository that is not indexed yet fails with `<owner/repo> is not indexed yet: call check_pull_request with one of its pull requests first`. A call that names no repository fails with `name a repository: pass a pull request URL (pr_url), repo or repos ("owner/name"), or ids that start with owner/repo:`, except `decisions_for` and `write_decision`, which then use the curated graph.
 - **No examples run.** `run_example` is not offered, because the service has no sandbox, and `check_pull_request` with `run_examples` executes nothing there. Run examples with the local server, the [CLI](cli.md#run) or the [GitHub Action](github-action.md).
+- **It cannot read your disk.** `check_changes` takes the edited files' contents (`files`); `dir` fails with `send the changed files: files: [{path, content}] with repo (this server cannot read your disk)`.
 
 ## Local over stdio
 
@@ -32,7 +33,7 @@ On the hosted server:
 claude mcp add staleproof -- npx -y staleproof mcp
 ```
 
-With no `FALKORDB_URL`, the server uses the FalkorDB on `localhost:6379`, and starts a local one there (falkordblite) when nothing answers. `check_pull_request`, `impact` and `clearance` index the pull request's repository the first time they see it, at its default branch head, so nothing has to be set up first.
+With no `FALKORDB_URL`, the server uses the FalkorDB on `localhost:6379`, and starts a local one there (falkordblite) when nothing answers. `check_pull_request`, `impact` and `clearance` index the pull request's repository the first time they see it, at its default branch head, so nothing has to be set up first. `audit_docs` and `docs_for_symbol` index the repositories named in `repos`; `check_changes` indexes the repository it checks: `repo`, or the `origin` remote of the checkout in `dir` (default: the directory the server was started in, usually your project).
 
 To use a FalkorDB elsewhere, or another graph:
 
@@ -42,7 +43,7 @@ claude mcp add staleproof -e FALKORDB_URL='falkor://falkordb:<password>@<host>:<
 
 Use `falkors://` for an endpoint with TLS. Add `-e GITHUB_TOKEN=<token>` for private repositories and to raise GitHub's limit of 60 API requests an hour, which the first look at each pull request uses. Check the server with `claude mcp list`.
 
-The stdio server uses the graph named by `--org` or `STALEPROOF_ORG` when one is set, else, like the CLI, the graph named after the owner of the repository each call is about, so `check` and the MCP tools read the same graph. Repositories it indexes on first use go into that graph.
+The stdio server uses the graph named by `--org` or `STALEPROOF_ORG` when one is set, else, like the CLI, the graph named after the owner of the repository each call is about (for `check_changes` on a checkout, the owner of its `origin`), so `check` and the MCP tools read the same graph. Repositories it indexes on first use go into that graph.
 
 ### Claude Desktop, Cursor and other clients
 
@@ -74,7 +75,7 @@ For a second graph, add a second entry, for example `staleproof-encode` with `"S
 
 ### Over HTTP from your machine
 
-`npx -y staleproof serve` exposes the same endpoint locally, at `http://127.0.0.1:8080/api/mcp`, for clients that only speak HTTP. Started plainly it answers from its one graph and indexes nothing on first use (index with `staleproof index` first); `serve --hosted` indexes any public repository on demand, as the hosted server does. See [HTTP API](http-api.md#post-apimcp).
+`npx -y staleproof serve` exposes the same endpoint locally, at `http://127.0.0.1:8080/api/mcp`, for clients that only speak HTTP. Started plainly it answers from its one graph and indexes a repository into it the first time an indexing tool names it, as the stdio server does (but `check_changes` takes `files` there, not `dir`); `serve --hosted` indexes any public repository on demand into workspace graphs, as the hosted server does. See [HTTP API](http-api.md#post-apimcp).
 
 ## What the server exposes
 
@@ -89,19 +90,22 @@ For a second graph, add a second entry, for example `staleproof-encode` with `"S
 The server gives clients these instructions:
 
 ```text
-Staleproof keeps docs true to code over a FalkorDB graph of an organisation's repositories. For a pull request, call check_pull_request first: it returns every doc section and example the change can make false, with the evidence path for each. To judge sections one by one: impact, read_section and run_example, decisions_for before editing, then propose_edit or record_verdict for every impacted section, and docs_patch for the diff. Every result lists the Cypher it ran.
+Staleproof keeps docs true to code over a FalkorDB graph of an organisation's repositories. For a pull request, call check_pull_request first: it returns every doc section and example the change can make false, with the evidence path for each. To judge sections one by one: impact, read_section and run_example, decisions_for before editing, then propose_edit or record_verdict for every impacted section, and docs_patch for the diff. Before a pull request exists: docs_for_symbol says which docs depend on a function you are about to change, and check_changes says which docs your edits make false and which examples they break. With no change at all, audit_docs reports which examples no longer fit the code and which public API no doc covers. Every result lists the Cypher it ran.
 ```
 
 The hosted server appends: `This is the hosted server: any public GitHub repository is indexed on first use (into a workspace graph named gh-<owner>); examples are not executed here; run them with the CLI (npx -y staleproof run <example-id> --pr <url>) or the GitHub Action.`
 
 ## The tools
 
-Eleven tools over stdio; ten on the hosted server, which leaves out `run_example`. Each tool's description, as the client sees it, ends with the Cypher of the first query it runs; its input schema is JSON Schema. [Tools reference](tools.md) lists every parameter.
+Fourteen tools over stdio; thirteen on the hosted server, which leaves out `run_example`. Each tool's description, as the client sees it, ends with the Cypher of the first query it runs; its input schema is JSON Schema. [Tools reference](tools.md) lists every parameter.
 
 | Tool | What it does | Writes to the graph |
 |---|---|---|
 | [`check_pull_request`](tools.md#check_pull_request) | The whole check in one call, as the Markdown report the GitHub Action posts: the examples run before and after, every impacted section with its evidence path, the cleared symbols, and verdicts recorded earlier. `run_examples: true` also runs up to 3 affected examples before and after (local servers only; takes minutes). | A Check node (graph mode) with its trace; on the first call, the pull request and its changes; with `run_examples`, Run nodes |
-| [`impact`](tools.md#impact) | The doc sections and examples a pull request can make false, with severity and the evidence path for each; 40 per call, page with `offset`. | On the first call for a pull request: the pull request and its symbol-level changes. |
+| [`check_changes`](tools.md#check_changes) | Edits that are not a pull request yet: the doc sections they can make false with the evidence path for each, the examples [predicted to break](concepts.md#predicted-breaks), the impacted lines already out of date, and the changed symbols no doc reaches. Send `repo` and `files` (path and full new content, `null` to delete; at most 50), compared with the commit the graph indexed; a local server can instead read a checkout's working tree (`dir`, `base`). | No (it may index the repository first) |
+| [`docs_for_symbol`](tools.md#docs_for_symbol) | The doc sections and examples that depend on a symbol (an id, a qualified name, `Class.method` or a bare name), with the evidence path for each: what to update in the same change. | No |
+| [`audit_docs`](tools.md#audit_docs) | The [docs audit](audit.md) with no pull request: a 0-100 health score, every example line that no longer fits the code, API coverage, and the runs recorded at the indexed commits. It runs nothing. | No |
+| [`impact`](tools.md#impact) | The doc sections and examples a pull request can make false, with severity and the evidence path for each; 40 per call, page with `offset`. It also lists, over every page, the examples predicted to break and the impacted lines already out of date. | On the first call for a pull request: the pull request and its symbol-level changes. |
 | [`clearance`](tools.md#clearance) | The changed symbols that reach no doc within 3 call hops, each with a `git grep` command to check the claim. | As `impact`, if called first. |
 | [`read_section`](tools.md#read_section) | The current Markdown of a section and its code examples. | No |
 | [`run_example`](tools.md#run_example) | Runs an example in the sandbox, before and after a pull request with `pr_url`; identical runs are answered from the graph. Not on the hosted server. | Run nodes |
@@ -145,7 +149,7 @@ Errors come back as a result with `isError: true` and one text block:
 | Unknown tool | `unknown tool <name>` |
 | A parameter the tool does not declare | `<tool> has no parameter <names>; its parameters are <list>` |
 | Invalid input | `invalid input: <field or (root)>: <problem>; …` |
-| The tool failed | The tool's message, for example `pr_url is required`, `refused: no path in the graph from <pr>'s changes to <section>. …`, `<pr> has not been checked yet; call impact first`, or `<owner/repo> is not indexed in the "<org>" graph. Run: staleproof index …` (from `staleproof serve` without `--hosted`, which indexes nothing on first use) |
+| The tool failed | The tool's message, for example `pr_url is required`, `refused: no path in the graph from <pr>'s changes to <section>. …`, `<pr> has not been checked yet; call impact first`, `<owner/repo> is not indexed in the "<org>" graph. Run: staleproof index …`, or `send the changed files: files: [{path, content}] with repo (this server cannot read your disk)` (`check_changes` with `dir` on an HTTP server) |
 | Hosted routing | `name a repository: …`, `<owner/repo> is not indexed yet: call check_pull_request with one of its pull requests first`, and the hosted limits ([Troubleshooting](troubleshooting.md#hosted-service)) |
 
 Unknown parameters are rejected with the same message the agent loop uses, so a client never gets a silently different answer.
@@ -195,24 +199,46 @@ Run ids come from the `run_example` result (`runs[].id`). For the GRAPH.EXPLAIN 
 
 With only `ok` verdicts, the summary is `No proposed edits for this pull request yet.` With proposed edits, the data holds the diff, a pull request title and description, and the changed files as `<owner>/<repo>:<path>`; ask the client to apply the diff in your checkout of the docs repository.
 
+### Before a pull request
+
+A coding agent changing the code can ask the same graph before anything is committed. These calls are from the test suite's fixture organisation, where `acme/mini-docs` documents `acme/mini-client`.
+
+**"I'm about to add a required `timeout` to `Graph.query`. Which docs depend on it?"**
+
+```json
+{ "name": "docs_for_symbol", "arguments": { "symbol": "Graph.query", "repos": ["acme/mini-client"] } }
+```
+
+The summary: `3 doc sections reach miniclient.graph.Graph.query (2 name or call it directly; 2 repositories). 2 line(s) in those examples already do not fit the code.` The data lists each section with its evidence path, for example `miniclient.graph.Graph.query ← miniclient.graph.Graph.ro_query ← acme/mini-docs:docs/getting-started.mdx:1`.
+
+**"I've made the change. Which examples does it break?"**
+
+```json
+{ "name": "check_changes", "arguments": { "repo": "acme/mini-client", "files": [{ "path": "miniclient/graph.py", "content": "<the whole new file>" }] } }
+```
+
+The file is compared with the commit the graph indexed. The result's `impact.predicted` names the line that breaks: `docs/getting-started.mdx:0` line 18, `` `Graph.query` requires `timeout`, which the example does not pass ``. On a local stdio server, `{ "dir": "/path/to/checkout" }` checks the checkout's working tree instead of the files sent. Nothing is written to the graph.
+
+The rules to put in a repository's `AGENTS.md` or `CLAUDE.md`, so an agent does this unasked, are on [staleproof.dev/#/install](https://staleproof.dev/#/install) and in [Use cases](use-cases.md#coding-agents-before-the-pull-request).
+
 ## Security notes
 
 - **The local server runs code on your machine.** `run_example` (and `check_pull_request` with `run_examples`) clones the repositories, installs them from source, and executes docs code. The install step runs the projects' build steps with an allow-listed environment that leaves out `FALKORDB_URL`, `GITHUB_TOKEN` and model keys; the examples themselves run with a minimal environment and a socket-level block on network access other than the scratch FalkorDB. That is a guard, not a security boundary ([Example runner](example-runner.md#the-sandbox)).
 - **It flushes the scratch FalkorDB** before every example run. Staleproof refuses only when the scratch server is the one in `FALKORDB_URL`; make sure `STALEPROOF_SCRATCH_URL` (or the local port 6390) holds nothing you need.
-- **It writes to the graph.** Pull requests and their changes (`check_pull_request`, `impact`, `clearance`), checks (`check_pull_request`), runs (`run_example`), verdicts (`propose_edit`, `record_verdict`) and decisions (`write_decision`, which can also mark an older decision superseded). Nothing is deleted, but whoever uses the server changes what later checks, the comment and the patch see. On the hosted server those writes go to a shared workspace graph that everyone checking that repository there sees.
+- **It writes to the graph.** Pull requests and their changes (`check_pull_request`, `impact`, `clearance`), checks (`check_pull_request`), runs (`run_example`), verdicts (`propose_edit`, `record_verdict`) and decisions (`write_decision`, which can also mark an older decision superseded). `check_changes`, `docs_for_symbol` and `audit_docs` write nothing beyond indexing a repository the graph lacks; the files sent to `check_changes` are not stored. Nothing is deleted, but whoever uses the server changes what later checks, the comment and the patch see. On the hosted server those writes go to a shared workspace graph that everyone checking that repository there sees.
 - **It writes nothing to GitHub.** No MCP tool opens a pull request or posts a comment; opening a docs pull request is the CLI's `patch --open-pr`.
 - **Credentials sit in the client configuration** in plain text, including any FalkorDB password in `FALKORDB_URL` and a `GITHUB_TOKEN`. The hosted server needs none.
 - Keep your client's approval prompts on for `run_example`, `propose_edit`, `record_verdict` and `write_decision`.
 
 ## Limits
 
-- The tools take a GitHub pull request URL; uncommitted or unpushed changes cannot be checked. The local server indexes the pull request's repository on first use (private ones with `GITHUB_TOKEN`); the hosted server reads public repositories only.
+- `check_changes` checks edits statically: it predicts which examples break, but runs nothing. Running examples before and after needs a pull request (`run_example` with `pr_url`). The local server indexes the repositories it is asked about on first use (private ones with `GITHUB_TOKEN`); the hosted server reads public repositories only.
 - First-use indexing indexes the pull request's repository alone. For docs in another repository, index them together first (`staleproof index <code repo> <docs repo>`), or use `staleproof check <pr-url> --with <docs repo>`, or name them next to the repository on the website.
-- The stdio server serves one graph. The hosted server picks the graph per repository.
+- The stdio server serves one graph per call: `STALEPROOF_ORG` when set, else the owner of the repository the call names. The hosted server picks the graph per repository.
 - No `--fresh` over MCP: an identical recorded run is always answered from the graph. Use `staleproof run --fresh` to execute it again.
 - Only `check_pull_request` stores a Check node; the other tools store no check and no trace.
 - `impact` returns 40 sections per call; for a larger pull request the client must page with `offset`, as the summary tells it to.
-- `/api/mcp` has no rate limit and no authentication, and its calls do not wait in the HTTP server's one-check-at-a-time queue.
+- `/api/mcp` has no authentication, a rate limit of 300 requests per client per hour, and its calls do not wait in the HTTP server's one-check-at-a-time queue.
 
 ## Related
 

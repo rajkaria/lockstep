@@ -354,7 +354,7 @@ export function createApp(opts: AppOptions): Hono {
         chain = chain.then(() => stream.writeSSE({ event: 'trace', data: JSON.stringify(e) })).catch(() => undefined);
       };
       try {
-        if (mutex.busy) send({ type: 'queued' });
+        if (hosted && mutex.busy) send({ type: 'queued' });
         const target = hosted ? await mutex.run(() => hosted.ensure(repo, { with: withRepos, onEvent: send })) : { graph };
         const known = (await target.graph.run(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name`, { name: repo })).rows.length > 0;
         if (!known) throw new Error(`${repo} is not indexed in the "${target.graph.name}" graph: staleproof index ${repo}`);

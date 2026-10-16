@@ -60,7 +60,7 @@ Function duration is capped at 300 s (`maxDuration`). An agent check in the serv
 Hosted mode is how staleproof.dev checks pull requests in repositories nobody indexed for it. It is on by default in the Vercel function, and `staleproof serve --hosted` (or `STALEPROOF_HOSTED=on`) turns it on anywhere else. The code is [src/hosted/workspaces.ts](../src/hosted/workspaces.ts).
 
 - **The curated graph** is the server's own (`STALEPROOF_ORG`, else `falkordb`), indexed and seeded from the CLI as before. A repository it holds answers from it; hosted mode never re-indexes, evicts or adds to it.
-- **Workspaces.** Any other public repository is indexed on demand into the graph of its owner, `gh-<owner>` (the owner slugged), when a check, `POST /api/index` or an MCP call first names it. The repositories named with it (`with`: a docs site, an SDK) join the same workspace, and every repository of a workspace is indexed together on every refresh, so calls and doc links across them resolve.
+- **Workspaces.** Any other public repository is indexed on demand into the graph of its owner, `gh-<owner>` (the owner slugged), when a check, an audit (`POST /api/audit`, the `#/audit` page), `POST /api/index` or an MCP call first names it. The repositories named with it (`with`: a docs site, an SDK) join the same workspace, and every repository of a workspace is indexed together on every refresh, so calls and doc links across them resolve.
 - **Downloads.** Each repository is downloaded as a tarball at its default branch head and only the files the indexer reads are extracted ([Indexing](indexing.md#without-git-tarballs)); translated docs directories, such as `docs/zh/` or `i18n/pt-BR/`, are skipped. The extracted files are deleted once the repository is indexed.
 - **Registry.** The graph `staleproof-hosted` records which workspace holds each repository, its commit, when it was indexed and last used, a lock per workspace (one indexing run at a time across every server instance; others wait up to 150 seconds), and the daily counters.
 - **No examples.** Graph-mode checks in a workspace run no examples, and the MCP endpoint does not offer `run_example`. A server with a sandbox still runs them for the curated graph.
@@ -74,10 +74,10 @@ Hosted mode is how staleproof.dev checks pull requests in repositories nobody in
 | Repositories per workspace | 4 | Indexing a fifth is refused, with the `npx -y staleproof index …` command to run it yourself |
 | Workspace graph size | 20 MB | A workspace bigger than this after indexing is dropped and refused (needs `GRAPH.MEMORY USAGE` on the server; without it, the size is not checked) |
 | Eviction | above 70 MB, down to 55 MB | Before indexing, when the FalkorDB server uses more than 70 MB, the least recently used workspaces are dropped until it uses less than 55 MB. If it still uses more than 70 MB, indexing is refused: `the hosted service is full right now.` A dropped workspace is indexed again the next time someone asks for it |
-| Re-index | after 7 days | A workspace indexed more than 7 days ago is indexed again at its default branch heads on its next use |
+| Re-index | after 7 days | A workspace indexed more than 7 days ago, or by an older Staleproof (before index format 3: no static checks or export flags), is indexed again at its default branch heads on its next use |
 | Index runs | 500 per day | Across the service, per UTC day |
 | Archive size | 150 MB | Compressed download, checked against `Content-Length` and while streaming |
-| Files | 3000 | Files the indexer would read (Python, Markdown and MDX, dependency manifests) |
+| Files | 3000 | Files the indexer would read (Python, TypeScript and JavaScript, Markdown, MDX and reStructuredText, dependency manifests) |
 | Agent checks | 50 per day | `STALEPROOF_AGENT_CHECKS_PER_DAY` in the Vercel function; over it, agent checks answer 429 and graph mode still works |
 
 The eviction thresholds fit FalkorDB Cloud's free tier, which is 100 MB. `GET /api/health` reports the server's memory and the limits, and `GET /api/workspaces` lists every workspace ([HTTP API](http-api.md#get-apiworkspaces)).
@@ -125,7 +125,7 @@ Keep the scratch server separate and disposable: leave `STALEPROOF_SCRATCH_URL` 
 claude mcp add staleproof -e FALKORDB_URL=falkor://localhost:6379 -e STALEPROOF_ORG=falkordb -- npx -y staleproof mcp
 ```
 
-Add `-e GITHUB_TOKEN=...` to raise the GitHub limit for pull requests the graph has not ingested yet. A deployment also serves MCP over Streamable HTTP at `/api/mcp`, for example `claude mcp add --transport http staleproof https://<your host>/api/mcp`. [MCP server](mcp.md) covers other clients and the eleven tools.
+Add `-e GITHUB_TOKEN=...` to raise the GitHub limit for pull requests the graph has not ingested yet. A deployment also serves MCP over Streamable HTTP at `/api/mcp`, for example `claude mcp add --transport http staleproof https://<your host>/api/mcp`. [MCP server](mcp.md) covers other clients and the fourteen tools.
 
 ## GitHub Action
 

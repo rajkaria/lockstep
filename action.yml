@@ -298,7 +298,13 @@ runs:
         existing=$(gh api "repos/$REPO/issues?state=open&per_page=100" \
           --jq '[.[] | select(.pull_request == null) | select((.body // "") | startswith("<!-- staleproof-audit -->"))][0].number // empty' 2>/dev/null || true)
         todo=$(( ${MISMATCHED:-0} + ${FAILING:-0} ))
-        title="Docs health $SCORE/100: $MISMATCHED example(s) no longer fit the code"
+        if [ "${MISMATCHED:-0}" != "0" ]; then
+          title="Docs health $SCORE/100: $MISMATCHED example(s) no longer fit the code"
+        elif [ "${FAILING:-0}" != "0" ]; then
+          title="Docs health $SCORE/100: $FAILING example(s) fail when run"
+        else
+          title="Docs health $SCORE/100"
+        fi
         if [ -n "$existing" ]; then
           gh api -X PATCH "repos/$REPO/issues/$existing" -f title="$title" -F body=@"$REPORT" >/dev/null && echo "Updated issue #$existing."
           if [ "$todo" = "0" ]; then

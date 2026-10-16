@@ -82,7 +82,9 @@ A run recorded before this entry point existed (Staleproof 0.1.0) keeps its `Syn
 
 ## Skip rules
 
-An example is recorded as skipped, with the reason, when it cannot be run honestly. The rules are checked in this order on the prepared code:
+An example the docs mark not to run is never prepared: one with a `skip` or `expect-error` [directive](indexing.md#example-directives) (`<!-- staleproof: skip -->`, a fence word such as `no-run`, a pytest-codeblocks or Sybil marker), or on a page the repository's `skip-examples` matches ([Configuration](configuration.md#repository-configuration)). `run_example` answers `Not run: the docs or the repository config mark this example skip.`, or for `expect-error` `Not run: the docs mark this example as failing on purpose (expect-error), so a run proves nothing.`, with verdict `skipped`, and records no run. `audit --run` never picks such examples; in graph mode one can take one of the run slots and come back skipped.
+
+Otherwise an example is recorded as skipped, with the reason, when it cannot be run honestly. The rules are checked in this order on the prepared code:
 
 1. **Not Python**: the block's language is not Python: `not Python (bash)`, or `not Python (no language tag)`.
 2. **Empty**: `empty example`.

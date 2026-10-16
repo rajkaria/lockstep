@@ -131,6 +131,7 @@ The system prompt ([src/agent/prompt.ts](../src/agent/prompt.ts)) states the job
 
 - A path is a reason to look, not proof: "A path from a changed symbol to the section is the reason to look at it, not proof that it is wrong."
 - Breaking changes usually make a section wrong; behaviour changes often do not.
+- An example `impact` lists as predicted to break (its call no longer fits the changed code) is strong evidence the section is wrong: run it to prove it when possible, and fix the call to the new signature. Its "already did not fit" list is drift that predates the pull request.
 - Running a Python example before and after is the strongest evidence: passes before and fails after proves a break, passes both is good evidence the docs hold, fails both means it was already broken, and skipped runs prove nothing.
 - Check `decisions_for` before editing, and cite a governing decision with a `governed` verdict. Use earlier verdicts, and whether maintainers accepted them.
 - Never propose an edit without a path from the pull request's changes; `propose_edit` refuses otherwise.
@@ -215,7 +216,7 @@ The order:
 1. `impact`, with `max_hops` when it is not 3.
 2. `clearance` (always 3 hops).
 3. `rank_sections` over the impacted section ids of the first page, if there are any.
-4. `run_example` with the pull request, for up to `maxRuns` distinct examples taken from the `exact` sections of the first page.
+4. `run_example` with the pull request, for up to `maxRuns` distinct examples: first those `impact` predicts to break (with an `exact` match), so a run can prove the prediction, then examples from the `exact` sections of the first page.
 
 Graph mode samples: it ranks the first `impact` page (40 sections) and runs at most 3 examples by default, so on a pull request with more sections, the rest are listed in the impact count but not ranked or run. It writes no verdicts and no edits, does not read decisions, sends no reminders and computes no "since" summary. A tool error is recorded in the trace and the remaining steps continue; only a failing `impact` ends the check as `error` (`The check failed: impact failed`). On #262 it makes 4 calls: impact, clearance, rank_sections and one run_example.
 
