@@ -44,12 +44,18 @@ export function checkMarkdown(opts: {
 }): string {
   const { impact } = opts;
   const runs = opts.runs ?? [];
-  const breaks = runs.filter((r) => r.verdict === 'breaks').length;
+  // Pages the pull request edits itself: their examples were run as they are on the default branch.
+  const touched = new Set(impact.pr.docsTouched.map((p) => `${impact.pr.repo}:${p}`));
+  const onTouchedPage = (id: string) => touched.has(id.split(':').slice(0, 2).join(':'));
+  const breaks = runs.filter((r) => r.verdict === 'breaks' && !onTouchedPage(r.example)).length;
+  const editedBreaks = runs.filter((r) => r.verdict === 'breaks' && onTouchedPage(r.example)).length;
   const title = breaks
     ? `this pull request breaks ${breaks} docs example${breaks === 1 ? '' : 's'}`
-    : impact.totalSections
-      ? `${impact.totalSections} doc section${impact.totalSections === 1 ? '' : 's'} this pull request can make false`
-      : 'no docs reach the code this pull request changed';
+    : editedBreaks
+      ? `${editedBreaks} docs example${editedBreaks === 1 ? '' : 's'} break${editedBreaks === 1 ? 's' : ''} unless this pull request's doc edits fix ${editedBreaks === 1 ? 'it' : 'them'}`
+      : impact.totalSections
+        ? `${impact.totalSections} doc section${impact.totalSections === 1 ? '' : 's'} this pull request can make false`
+        : 'no docs reach the code this pull request changed';
   const out: string[] = [COMMENT_MARKER, `### Staleproof: ${title}`, '', opts.summary, ''];
   if (runs.length) {
     const short = (sha: string) => sha.slice(0, 7);
@@ -57,7 +63,10 @@ export function checkMarkdown(opts: {
       `| Example | Before (\`${short(impact.pr.before)}\`) | After (\`${short(impact.pr.after)}\`) | Result |`,
       '|---|---|---|---|',
     );
-    for (const r of runs) out.push(`| [${esc(r.example.split(':').slice(1).join(':'))}](${r.url}) | ${side(r.before)} | ${side(r.after)} | ${RESULT[r.verdict]} |`);
+    for (const r of runs) {
+      const result = onTouchedPage(r.example) && r.verdict === 'breaks' ? `${RESULT.breaks}, as written on the default branch; this PR edits the page` : RESULT[r.verdict];
+      out.push(`| [${esc(r.example.split(':').slice(1).join(':'))}](${r.url}) | ${side(r.before)} | ${side(r.after)} | ${result} |`);
+    }
     out.push('');
   }
   if (impact.sections.length) {
@@ -66,7 +75,7 @@ export function checkMarkdown(opts: {
     out.push('| Change | Doc section | Repository | Evidence path (changed symbol ← … ← doc) | Hops |', '|---|---|---|---|---|');
     for (const s of sections) {
       out.push(
-        `| ${SEV[s.severity]} | [${esc(s.heading)}](${s.url}) | ${s.repo} | ${s.evidence.map((n) => `\`${esc(n)}\``).join(' ← ')} | ${s.hops} (${s.confidence}) |`,
+        `| ${SEV[s.severity]} | [${esc(s.heading)}](${s.url})${onTouchedPage(s.section.replace('#', ':')) ? ' (page edited in this PR)' : ''} | ${s.repo} | ${s.evidence.map((n) => `\`${esc(n)}\``).join(' ← ')} | ${s.hops} (${s.confidence}) |`,
       );
     }
     if (impact.truncated) out.push('', `_${impact.totalSections - impact.sections.length} more sections not shown._`);
@@ -83,6 +92,7 @@ export function checkMarkdown(opts: {
     out.push('');
     if (opts.verdicts.some((v) => v.verdict === 'stale')) out.push('Proposed edits: `npx staleproof patch ' + impact.pr.url + '`', '');
   }
+  if (impact.pr.docsTouched.length) out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: the sections and examples above are as they are on the default branch.`, '');
   if (opts.agentSummary) out.push(opts.agentSummary, '');
   out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${opts.org}\` · ${impact.pr.before.slice(0, 7)}..${impact.pr.after.slice(0, 7)}</sub>`);
   return out.join('\n');

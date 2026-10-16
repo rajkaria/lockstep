@@ -81,4 +81,18 @@ describe('checkMarkdown', () => {
     const md = checkMarkdown({ impact: { ...impact, sections: [], totalSections: 0, counts: { breaking: 0, api: 0, behavior: 0 } }, summary: 's', cleared: [], org: 'acme' });
     expect(md.split('\n')[1]).toBe('### Staleproof: no docs reach the code this pull request changed');
   });
+
+  it('says when the pull request edits the page of an example that breaks as written on the default branch', () => {
+    const md = checkMarkdown({
+      impact: { ...impact, pr: { ...impact.pr, repo: 'acme/docs', docsTouched: ['a.mdx'] } },
+      summary: 's',
+      cleared: [],
+      runs: [{ example: 'acme/docs:a.mdx:0', url: 'u', verdict: 'breaks', before: { status: 'pass', error: '', reason: '' }, after: { status: 'fail', error: 'E', reason: '' } }],
+      org: 'acme',
+    });
+    expect(md.split('\n')[1]).toBe("### Staleproof: 1 docs example breaks unless this pull request's doc edits fix it");
+    expect(md).toContain('**breaks**: passes before this PR, fails after, as written on the default branch; this PR edits the page |');
+    expect(md).toContain('(page edited in this PR)');
+    expect(md).toContain('This pull request also edits `a.mdx`: the sections and examples above are as they are on the default branch.');
+  });
 });

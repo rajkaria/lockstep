@@ -62,6 +62,10 @@ runs:
         node-version: 22
 
     - uses: astral-sh/setup-uv@v10.3.0
+      with:
+        # The job has no checkout of its own; uv's cache is keyed by the runner, not a lock file.
+        enable-cache: false
+        ignore-empty-workdir: true
 
     - name: Start FalkorDB
       id: db
