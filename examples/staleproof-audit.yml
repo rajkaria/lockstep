@@ -1,0 +1,22 @@
+# .github/workflows/staleproof-audit.yml: a weekly docs audit, with no pull request.
+# Every example's calls are checked against the code (across repositories), examples run at the default
+# branch, and one issue is kept up to date: opened when something needs fixing, closed when all clear.
+name: Staleproof docs audit
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rajkaria/staleproof@v1
+        # with:
+        #   also-index: your-org/docs   # docs in another repository
+        #   audit-runs: 20              # examples to run (0: static checks only)
+        #   fail-on: mismatches         # fail the job when an example no longer fits the code

@@ -23,6 +23,26 @@ export interface IngestedPr {
 export class NotIndexedError extends Error {}
 
 /**
+ * A pull request that is still open may have moved since it was ingested (new pushes):
+ * when its head differs from the one recorded, drop the old symbol diff so the next tool
+ * call ingests the current one. Merged pull requests never change. Returns whether it moved.
+ * A failed lookup (rate limit, network) keeps what the graph has.
+ */
+export async function refreshIfMoved(graph: OrgGraph, config: Config, prUrl: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<boolean> {
+  const row = (await graph.run<{ state: string; head: string }>(`MATCH (pr:PullRequest {url: $url}) RETURN pr.state AS state, pr.head_sha AS head`, { url: prUrl })).rows[0];
+  if (!row || row.state !== 'open') return false;
+  let pr: PullRequestInfo;
+  try {
+    pr = await fetchPullRequest(parsePrUrl(prUrl), { token: config.githubToken, fetchImpl: opts.fetchImpl });
+  } catch {
+    return false;
+  }
+  if (pr.headSha === row.head && !pr.mergedAt) return false;
+  await graph.run(Q.resetPullRequest, { url: prUrl });
+  return true;
+}
+
+/**
  * The pull request URL with the repository named as the graph has it. GitHub names are
  * case-insensitive, so `falkordb/FalkorDB-py#262` is the same pull request as
  * `FalkorDB/falkordb-py#262`; every node is keyed by the indexed spelling.

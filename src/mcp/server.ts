@@ -10,7 +10,7 @@ import { runGraphCheck } from '../agent/graph-check.js';
 import { checkReport } from '../format/report.js';
 import { ensureIndexed } from '../indexer/ensure.js';
 import { repoOfArgs } from './args.js';
-import { canonicalPrUrl } from '../pr/ingest.js';
+import { canonicalPrUrl, refreshIfMoved } from '../pr/ingest.js';
 import { parsePrUrl } from '../pr/github.js';
 import { packageVersion } from '../pkg.js';
 import { ALL_TOOLS, inputJsonSchema } from '../tools/index.js';
@@ -56,6 +56,7 @@ export const checkPullRequestTool: ToolDef<{ pr_url: string; run_examples?: bool
   queries: [Q.impact, Q.clearance, Q.rankSections],
   async run(ctx, input) {
     const pr = parsePrUrl(input.pr_url).url;
+    await refreshIfMoved(ctx.graph, ctx.config, pr);
     const r = await runGraphCheck(ctx, pr, { maxRuns: input.run_examples ? 3 : 0 });
     const report = await checkReport(ctx, ctx.graph.name, pr);
     return { tool: 'check_pull_request', summary: r.summary, data: { report, checkId: r.checkId, status: r.status }, queries: [] };

@@ -146,6 +146,32 @@ describe('decisions, verdicts and memory (FalkorDB)', () => {
     await expect(openDocsPr(patch, { token: '', target: 'fork', fetchImpl })).rejects.toThrow(/GITHUB_TOKEN/);
   });
 
+  it('opens the docs PR in the repository itself for CI tokens: no fork, no user, into the given branch', async () => {
+    const patch = await buildDocsPatch(ctx, PR.url);
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      const path = url.replace('https://api.github.com', '');
+      const method = init?.method ?? 'GET';
+      calls.push(`${method} ${path}`);
+      const body =
+        path === '/repos/acme/mini-docs' ? { default_branch: 'main' }
+        : path.startsWith('/repos/acme/mini-docs/git/ref/heads/') ? { object: { sha: 'feature-sha' } }
+        : path.includes('/contents/') && method === 'GET' ? { sha: 'blob' }
+        : path.includes('/pulls?') ? []
+        : path.endsWith('/pulls') ? { html_url: 'https://github.com/acme/mini-docs/pull/9' }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as typeof fetch;
+    const opened = await openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['ACME/mini-docs'], fetchImpl });
+    expect(opened).toEqual([{ repo: 'acme/mini-docs', url: 'https://github.com/acme/mini-docs/pull/9', target: 'same-repo', branch: 'staleproof/docs-acme-mini-client-7' }]);
+    expect(calls).not.toContain('GET /user');
+    expect(calls.some((c) => c.includes('/forks'))).toBe(false);
+    expect(calls).toContain('GET /repos/acme/mini-docs/git/ref/heads/feature');
+    const create = calls.indexOf('POST /repos/acme/mini-docs/pulls');
+    expect(create).toBeGreaterThan(calls.indexOf('PUT /repos/acme/mini-docs/contents/docs/getting-started.mdx'));
+    expect(await openDocsPr(patch, { token: 't', target: 'same-repo', only: ['acme/other'], fetchImpl })).toEqual([]);
+  });
+
   it('summarises what changed since the last check', async () => {
     const s = await sinceLastCheck(ctx, started);
     expect(s.prs.map((p) => p.url)).toEqual([PR.url]);

@@ -97,3 +97,24 @@ describe('importsName', () => {
     expect(importsName('from acme import ClientPool', 'acme', 'Client')).toBe(false);
   });
 });
+
+describe('open pull requests that moved', () => {
+  it('drops the old diff when the head changed, keeps it otherwise, and ignores lookup failures', async () => {
+    const { refreshIfMoved, recordPullRequest: record } = await import('../src/pr/ingest.js');
+    const { graph, done } = await testGraph('refresh');
+    try {
+      const pr = fakePr({ number: 77, url: 'https://github.com/acme/mini-client/pull/77', state: 'open', mergedAt: null, mergeSha: null, headSha: 'head-1' });
+      await graph.run(`CREATE (:Symbol {id: 'acme/mini-client:pkg.f', status: 'live'})`);
+      await record(graph, pr, { before: 'b', after: 'a', files: [], docsTouched: [], symbols: [{ repo: 'acme/mini-client', qualname: 'pkg.f', name: 'f', kind: 'function', change: 'modified', before: 'def f()', after: 'def f()', path: 'pkg.py', lineno: 1, endLineno: 2 }] });
+      const gh = (head: string) => (async () => new Response(JSON.stringify({ number: 77, title: 't', body: '', user: { login: 'u' }, state: 'open', merged_at: null, merge_commit_sha: null, base: { sha: 'b', ref: 'main' }, head: { sha: head, ref: 'f' } }))) as unknown as typeof fetch;
+      const config = testConfig();
+      expect(await refreshIfMoved(graph, config, pr.url, { fetchImpl: gh('head-1') })).toBe(false);
+      expect(await refreshIfMoved(graph, config, pr.url, { fetchImpl: (async () => { throw new Error('offline'); }) as unknown as typeof fetch })).toBe(false);
+      expect(await refreshIfMoved(graph, config, pr.url, { fetchImpl: gh('head-2') })).toBe(true);
+      const row = (await graph.run<{ ingested: number | null; n: number }>(`MATCH (p:PullRequest {url: $url}) OPTIONAL MATCH (p)<-[c:CHANGED_IN]-() RETURN p.ingested_at AS ingested, count(c) AS n`, { url: pr.url })).rows[0]!;
+      expect(row).toEqual({ ingested: null, n: 0 });
+    } finally {
+      await done();
+    }
+  });
+});

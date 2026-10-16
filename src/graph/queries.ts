@@ -209,6 +209,14 @@ export const lateLinkExamples = q('index', 'lateLinkExamples', 'Link code exampl
   RETURN count(u) AS linked
 `);
 
+export const resetPullRequest = q('index', 'resetPullRequest', 'An open pull request moved (new pushes): drop its old symbol diff so it is ingested again.', `
+  MATCH (pr:PullRequest {url: $url})
+  SET pr.ingested_at = null
+  WITH pr
+  MATCH (pr)<-[c:CHANGED_IN]-()
+  DELETE c
+`);
+
 export const upsertChangedIn = q('index', 'upsertChangedIn', 'Attach each changed symbol to the pull request with the kind of change.', `
   UNWIND $rows AS row
   MATCH (s:Symbol {id: row.id})
@@ -809,6 +817,7 @@ export const ALL_QUERIES: NamedQuery[] = [
   upsertUses,
   upsertMismatches,
   upsertLinks,
+  resetPullRequest,
   predictedCalls,
   mismatchesFor,
   findSymbols,

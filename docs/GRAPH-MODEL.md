@@ -632,6 +632,16 @@ MATCH (b:DocSection {id: row.to})
 MERGE (a)-[:LINKS_TO]->(b)
 ```
 
+**`resetPullRequest`** — An open pull request moved (new pushes): drop its old symbol diff so it is ingested again.
+
+```cypher
+MATCH (pr:PullRequest {url: $url})
+SET pr.ingested_at = null
+WITH pr
+MATCH (pr)<-[c:CHANGED_IN]-()
+DELETE c
+```
+
 **`markGoneDocs`** — Doc sections and examples no longer present are kept but marked gone.
 
 ```cypher

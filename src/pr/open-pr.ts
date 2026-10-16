@@ -3,8 +3,15 @@ import { githubJson, type GitHubOptions } from './github.js';
 
 export interface OpenPrOptions extends GitHubOptions {
   token: string;
-  /** `fork` (default): the PR is opened inside your fork. `upstream`: against the original repository. */
-  target: 'fork' | 'upstream';
+  /**
+   * `fork` (default): the PR is opened inside your fork. `upstream`: from your fork against the original repository.
+   * `same-repo`: a branch in the repository itself and a PR there — what a CI token can do (no fork, no user account).
+   */
+  target: 'fork' | 'upstream' | 'same-repo';
+  /** `same-repo`: the branch the PR targets (default: the repository's default branch), e.g. the checked PR's own branch. */
+  base?: string;
+  /** `same-repo`: only these repositories (a CI token can write to its own repository only); others are skipped. */
+  only?: string[];
   /** Poll interval while GitHub creates a fork. */
   pollMs?: number;
 }
@@ -12,7 +19,7 @@ export interface OpenPrOptions extends GitHubOptions {
 export interface OpenedPr {
   repo: string;
   url: string;
-  target: 'fork' | 'upstream';
+  target: OpenPrOptions['target'];
   branch: string;
 }
 
@@ -24,6 +31,7 @@ export async function openDocsPr(patch: DocsPatch, opts: OpenPrOptions): Promise
   if (!opts.token) throw new Error('opening a pull request needs GITHUB_TOKEN');
   if (patch.files.length === 0) throw new Error('the patch is empty: no proposed edits to open a pull request for');
   const gh = <T>(path: string, init: RequestInit = {}) => githubJson<T>(path, opts, init);
+  if (opts.target === 'same-repo') return openInRepo(patch, opts, gh);
   const me = await gh<{ login: string }>('/user');
   const opened: OpenedPr[] = [];
   const repos = [...new Set(patch.files.map((f) => f.repo))];
@@ -70,6 +78,41 @@ export async function openDocsPr(patch: DocsPatch, opts: OpenPrOptions): Promise
       }),
     });
     opened.push({ repo: target, url: pr.html_url, target: opts.target, branch });
+  }
+  return opened;
+}
+
+type Gh = <T>(path: string, init?: RequestInit) => Promise<T>;
+
+/** A branch in each docs repository itself (no fork), its files updated, and a pull request into `base`. */
+async function openInRepo(patch: DocsPatch, opts: OpenPrOptions, gh: Gh): Promise<OpenedPr[]> {
+  const opened: OpenedPr[] = [];
+  const repos = [...new Set(patch.files.map((f) => f.repo))].filter((r) => !opts.only || opts.only.some((o) => o.toLowerCase() === r.toLowerCase()));
+  for (const repo of repos) {
+    const files = patch.files.filter((f) => f.repo === repo);
+    const info = await gh<{ default_branch: string }>(`/repos/${repo}`);
+    const base = opts.base ?? info.default_branch;
+    const baseSha = (await gh<{ object: { sha: string } }>(`/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`)).object.sha;
+    const branch = `staleproof/docs-${patch.pr.repo.replace('/', '-')}-${patch.pr.number}`;
+    await gh(`/repos/${repo}/git/refs`, { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseSha }) }).catch(async (err: Error) => {
+      if (!/already exists|422/.test(err.message)) throw err;
+      await gh(`/repos/${repo}/git/refs/heads/${branch}`, { method: 'PATCH', body: JSON.stringify({ sha: baseSha, force: true }) });
+    });
+    for (const f of files) {
+      const current = await gh<{ sha: string }>(`/repos/${repo}/contents/${encodePath(f.path)}?ref=${encodeURIComponent(branch)}`);
+      await gh(`/repos/${repo}/contents/${encodePath(f.path)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          message: `docs: update ${f.path} for ${patch.pr.repo}#${patch.pr.number}`,
+          content: Buffer.from(f.after, 'utf8').toString('base64'),
+          sha: current.sha,
+          branch,
+        }),
+      });
+    }
+    const existing = await gh<{ html_url: string }[]>(`/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`);
+    const pr = existing[0] ?? (await gh<{ html_url: string }>(`/repos/${repo}/pulls`, { method: 'POST', body: JSON.stringify({ title: patch.title, body: patch.body, head: branch, base }) }));
+    opened.push({ repo, url: pr.html_url, target: 'same-repo', branch });
   }
   return opened;
 }

@@ -22,7 +22,7 @@ import { ALL_TOOLS } from '../tools/index.js';
 import { HostedLimitError, Workspaces, type HostedEvent } from '../hosted/workspaces.js';
 import { RepoTooLargeError } from '../indexer/tarball.js';
 import { parseRepoName } from '../indexer/repo.js';
-import { canonicalPrUrl, NotIndexedError } from '../pr/ingest.js';
+import { canonicalPrUrl, NotIndexedError, refreshIfMoved } from '../pr/ingest.js';
 import { handleMcpRequest } from '../mcp/http.js';
 import { auditDocs, type AuditData } from '../audit.js';
 import { healthBadge } from './badge.js';
@@ -305,6 +305,7 @@ export function createApp(opts: AppOptions): Hono {
           const target = hosted ? await hosted.ensure(repo, { with: withRepos, onEvent: send }) : { graph, curated: true };
           const ctx = { graph: target.graph, config };
           pr = await canonicalPrUrl(target.graph, pr);
+          await refreshIfMoved(target.graph, config, pr);
           // Indexing came out of the same function-time budget.
           const budgetMs = config.checkBudgetMs ? Math.max(45_000, config.checkBudgetMs - (Date.now() - t0)) : undefined;
           if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send, budgetMs });

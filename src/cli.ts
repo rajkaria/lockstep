@@ -28,7 +28,7 @@ import { checkReport } from './format/report.js';
 import { ensureIndexed } from './indexer/ensure.js';
 import { openDocsPr } from './pr/open-pr.js';
 import { parsePrUrl } from './pr/github.js';
-import { canonicalPrUrl } from './pr/ingest.js';
+import { canonicalPrUrl, refreshIfMoved } from './pr/ingest.js';
 import { impactTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 import { auditDocs } from './audit.js';
@@ -191,6 +191,7 @@ async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; ef
         log('No model API key (ANTHROPIC_API_KEY): running graph mode. Set a key for agent mode, or pass --no-agent to skip this note.');
         opts.agent = false;
       }
+      if (await refreshIfMoved(ctx.graph, config, prUrl)) log(`${prUrl} has new commits since it was last checked: reading its current diff`);
       if (opts.agent) {
         const model = new AnthropicModel({
           model: opts.model ?? config.model,
@@ -412,7 +413,11 @@ program
   .option('--out <file>', 'write the diff to a file (the description goes to <file>.md)')
   .option('--open-pr', 'open the fix as a pull request in your fork (needs GITHUB_TOKEN)')
   .option('--upstream', 'with --open-pr: target the original repository instead of your fork')
-  .action(async (prUrl: string, opts: { out?: string; openPr?: boolean; upstream?: boolean }) => {
+  .option('--in-repo', 'with --open-pr: a branch and pull request in the docs repository itself, no fork (what a CI token can do)')
+  .option('--base <branch>', 'with --in-repo: the branch the fix targets (default: the default branch), e.g. the checked pull request\'s branch')
+  .option('--only <repos...>', 'with --in-repo: only these repositories (others are skipped)')
+  .action(async (prUrl: string, opts: { out?: string; openPr?: boolean; upstream?: boolean; inRepo?: boolean; base?: string; only?: string[] }) => {
+    if (opts.upstream && opts.inRepo) throw new Error('--upstream and --in-repo are different targets: pick one');
     aboutRepo(parsePrUrl(prUrl).fullName);
     await withGraph(async (store, org) => {
       const config = settings();
@@ -426,7 +431,13 @@ program
         console.log(`# ${patch.title}\n\n${patch.body}`);
       }
       if (opts.openPr) {
-        const opened = await openDocsPr(patch, { token: config.githubToken ?? '', target: opts.upstream ? 'upstream' : 'fork' });
+        const opened = await openDocsPr(patch, {
+          token: config.githubToken ?? '',
+          target: opts.inRepo ? 'same-repo' : opts.upstream ? 'upstream' : 'fork',
+          base: opts.base,
+          only: opts.only?.map(parseRepoName),
+        });
+        if (!opened.length) log('no pull request opened: no proposed edit is in a repository this token may write to');
         for (const o of opened) console.log(`opened ${o.url} (${o.target})`);
       }
     });

@@ -28,6 +28,9 @@ describe('install page links', () => {
     expect(all).toContain('      - uses: rajkaria/staleproof@v1\n        with:\n          also-index: acme/docs acme/sdk\n');
     expect(all).toContain('          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}\n');
     expect(all).toContain('          fail-on: breaks\n');
+    const audited = workflowYaml({ withRepos: [], agent: false, failOnBreaks: false, weeklyAudit: true });
+    expect(audited).toContain("on:\n  pull_request:\n  schedule:\n    - cron: '0 6 * * 1'\n  workflow_dispatch:\n");
+    expect(audited).toContain('  pull-requests: write\n  issues: write\n');
     // Every input the page can write is one the action declares.
     const action = await readFile(join(import.meta.dirname, '..', 'action.yml'), 'utf8');
     for (const input of ['also-index', 'anthropic-api-key', 'fail-on']) expect(action).toContain(`\n  ${input}:`);

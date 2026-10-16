@@ -86,6 +86,7 @@ function GitHubInstall({ initialRepo, health }: { initialRepo?: string; health?:
   const [docs, setDocs] = useState('');
   const [agent, setAgent] = useState(false);
   const [failOnBreaks, setFailOnBreaks] = useState(false);
+  const [weeklyAudit, setWeeklyAudit] = useState(false);
 
   // Look the repository up on GitHub (from the browser: the visitor's own rate limit) once typing pauses.
   useEffect(() => {
@@ -121,7 +122,7 @@ function GitHubInstall({ initialRepo, health }: { initialRepo?: string; health?:
     .split(/[\s,]+/)
     .map((d) => repoFromInput(d))
     .filter((d): d is string => !!d && d.toLowerCase() !== repo?.toLowerCase());
-  const yaml = useMemo(() => workflowYaml({ withRepos, agent, failOnBreaks }), [withRepos.join(' '), agent, failOnBreaks]);
+  const yaml = useMemo(() => workflowYaml({ withRepos, agent, failOnBreaks, weeklyAudit }), [withRepos.join(' '), agent, failOnBreaks, weeklyAudit]);
   const target = gh?.info?.full_name ?? repo;
   const link = target ? newWorkflowUrl(target, branch, yaml) : undefined;
   const hostedOk = !!health?.hosted?.enabled && !gh?.info?.private;
@@ -162,6 +163,10 @@ function GitHubInstall({ initialRepo, health }: { initialRepo?: string; health?:
               <label className="check">
                 <input type="checkbox" checked={failOnBreaks} onChange={(e) => setFailOnBreaks(e.target.checked)} /> Fail the check when an example passes before the pull
                 request and fails after it
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={weeklyAudit} onChange={(e) => setWeeklyAudit(e.target.checked)} /> Audit the whole docs every Monday: one issue lists the
+                examples that no longer fit the code (opened when there is something to fix, closed when all clear)
               </label>
               {gh?.error && (
                 <>

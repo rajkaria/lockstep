@@ -1,11 +1,14 @@
 name: Staleproof docs check
-description: Comment on every pull request with the docs it can make false (evidence path for each) and run their examples before and after. No setup, no secrets.
+description: Comment on every pull request with the docs it can make false (evidence path for each) and run their examples before and after; on a schedule, audit the whole docs. No setup, no secrets.
 author: Raj Karia
 branding:
   icon: book-open
   color: green
 
 inputs:
+  mode:
+    description: "`auto` (default): check the pull request on pull_request events, audit the docs otherwise (schedule, workflow_dispatch, push); `check` or `audit` to force one."
+    default: auto
   also-index:
     description: Other repositories to index together with this one, space- or comma-separated (e.g. your docs site `acme/docs`), so links across them resolve.
     default: ''
@@ -22,8 +25,20 @@ inputs:
     description: Graph mode runs up to this many affected examples before and after the pull request (0 to skip).
     default: '3'
   fail-on:
-    description: "`never` (default); `breaks`: fail the job when an example passes before the pull request and fails after it; `predicted`: also fail when a static check predicts an example's call no longer fits the changed code."
+    description: "`never` (default); `breaks`: fail the job when an example passes before the pull request and fails after it; `predicted`: also fail when a static check predicts an example's call no longer fits the changed code; `mismatches` (audit): fail when any example no longer fits the code."
     default: never
+  fail-under:
+    description: Audit mode. Fail the job when the docs health score is below this (0-100).
+    default: ''
+  audit-runs:
+    description: Audit mode. Run up to this many examples at the default branch (0 for static checks only).
+    default: '20'
+  issue:
+    description: Audit mode. Keep one issue up to date with the audit (opened when something needs fixing, closed when all clear). Needs `issues write`.
+    default: 'true'
+  open-docs-pr:
+    description: Agent mode on a pull request from this repository. Open the proposed docs edits as a pull request into the checked pull request's branch. Needs `contents write`.
+    default: 'false'
   comment:
     description: Post (and keep updating) one pull request comment. The report always goes to the job summary.
     default: 'true'
@@ -56,6 +71,12 @@ outputs:
   predicted:
     description: How many docs examples a static check predicts the pull request breaks (their call no longer fits the changed code).
     value: ${{ steps.check.outputs.predicted }}
+  score:
+    description: Audit mode. The docs health score (0-100).
+    value: ${{ steps.audit.outputs.score }}
+  mismatched:
+    description: Audit mode. How many examples no longer fit the code.
+    value: ${{ steps.audit.outputs.mismatched }}
 
 runs:
   using: composite
@@ -115,6 +136,21 @@ runs:
           from_source
         fi
 
+    - name: Choose check or audit
+      id: mode
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
+      run: |
+        case "$MODE" in
+          check|audit) mode="$MODE" ;;
+          auto|'') if [ -n "$PR_URL" ]; then mode=check; else mode=audit; fi ;;
+          *) echo "::error::mode must be auto, check or audit (got $MODE)"; exit 1 ;;
+        esac
+        echo "Staleproof mode: $mode"
+        echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
     - name: Re-index
       if: inputs.reindex == 'true' && inputs.falkordb-url != ''
       shell: bash
@@ -128,6 +164,7 @@ runs:
 
     - name: Check the pull request
       id: check
+      if: steps.mode.outputs.mode == 'check'
       shell: bash
       env:
         FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
@@ -180,7 +217,7 @@ runs:
         exit 0
 
     - name: Post or update the comment
-      if: always() && inputs.comment == 'true' && steps.check.outputs.report != ''
+      if: always() && steps.mode.outputs.mode == 'check' && inputs.comment == 'true' && steps.check.outputs.report != ''
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -199,8 +236,94 @@ runs:
         fi
         echo "::warning::Could not comment on the pull request (pull requests from forks get a read-only token). The report is in the job summary."
 
+    - name: Open the docs fix as a pull request
+      if: inputs.open-docs-pr == 'true' && steps.mode.outputs.mode == 'check' && inputs.anthropic-api-key != '' && steps.check.outputs.report != '' && github.event.pull_request.head.repo.full_name == github.repository
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
+        HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        REPO: ${{ github.repository }}
+        REPORT: ${{ steps.check.outputs.report }}
+        CLI: ${{ steps.cli.outputs.cli }}
+      run: |
+        if ! grep -q 'Proposed edits:' "$REPORT"; then echo "No proposed docs edits."; exit 0; fi
+        # Into the pull request's own branch, so the docs fix lands with the code change.
+        $CLI patch "$PR_URL" --open-pr --in-repo --base "$HEAD_REF" --only "$REPO" \
+          || echo "::warning::Could not open the docs fix pull request (the job needs contents: write and pull-requests: write)."
+
+    - name: Audit the docs
+      id: audit
+      if: steps.mode.outputs.mode == 'audit'
+      shell: bash
+      env:
+        FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
+        ORG: ${{ inputs.org }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        WITH: ${{ inputs.also-index }}
+        RUNS: ${{ inputs.audit-runs }}
+        CLI: ${{ steps.cli.outputs.cli }}
+      run: |
+        [ -n "$FALKORDB_URL_INPUT" ] && export FALKORDB_URL="$FALKORDB_URL_INPUT"
+        [ -n "$FALKORDB_URL_INPUT" ] && [ -n "$ORG" ] && export STALEPROOF_ORG="$ORG"
+        report="$RUNNER_TEMP/staleproof-audit.md"
+        status=0
+        $CLI audit "$REPO" $(echo "$WITH" | tr ',' ' ') --run "$RUNS" --format markdown --out "$report" || status=$?
+        if [ ! -f "$report" ]; then
+          echo "::error::staleproof audit failed (exit $status); see the log above."
+          exit 1
+        fi
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        counts=$(grep -o '<!-- staleproof:audit [^>]*-->' "$report" | tail -1)
+        score=$(echo "$counts" | sed -E 's/.*score=([0-9]+).*/\1/')
+        mismatched=$(echo "$counts" | sed -E 's/.*mismatched=([0-9]+).*/\1/')
+        failing=$(echo "$counts" | sed -E 's/.*failing=([0-9]+).*/\1/')
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        echo "score=$score" >> "$GITHUB_OUTPUT"
+        echo "mismatched=$mismatched" >> "$GITHUB_OUTPUT"
+        echo "failing=$failing" >> "$GITHUB_OUTPUT"
+
+    - name: Keep the audit issue up to date
+      if: steps.mode.outputs.mode == 'audit' && inputs.issue == 'true' && steps.audit.outputs.report != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        REPORT: ${{ steps.audit.outputs.report }}
+        SCORE: ${{ steps.audit.outputs.score }}
+        MISMATCHED: ${{ steps.audit.outputs.mismatched }}
+        FAILING: ${{ steps.audit.outputs.failing }}
+      run: |
+        existing=$(gh api "repos/$REPO/issues?state=open&per_page=100" \
+          --jq '[.[] | select(.pull_request == null) | select((.body // "") | startswith("<!-- staleproof-audit -->"))][0].number // empty' 2>/dev/null || true)
+        todo=$(( ${MISMATCHED:-0} + ${FAILING:-0} ))
+        title="Docs health $SCORE/100: $MISMATCHED example(s) no longer fit the code"
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$REPO/issues/$existing" -f title="$title" -F body=@"$REPORT" >/dev/null && echo "Updated issue #$existing."
+          if [ "$todo" = "0" ]; then
+            gh api -X POST "repos/$REPO/issues/$existing/comments" -f body="All clear: every docs example fits the code again. Closing." >/dev/null
+            gh api -X PATCH "repos/$REPO/issues/$existing" -f state=closed >/dev/null && echo "Closed issue #$existing."
+          fi
+        elif [ "$todo" != "0" ]; then
+          gh api -X POST "repos/$REPO/issues" -f title="$title" -F body=@"$REPORT" --jq '"Opened issue #\(.number)."' \
+            || echo "::warning::Could not open the audit issue (the job needs issues: write). The report is in the job summary."
+        else
+          echo "Nothing to fix: no issue opened."
+        fi
+
+    - name: Fail on the audit
+      if: steps.mode.outputs.mode == 'audit' && ((inputs.fail-on == 'mismatches' && steps.audit.outputs.mismatched != '0') || (inputs.fail-under != '' && fromJSON(steps.audit.outputs.score || '100') < fromJSON(inputs.fail-under)))
+      shell: bash
+      env:
+        SCORE: ${{ steps.audit.outputs.score }}
+        MISMATCHED: ${{ steps.audit.outputs.mismatched }}
+      run: |
+        echo "::error::Docs health $SCORE/100; $MISMATCHED example(s) no longer fit the code. See the report in the job summary."
+        exit 1
+
     - name: Fail on broken examples
-      if: (inputs.fail-on == 'breaks' || inputs.fail-on == 'predicted') && steps.check.outputs.breaks != '0' && steps.check.outputs.breaks != ''
+      if: steps.mode.outputs.mode == 'check' && (inputs.fail-on == 'breaks' || inputs.fail-on == 'predicted') && steps.check.outputs.breaks != '0' && steps.check.outputs.breaks != ''
       shell: bash
       env:
         BREAKS: ${{ steps.check.outputs.breaks }}
@@ -209,7 +332,7 @@ runs:
         exit 1
 
     - name: Fail on predicted breaks
-      if: inputs.fail-on == 'predicted' && steps.check.outputs.predicted != '0' && steps.check.outputs.predicted != ''
+      if: steps.mode.outputs.mode == 'check' && inputs.fail-on == 'predicted' && steps.check.outputs.predicted != '0' && steps.check.outputs.predicted != ''
       shell: bash
       env:
         PREDICTED: ${{ steps.check.outputs.predicted }}

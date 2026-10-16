@@ -15,6 +15,8 @@ export interface WorkflowOptions {
   withRepos: string[];
   agent: boolean;
   failOnBreaks: boolean;
+  /** Also audit the whole docs every week (the action's audit mode) and keep one issue up to date. */
+  weeklyAudit?: boolean;
 }
 
 /** The workflow file the one-click link commits. */
@@ -30,10 +32,12 @@ export function workflowYaml(opts: WorkflowOptions): string {
     `name: ${PRODUCT}`,
     'on:',
     '  pull_request:',
+    ...(opts.weeklyAudit ? ['  schedule:', "    - cron: '0 6 * * 1'", '  workflow_dispatch:'] : []),
     '',
     'permissions:',
     '  contents: read',
     '  pull-requests: write',
+    ...(opts.weeklyAudit ? ['  issues: write'] : []),
     '',
     'jobs:',
     '  docs:',

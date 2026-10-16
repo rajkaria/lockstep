@@ -32,7 +32,7 @@ describe('GitHub Action', () => {
     expect(yml).toContain('using: composite');
     // Zero configuration: no input is required.
     expect(yml).not.toMatch(/required: true/);
-    for (const input of ['also-index:', 'anthropic-api-key:', 'model:', 'base-url:', 'runs:', 'fail-on:', 'comment:', 'pr-url:', 'falkordb-url:', 'org:', 'reindex:', 'github-token:', 'version:']) {
+    for (const input of ['mode:', 'also-index:', 'anthropic-api-key:', 'model:', 'base-url:', 'runs:', 'fail-on:', 'fail-under:', 'audit-runs:', 'issue:', 'open-docs-pr:', 'comment:', 'pr-url:', 'falkordb-url:', 'org:', 'reindex:', 'github-token:', 'version:']) {
       expect(yml).toContain(`\n  ${input}`);
     }
   });
@@ -40,8 +40,8 @@ describe('GitHub Action', () => {
   it('calls real CLI commands and flags', async () => {
     const yml = await readFile(join(root, 'action.yml'), 'utf8');
     const cli = await readFile(join(root, 'src', 'cli.ts'), 'utf8');
-    for (const cmd of ['index', 'check']) expect(cli).toContain(`.command('${cmd}')`);
-    for (const flag of ['--no-agent', '--format', '--out', '--runs', '--with']) {
+    for (const cmd of ['index', 'check', 'audit', 'patch']) expect(cli).toContain(`.command('${cmd}')`);
+    for (const flag of ['--no-agent', '--format', '--out', '--runs', '--with', '--run', '--open-pr', '--in-repo', '--base', '--only']) {
       expect(yml).toContain(flag);
       expect(cli).toContain(`'${flag}`);
     }
@@ -72,6 +72,34 @@ describe('GitHub Action', () => {
     const predictedExpr = /predicted=\$\(echo "\$counts" \| sed -E '([^']+)'\)/.exec(yml)![1]!;
     expect(sh(breaksExpr)).toBe('2');
     expect(sh(predictedExpr)).toBe('5');
+  });
+
+  it('reads score and counts from the line the audit report ends with', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { auditMarkdown } = await import('../src/format/audit.js');
+    const yml = await readFile(join(root, 'action.yml'), 'utf8');
+    const md = auditMarkdown(
+      {
+        org: 'o', repos: [{ name: 'a/b', sha: 'abc', symbols: 1, sections: 1 }], score: 61, grade: 'D', deductions: [],
+        examples: { total: 3, python: 3, linked: 3, mismatched: 2 }, mismatches: [], coverage: { api: 1, documented: 1, percent: 100 },
+        undocumented: [], runs: [], runCounts: { pass: 0, fail: 4, skipped: 0, error: 0 }, generatedAt: 0,
+      },
+      's',
+    );
+    const counts = /<!-- staleproof:audit [^>]*-->/.exec(md)![0];
+    const sh = (name: string) => {
+      const expr = new RegExp(`${name}=\\$\\(echo "\\$counts" \\| sed -E '([^']+)'\\)`).exec(yml)![1]!;
+      return execFileSync('bash', ['-c', `counts='${counts}'; echo "$counts" | sed -E '${expr}'`], { encoding: 'utf8' }).trim();
+    };
+    expect([sh('score'), sh('mismatched'), sh('failing')]).toEqual(['61', '2', '4']);
+  });
+
+  it('the audit workflow in examples/ runs on a schedule with issues write and no secrets', async () => {
+    const wf = await readFile(join(root, 'examples', 'staleproof-audit.yml'), 'utf8');
+    expect(wf).toMatch(/uses: rajkaria\/staleproof@v\d/);
+    expect(wf).toContain('schedule:');
+    expect(wf).toContain('issues: write');
+    expect(wf).not.toMatch(/^\s+[a-z-]+: \$\{\{ secrets\./m);
   });
 
   it('the install workflow in examples/ uses the root action and needs no secrets', async () => {
