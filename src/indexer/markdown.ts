@@ -1,3 +1,5 @@
+import { scanRst } from './rst.js';
+
 /**
  * A tolerant scanner for Markdown and MDX. Strict MDX parsers reject real-world
  * docs (Mintlify components, stray braces); Staleproof only needs headings, fenced
@@ -108,6 +110,11 @@ const LANG_ALIASES: Record<string, string> = {
 export function normalizeLang(raw: string): string {
   const l = raw.trim().toLowerCase().replace(/^\{?\.?/, '').replace(/[}].*$/, '');
   return LANG_ALIASES[l] ?? l;
+}
+
+/** Scan a docs page by its extension: reStructuredText (Sphinx) or Markdown/MDX. */
+export function scanDoc(path: string, text: string): MdDoc {
+  return /\.rst$/i.test(path) ? scanRst(path, text) : scanMarkdown(path, text);
 }
 
 export function scanMarkdown(path: string, text: string): MdDoc {

@@ -102,14 +102,14 @@ const IGNORED_DIRS = /(^|\/)(\.github|node_modules|venv|\.venv|build|dist|site-p
 const TEST_FILE = /(^|\/)(tests?|testing)\/|(^|\/)test_[^/]*\.py$|_test\.py$|(^|\/)conftest\.py$/;
 
 /** Repository housekeeping files are not product documentation. */
-const NON_DOCS_MD = /(^|\/)(CHANGELOG|CHANGES|HISTORY|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT|AGENTS|CLAUDE|GEMINI|LICENSE|NOTICE|PULL_REQUEST_TEMPLATE|ISSUE_TEMPLATE)[^/]*\.mdx?$/i;
+const NON_DOCS_MD = /(^|\/)(CHANGELOG|CHANGES|HISTORY|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT|AGENTS|CLAUDE|GEMINI|LICENSE|NOTICE|PULL_REQUEST_TEMPLATE|ISSUE_TEMPLATE)[^/]*\.(mdx?|rst)$/i;
 
 export type FileKind = 'python' | 'markdown' | 'python-example';
 
 /** Classify a tracked path; `undefined` means the indexer skips it. */
 export function classifyFile(path: string): FileKind | undefined {
   if (IGNORED_DIRS.test(path)) return undefined;
-  if (/\.(md|mdx)$/i.test(path)) {
+  if (/\.(md|mdx|rst)$/i.test(path)) {
     return NON_DOCS_MD.test(path) || /(^|\/)(tests?|testing|fixtures)\//.test(path) ? undefined : 'markdown';
   }
   if (!path.endsWith('.py')) return undefined;

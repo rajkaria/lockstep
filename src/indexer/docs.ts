@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
-import { identifiersIn, packagesNamedIn, scanMarkdown, type ExampleDirective, type MdDoc } from './markdown.js';
+import { identifiersIn, packagesNamedIn, scanDoc, type ExampleDirective, type MdDoc } from './markdown.js';
 import { matchesAny } from './repo-config.js';
 import { extractPython } from './python.js';
 import type { ParsedRepo } from './index.js';
@@ -55,7 +55,7 @@ export async function readDocs(p: ParsedRepo): Promise<MdDoc[]> {
   const docs: MdDoc[] = [];
   for (const f of p.files.filter((x) => x.kind === 'markdown')) {
     const text = await readFile(join(p.checkout.dir, f.path), 'utf8');
-    docs.push(scanMarkdown(f.path, text));
+    docs.push(scanDoc(f.path, text));
   }
   return docs;
 }
@@ -356,14 +356,23 @@ export function resolveLink(fromPath: string, target: string, ids: Map<string, M
     const base = rawPath.startsWith('/')
       ? rawPath.replace(/^\/+/, '')
       : posix.normalize(posix.join(posix.dirname(fromPath), rawPath));
-    const stem = base.replace(/\/$/, '').replace(/\.(mdx?|html)$/i, '');
-    candidates = [base, `${stem}.mdx`, `${stem}.md`, `${stem}/index.mdx`, `${stem}/index.md`, `${stem}/README.md`];
+    const stem = base.replace(/\/$/, '').replace(/\.(mdx?|rst|html)$/i, '');
+    candidates = [base, `${stem}.mdx`, `${stem}.md`, `${stem}.rst`, `${stem}/index.mdx`, `${stem}/index.md`, `${stem}/index.rst`, `${stem}/README.md`];
   }
   for (const c of candidates) {
     const anchors = ids.get(c);
     if (!anchors) continue;
     if (anchor && anchors.has(anchor)) return anchors.get(anchor);
     return anchors.values().next().value;
+  }
+  // Sphinx's absolute :doc:`/user/quickstart` is relative to the docs source root (docs/), not the repository's.
+  if (rawPath.startsWith('/') || /\.rst$/i.test(fromPath)) {
+    const tail = rawPath.replace(/^\/+/, '').replace(/\.(mdx?|rst|html)$/i, '');
+    for (const [path, anchors] of ids) {
+      if (!new RegExp(`(^|/)${tail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(rst|mdx?)$`).test(path)) continue;
+      if (anchor && anchors.has(anchor)) return anchors.get(anchor);
+      return anchors.values().next().value;
+    }
   }
   return undefined;
 }

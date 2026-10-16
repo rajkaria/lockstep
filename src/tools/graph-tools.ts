@@ -245,7 +245,7 @@ export const clearanceTool: ToolDef<{ pr_url: string }, { cleared: ClearedSymbol
     ).rows.map((r) => r.name);
     const cleared: ClearedSymbol[] = [];
     for (const r of rows.rows) {
-      const grep = `git grep -nw ${shellQuote(r.name)} -- '*.md' '*.mdx'`;
+      const grep = `git grep -nw ${shellQuote(r.name)} -- '*.md' '*.mdx' '*.rst'`;
       let textMatches = 0;
       for (const repo of docsRepos) {
         const dir = join(ctx.config.home, 'repos', ...repo.split('/'));
@@ -270,7 +270,7 @@ export const clearanceTool: ToolDef<{ pr_url: string }, { cleared: ClearedSymbol
 
 export async function countMatches(dir: string, name: string): Promise<number> {
   try {
-    const { stdout } = await exec('git', ['grep', '-cw', name, '--', '*.md', '*.mdx'], { cwd: dir });
+    const { stdout } = await exec('git', ['grep', '-cw', name, '--', '*.md', '*.mdx', '*.rst'], { cwd: dir });
     return stdout
       .split('\n')
       .filter(Boolean)

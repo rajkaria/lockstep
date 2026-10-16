@@ -169,7 +169,7 @@ export async function analyzeChanges(
       const dir = join(home, 'repos', ...d.split('/'));
       if (existsSync(dir)) textMatches += await countMatches(dir, r.name);
     }
-    cleared.push({ ...r, textMatches, grep: `git grep -nw ${shellQuote(r.name)} -- '*.md' '*.mdx'` });
+    cleared.push({ ...r, textMatches, grep: `git grep -nw ${shellQuote(r.name)} -- '*.md' '*.mdx' '*.rst'` });
   }
 
   const impact: ImpactData = {

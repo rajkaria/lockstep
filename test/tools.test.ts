@@ -83,7 +83,7 @@ describe('graph tools (FalkorDB)', () => {
   it('clearance: proves which changed symbols reach no doc', async () => {
     const r = await clearanceTool.run(ctx, { pr_url: PR.url });
     expect(r.data.cleared.map((c) => `${c.symbol} ${c.change}`)).toEqual(['miniclient.graph.Graph.delete modified']);
-    expect(r.data.cleared[0]!.grep).toBe("git grep -nw delete -- '*.md' '*.mdx'");
+    expect(r.data.cleared[0]!.grep).toBe("git grep -nw delete -- '*.md' '*.mdx' '*.rst'");
   });
 
   it('rank_sections: orders by PageRank of the page', async () => {
