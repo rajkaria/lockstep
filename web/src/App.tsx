@@ -1,29 +1,27 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { api, streamCheck } from './api';
-import { ClearedList, CypherList, RepoChip, SectionCard, TraceList, type PackageRepo } from './components';
-import { ago, num, runSummary, seedRepoColors } from './format';
-import { emptyView, reduce, replay, type CheckView } from './state';
-import type { CheckRow, Facts, Health, NamedQuery, PreloadedPr, TraceEvent } from './types';
-
-type Route = { page: 'home' } | { page: 'check'; id: string } | { page: 'model' };
-
-function parseRoute(): Route {
-  const h = window.location.hash.replace(/^#\/?/, '');
-  if (h.startsWith('check/')) return { page: 'check', id: decodeURIComponent(h.slice(6)) };
-  if (h === 'model') return { page: 'model' };
-  return { page: 'home' };
-}
+import { useEffect, useMemo, useState } from 'react';
+import { api } from './api';
+import { StoredCheck } from './CheckResults';
+import { CypherList, RepoChip, type PackageRepo } from './components';
+import { DocsPage } from './Docs';
+import { PACKAGE, PRODUCT } from './docs/manifest';
+import { num, seedRepoColors } from './format';
+import { Landing } from './Landing';
+import { Footer, Header } from './layout';
+import { HOME_SECTIONS, parseRoute, type Route } from './route';
+import { TryIt } from './TryIt';
+import type { Facts, Health, NamedQuery } from './types';
 
 export function App() {
-  const [route, setRoute] = useState<Route>(parseRoute);
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
   const [health, setHealth] = useState<Health>();
   const [facts, setFacts] = useState<Facts>();
   const [loadError, setLoadError] = useState<string>();
 
   useEffect(() => {
     const on = () => {
-      setRoute(parseRoute());
-      window.scrollTo(0, 0);
+      const next = parseRoute(window.location.hash);
+      setRoute(next);
+      if (next.page !== 'docs' && !(next.page === 'home' && next.section)) window.scrollTo(0, 0);
     };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
@@ -37,6 +35,20 @@ export function App() {
       })
       .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (route.page !== 'docs') document.title = `${PRODUCT} — keep docs true to code`;
+  }, [route]);
+  // Section routes (#/use-cases) scroll once the landing is on screen.
+  useEffect(() => {
+    if (route.page === 'home' && route.section && HOME_SECTIONS.includes(route.section)) {
+      const id = route.section;
+      const go = () => document.getElementById(id)?.scrollIntoView({ block: 'start' });
+      // Again once the demo's data has loaded above it and moved it down.
+      requestAnimationFrame(go);
+      const t = setTimeout(go, 700);
+      return () => clearTimeout(t);
+    }
+  }, [route]);
 
   const packageRepo: PackageRepo = useMemo(() => {
     const map = new Map<string, string>();
@@ -44,316 +56,91 @@ export function App() {
     return (q: string) => map.get(q.split('.')[0]!);
   }, [facts]);
 
-  return (
-    <div className="app">
-      <Header health={health} facts={facts} />
+  const current = route.page === 'docs' ? 'docs' : route.page === 'model' ? 'model' : route.page === 'home' ? route.section : undefined;
+  const banners = (
+    <>
       {loadError && <div className="banner err">The API is unreachable: {loadError}</div>}
       {health?.snapshot && (
         <div className="banner snapshot">
           <strong>Snapshot.</strong> This deployment isn't connected to a FalkorDB server, so it shows the graph's answers recorded on{' '}
           {health.snapshot.takenAt.replace('T', ' ').slice(0, 16)} UTC: the preloaded pull requests open their recorded checks, replayed exactly as they ran. For live
-          checks, run <code>npx lockstep-docs serve</code> against an indexed graph (see the README).
+          checks, run <code>npx {PACKAGE} serve</code> against an indexed graph (see the <a href="#/docs/getting-started">quickstart</a>).
         </div>
-      )}
-      <main>
-        {route.page === 'home' && <Home health={health} packageRepo={packageRepo} />}
-        {route.page === 'check' && <StoredCheck id={route.id} packageRepo={packageRepo} />}
-        {route.page === 'model' && <ModelPage />}
-      </main>
-      <footer>
-        <span>
-          Lockstep {health?.version ?? ''} · graph <code>{health?.org ?? '…'}</code> on FalkorDB {health?.falkordb ?? ''}
-        </span>
-        <span>
-          Public repositories only · <a href="#/model">Graph model and every Cypher query</a>
-        </span>
-      </footer>
-    </div>
-  );
-}
-
-function Header({ health, facts }: { health?: Health; facts?: Facts }) {
-  return (
-    <header className="top">
-      <a href="#/" className="brand">
-        <img src="/favicon.svg" alt="" width={28} height={28} />
-        <span>Lockstep</span>
-      </a>
-      <nav>
-        <a href="#/">Check a PR</a>
-        <a href="#/model">Graph model</a>
-      </nav>
-      <div className="stats">
-        {facts && (
-          <>
-            <span>{facts.repos.length} repositories</span>
-            <span>{num(facts.nodes.Symbol)} symbols</span>
-            <span>{num(facts.nodes.DocSection)} doc sections</span>
-            <span>{num(facts.calls.crossRepo)} cross-repo calls</span>
-          </>
-        )}
-        {health && (
-          <span className={`agent ${health.agent.available ? 'on' : 'off'}`} title={health.agent.available ? '' : health.agent.reason}>
-            {health.agent.available ? `agent: ${health.agent.model}` : 'agent off · graph mode'}
-          </span>
-        )}
-      </div>
-    </header>
-  );
-}
-
-function Home({ health, packageRepo }: { health?: Health; packageRepo: PackageRepo }) {
-  const [view, dispatch] = useReducer((v: CheckView, e: TraceEvent | { type: 'reset' }) => (e.type === 'reset' ? emptyView() : reduce(v, e)), undefined, emptyView);
-  const [prUrl, setPrUrl] = useState('');
-  const [mode, setMode] = useState<'agent' | 'graph'>('graph');
-  const [prs, setPrs] = useState<PreloadedPr[]>([]);
-  const [checks, setChecks] = useState<CheckRow[]>([]);
-  const [running, setRunning] = useState(false);
-  const [formError, setFormError] = useState<string>();
-  const abort = useRef<AbortController | undefined>(undefined);
-  const results = useRef<HTMLDivElement>(null);
-
-  const refresh = useCallback(() => {
-    api.prs().then((r) => setPrs(r.prs)).catch(() => undefined);
-    api.checks().then((r) => setChecks(r.checks)).catch(() => undefined);
-  }, []);
-  useEffect(refresh, [refresh]);
-  useEffect(() => {
-    if (health) setMode(health.agent.available ? 'agent' : 'graph');
-  }, [health]);
-
-  const start = async (url: string) => {
-    setFormError(undefined);
-    setPrUrl(url);
-    abort.current?.abort();
-    abort.current = new AbortController();
-    dispatch({ type: 'reset' });
-    setRunning(true);
-    setTimeout(() => results.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-    try {
-      await streamCheck(url, mode, dispatch, abort.current.signal);
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') setFormError((err as Error).message);
-    } finally {
-      setRunning(false);
-      refresh();
-    }
-  };
-
-  const agentOff = health && !health.agent.available;
-  return (
-    <>
-      <section className="hero">
-        <h1>Every merge can make a tutorial lie. Lockstep finds which one, proves it, and fixes it.</h1>
-        <p className="lede">
-          Paste a pull request. Lockstep walks a FalkorDB graph of code, docs and maintainers' decisions across every repository of the organisation, runs the examples
-          before and after the change, and proposes the docs fix with the path behind each paragraph.
-        </p>
-        <form
-          className="check-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (prUrl.trim()) void start(prUrl.trim());
-          }}
-        >
-          <input
-            value={prUrl}
-            onChange={(e) => setPrUrl(e.target.value)}
-            placeholder="https://github.com/FalkorDB/falkordb-py/pull/267"
-            aria-label="Pull request URL"
-            spellCheck={false}
-          />
-          <button disabled={running || !prUrl.trim() || !!health?.snapshot}>{running ? 'Checking…' : 'Check'}</button>
-        </form>
-        <div className="modes" role="radiogroup" aria-label="Mode">
-          <label className={mode === 'agent' ? 'on' : ''}>
-            <input type="radio" name="mode" checked={mode === 'agent'} disabled={agentOff} onChange={() => setMode('agent')} />
-            Agent: {health?.agent.available ? <code>{health.agent.model}</code> : 'the model'} chooses the tools and writes the verdicts
-          </label>
-          <label className={mode === 'graph' ? 'on' : ''}>
-            <input type="radio" name="mode" checked={mode === 'graph'} onChange={() => setMode('graph')} />
-            Graph only: the same tools in a fixed order, no model
-          </label>
-        </div>
-        {agentOff && !health.snapshot && (
-          <p className="note">
-            Agent mode is off on this server: {health.agent.available ? '' : health.agent.reason}. Graph mode runs the real graph queries and example runs; agent
-            traces recorded earlier are listed below with their dates.
-          </p>
-        )}
-        {formError && <div className="banner err">{formError}</div>}
-        <div className="preloaded">
-          {prs.map((p) => (
-            <button
-              key={p.url}
-              className="pr-card"
-              disabled={running || (!!health?.snapshot && !p.latestCheck)}
-              onClick={() => (health?.snapshot && p.latestCheck ? (window.location.hash = `#/check/${encodeURIComponent(p.latestCheck.id)}`) : void start(p.url))}
-            >
-              <span className="pr-ref">
-                {p.ref.fullName}#{p.ref.number}
-              </span>
-              <span className="pr-title">{p.title ?? 'not checked yet'}</span>
-              {p.runs.length > 0 && <span className="pr-runs">{runSummary(p.runs)}</span>}
-              {p.latestCheck && <span className="muted small">last checked {ago(p.latestCheck.startedAt)}</span>}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <div ref={results}>{(view.checkId || view.error || view.queued) && <CheckResults view={view} packageRepo={packageRepo} />}</div>
-
-      {checks.length > 0 && (
-        <section className="history">
-          <h2>Recent checks</h2>
-          <p className="muted">Every check is stored on a Check node in the graph with its full trace. Open one to replay it.</p>
-          <ul>
-            {checks.map((c) => (
-              <li key={c.id}>
-                <a href={`#/check/${encodeURIComponent(c.id)}`}>{c.title ?? c.pr}</a>
-                <span className="muted">
-                  {' '}
-                  · {c.model} · {c.status} · {c.toolCalls} tool calls{c.verdicts ? ` · ${c.verdicts} verdicts` : ''} · {ago(c.startedAt)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
       )}
     </>
   );
-}
 
-
-function CheckResults({ view, packageRepo }: { view: CheckView; packageRepo: PackageRepo }) {
-  const sections = useMemo(() => {
-    const list = view.impact?.sections ?? [];
-    if (!view.ranked) return list;
-    const order = new Map(view.ranked.map((r, i) => [r.id, i]));
-    return [...list].sort((a, b) => (order.get(a.section) ?? 1e9) - (order.get(b.section) ?? 1e9));
-  }, [view.impact, view.ranked]);
-  const counts = view.impact?.counts ?? { breaking: 0, api: 0, behavior: 0 };
-  if (!view.impact?.counts) for (const s of sections) counts[s.severity]++;
   return (
-    <section className="results">
-      <div className="results-head">
-        <div>
-          <h2>{view.impact?.pr.title ?? view.pr ?? 'Waiting for the check to start'}</h2>
-          {view.pr && (
-            <a href={view.pr} target="_blank" rel="noreferrer" className="muted">
-              {view.pr.replace('https://github.com/', '')}
-            </a>
-          )}
-          {view.model && <span className="chip muted">{view.model}</span>}
-          {view.checkId && <span className="chip muted">{view.checkId}</span>}
-        </div>
-        {view.queued && <div className="banner">Another check is running; this one starts when it finishes.</div>}
-        {view.error && <div className="banner err">{view.error}</div>}
-        {view.since && <div className="since">Since the last check: {view.since}</div>}
-      </div>
-      <div className="columns">
-        <div className="col trace-col">
-          <h3>Trace</h3>
-          <p className="muted small">Each step the {view.model?.startsWith('graph') ? 'pipeline' : 'agent'} took, with the Cypher it ran on FalkorDB.</p>
-          <TraceList view={view} />
-        </div>
-        <div className="col findings-col">
-          {view.finished && (
-            <div className={`summary st-${view.finished.status}`}>
-              <strong>{view.finished.status === 'done' ? 'Done' : view.finished.status}</strong> · {view.finished.toolCalls} tool calls
-              {view.finished.verdicts ? ` · ${view.finished.verdicts} verdicts` : ''}
-              <p>{view.finished.summary}</p>
-              {view.finished.verdicts > 0 && view.pr && <PatchLink pr={view.pr} />}
-            </div>
-          )}
-          {view.impact && (
-            <>
-              <h3>
-                Impacted doc sections ({view.impact.totalSections})
-                <span className="counts">
-                  {counts.breaking > 0 && <span className="chip sev breaking">{counts.breaking} breaking</span>}
-                  {counts.api > 0 && <span className="chip sev api">{counts.api} signature</span>}
-                  {counts.behavior > 0 && <span className="chip sev behavior">{counts.behavior} behavior</span>}
-                </span>
-              </h3>
-              <ChangedList view={view} />
-              {view.ranked && <p className="muted small">Ordered by PageRank of the page over the docs' link graph (most-read first).</p>}
-              {sections.length === 0 && <p className="muted">No doc section is reachable from this pull request's changes.</p>}
-              {sections.map((s) => (
-                <SectionCard key={s.section} s={s} view={view} packageRepo={packageRepo} />
-              ))}
-              {view.impact.truncated && <p className="muted">{view.impact.totalSections - view.impact.sections.length} more sections not shown.</p>}
-            </>
-          )}
-          {view.cleared && <ClearedList cleared={view.cleared} />}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ChangedList({ view }: { view: CheckView }) {
-  if (!view.impact?.changed.length) return null;
-  return (
-    <details className="changed">
-      <summary>{view.impact.changed.length} changed symbol(s) in {view.impact.pr.repo}</summary>
-      <ul>
-        {view.impact.changed.map((c) => (
-          <li key={c.symbol}>
-            <code>{c.change}</code> <code>{c.symbol}</code>
-            {c.renamedTo && (
+    <div className="app">
+      <Header current={current} />
+      <main className={`page-${route.page}`}>
+        {route.page === 'home' && (
+          <Landing
+            demo={
               <>
-                {' '}
-                → <code>{c.renamedTo}</code>
+                {banners}
+                <TryIt health={health} packageRepo={packageRepo} />
               </>
-            )}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
-function PatchLink({ pr }: { pr: string }) {
-  const [patch, setPatch] = useState<{ diff: string; title: string; body: string }>();
-  return (
-    <div className="patch">
-      {!patch ? (
-        <button className="link" onClick={() => void api.patch(pr).then(setPatch)}>
-          Show the docs patch (git-apply-able)
-        </button>
-      ) : patch.diff ? (
-        <>
-          <pre className="diff raw">{patch.diff}</pre>
-          <p className="muted small">
-            Open it as a pull request in your fork with <code>npx lockstep-docs patch {pr} --open-pr</code>. Lockstep never opens a PR upstream unless asked.
-          </p>
-        </>
-      ) : (
-        <p className="muted">No edits were proposed.</p>
-      )}
+            }
+            stats={<LiveStats facts={facts} health={health} />}
+          />
+        )}
+        {route.page === 'check' && (
+          <div className="wrap page-pad">
+            {banners}
+            <StoredCheck id={route.id} packageRepo={packageRepo} />
+          </div>
+        )}
+        {route.page === 'model' && (
+          <div className="wrap page-pad">
+            <ModelPage />
+          </div>
+        )}
+        {route.page === 'docs' && <DocsPage slug={route.slug} anchor={route.anchor} />}
+      </main>
+      <Footer
+        meta={
+          <>
+            <span>
+              {PRODUCT} {health?.version ?? ''} · graph <code>{health?.org ?? '…'}</code> on FalkorDB {health?.falkordb ?? ''}
+            </span>
+            <span>Public repositories only · MIT licensed</span>
+          </>
+        }
+      />
     </div>
   );
 }
 
-function StoredCheck({ id, packageRepo }: { id: string; packageRepo: PackageRepo }) {
-  const [view, setView] = useState<CheckView>();
-  const [error, setError] = useState<string>();
-  useEffect(() => {
-    api.check(id)
-      .then((r) => setView(replay(r.events)))
-      .catch((e: Error) => setError(e.message));
-  }, [id]);
-  if (error) return <div className="banner err">{error}</div>;
-  if (!view) return <p className="muted">Loading the stored trace…</p>;
+/** What the demo is connected to right now: the graph's size and the agent's model. */
+function LiveStats({ facts, health }: { facts?: Facts; health?: Health }) {
+  if (!facts && !health) return null;
   return (
-    <>
-      <div className="banner">
-        Recorded check from {view.startedAt ? new Date(view.startedAt).toISOString().replace('T', ' ').slice(0, 16) : '?'} UTC, replayed from the trace stored on
-        its Check node ({view.model}).
-      </div>
-      <CheckResults view={view} packageRepo={packageRepo} />
-    </>
+    <div className="live-stats" aria-label="The graph behind this demo">
+      <span className={`live-dot${health?.snapshot ? ' off' : ''}`} aria-hidden="true" />
+      <span className="muted">{health?.snapshot ? 'Snapshot of the graph' : 'Live graph'}</span>
+      {facts && (
+        <>
+          <span>
+            <strong>{facts.repos.length}</strong> repositories
+          </span>
+          <span>
+            <strong>{num(facts.nodes.Symbol)}</strong> symbols
+          </span>
+          <span>
+            <strong>{num(facts.nodes.DocSection)}</strong> doc sections
+          </span>
+          <span>
+            <strong>{num(facts.crossRepoDocPaths)}</strong> cross-repo doc paths
+          </span>
+        </>
+      )}
+      {health && (
+        <span className={`agent ${health.agent.available ? 'on' : 'off'}`} title={health.agent.available ? '' : health.agent.reason}>
+          {health.agent.available ? `agent: ${health.agent.model}` : 'agent off · graph mode'}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -396,7 +183,8 @@ function ModelPage() {
   ];
   return (
     <section className="model">
-      <h1>The graph Lockstep runs on</h1>
+      <span className="eyebrow">Graph model</span>
+      <h1>The graph {PRODUCT} runs on</h1>
       <p className="lede">One FalkorDB graph per organisation. Every step of the agent reads it, and every check writes back to it.</p>
       <div className="grid2">
         <div>
@@ -446,7 +234,9 @@ function ModelPage() {
         </li>
       </ul>
       <h2>Every Cypher query</h2>
-      <p className="muted">Generated from the code (src/graph/queries.ts): what is listed here is exactly what runs.</p>
+      <p className="muted">
+        Generated from the code (src/graph/queries.ts): what is listed here is exactly what runs. Also in the docs: <a href="#/docs/graph-model">Graph model and Cypher</a>.
+      </p>
       {groups.map(([g, title]) => (
         <div key={g}>
           <h3>{title}</h3>

@@ -1,51 +1,146 @@
 # Lockstep
 
-**An agent that keeps a devtools company's docs true to its code.** Paste a pull request: Lockstep walks a
-[FalkorDB](https://www.falkordb.com) graph of code, docs and past decisions across every repository of the
-organisation, proves which examples now break by running them before and after the change, and proposes the
-docs fix with the path in the graph behind each paragraph.
+**Every merge can make a tutorial lie — usually in another repository.** Lockstep finds the docs a pull request can
+make false, proves it by running their examples before and after the change, and proposes the fix with the evidence
+behind each paragraph. It works over a [FalkorDB](https://www.falkordb.com) graph of your code, docs and maintainers'
+decisions, across every repository of the organisation.
+
+[Live demo](https://lockstep-rho.vercel.app) · [Documentation](docs/README.md) · [Quickstart](docs/getting-started.md) ·
+[npm: `lockstep-docs`](https://www.npmjs.com/package/lockstep-docs) · MIT
 
 ```bash
 npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/262
 ```
 
-| Status | What |
+## One pull request, end to end
+
+[falkordb-py#262](https://github.com/FalkorDB/falkordb-py/pull/262) changed one function, `Is_Cluster`. No doc
+mentions it, so searching the docs for the name finds nothing. The graph finds the paragraph anyway, because the
+README's async example constructs `FalkorDB`, whose constructor calls the changed function:
+
+```text
+Is_Cluster  ← called by ─  FalkorDB.__init__  ← used in ─  README.md › "Asynchronous Example"   (falkordb-py)
+```
+
+Lockstep then ran that example against falkordb-py installed from source at both commits:
+
+| Commit | Result |
 |---|---|
-| **Built and run** (on the author's machine, against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
-| **Agent mode, run with a real model** | `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API ([how](docs/DEPLOY.md)), on the CLI and the live site. Each PR got a different tool order: [#262](https://github.com/FalkorDB/falkordb-py/pull/262) impact → read_section → decisions_for → run_example → record_verdict (5 calls, 1 verdict); [#267](https://github.com/FalkorDB/falkordb-py/pull/267) 15 calls, 3 verdicts, each citing its before/after runs; [#276](https://github.com/FalkorDB/falkordb-py/pull/276) 38 calls paging through 43 sections, all with verdicts. The first #276 run stopped at 40 turns with 21 sections open: `impact` capped results at 40 and the model's invented paging arguments were dropped silently; `impact` now pages and unknown arguments are an error. The agent was written for Claude (`claude-sonnet-5-5`, adaptive thinking, refusal fallback); that path is tested against a local fake API only. |
-| **Written, not exercised** | The GitHub Action and the Docker image (no Docker here). |
-| **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
-| **Live** | [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Paste any public pull request from the three repositories and pick agent mode (`deepseek-v4-pro` chooses the tools; its reasoning shows in the trace) or graph mode (fixed tool order, no model). Examples are not executed there (no sandbox), so their before/after results come from runs recorded on the graph. If the database is unreachable the page falls back to a labelled snapshot. Published on npm as [`lockstep-docs`](https://www.npmjs.com/package/lockstep-docs). |
-| **Designed** | Issue/discussion → symbol links ("asked about but undocumented"); hosted multi-org service. See [VISION.md](VISION.md). |
+| before the PR (`49aa012`) | **fails**: `TypeError: Redis.__init__() got an unexpected keyword argument 'himport_registry'` |
+| after the PR (`f7c3de7`) | **passes** |
 
-Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB), tracks 01 and 03.
-Written with an AI coding assistant (Claude Code); see [AI assistance](#ai-assistance).
+The README's async example was broken until this PR fixed it, and the run is the proof. Every number in this README
+comes from [docs/FACTS.md](docs/FACTS.md), generated from the graph.
 
----
+## Results on FalkorDB's repositories, against grep
 
-## What it found on FalkorDB's own repositories
+What a reviewer can do without the graph is search the docs for the names the PR changed. Here is that search next to
+the sections the graph reaches (≤ 3 call hops, any repository):
 
-Every number here comes from [docs/FACTS.md](docs/FACTS.md), generated from the graph.
+| Pull request | Sections the graph reaches | …in other repositories | grep finds of those | grep matches elsewhere |
+|---|---:|---:|---:|---:|
+| [falkordb-py#262](https://github.com/FalkorDB/falkordb-py/pull/262) | 1 | 0 | 0 | 0 |
+| [falkordb-py#267](https://github.com/FalkorDB/falkordb-py/pull/267) | 3 | 2 | 0 | 0 |
+| [falkordb-py#276](https://github.com/FalkorDB/falkordb-py/pull/276) | 43 | 41 | 0 | 8 |
+| [GraphRAG-SDK#336](https://github.com/FalkorDB/GraphRAG-SDK/pull/336) | 73 | 3 | 30 | 219 |
+| **Total** | **120** | **46** | **30** | **227** |
 
-- **[falkordb-py#262](https://github.com/FalkorDB/falkordb-py/pull/262)** changed one function, `Is_Cluster`. The graph
-  path `Is_Cluster ← FalkorDB.__init__ ← README "Asynchronous Example"` led Lockstep to run that example against
-  falkordb-py installed from source at both commits: **it fails before the PR** with
-  `TypeError: Redis.__init__() got an unexpected keyword argument 'himport_registry'` **and passes after it**.
-  The README's async example was broken (with today's dependencies) until this PR.
-- **[falkordb-py#267](https://github.com/FalkorDB/falkordb-py/pull/267)** fixed the execution-plan parser. Lockstep
-  followed `ExecutionPlan._operation_tree ← ExecutionPlan.__init__ ← Graph.explain` into a different repository, the
-  docs site's `GRAPH.EXPLAIN` and `GRAPH.PROFILE` pages, and ran both examples. The `GRAPH.EXPLAIN` example **fails as
-  written on a fresh server, before and after the PR** (`Invalid graph operation on empty key`: it explains a query on
-  a graph the page never creates). The PR didn't break it; it was already broken.
-- **[falkordb-py#276](https://github.com/FalkorDB/falkordb-py/pull/276)** changed 4 asyncio symbols that reach
-  **43 doc sections, 41 of them in other repositories**, through paths like
-  `AsyncGraph.query ← FalkorDBConnection.query (GraphRAG-SDK) ← GraphStore.delete_document_chunks ← GraphRAG.delete_document ← GraphRAG-SDK README`.
-  Three of the reachable examples were run before and after: all pass.
+- **#267** fixed the execution-plan parser. The path `ExecutionPlan._operation_tree ← ExecutionPlan.__init__ ←
+  Graph.explain` led into a different repository, the docs site's `GRAPH.EXPLAIN` and `GRAPH.PROFILE` pages. The
+  `GRAPH.EXPLAIN` example **fails as written on a fresh server, before and after the PR** (`Invalid graph operation on
+  empty key`: it explains a query on a graph the page never creates). The PR didn't break it; it was already broken.
+- **#276** changed four asyncio symbols that reach **43 doc sections, 41 of them in other repositories**, through paths
+  like `AsyncGraph.query ← FalkorDBConnection.query (GraphRAG-SDK) ← GraphStore.delete_document_chunks ←
+  GraphRAG.delete_document ← GraphRAG-SDK README`. Of the 21 reachable examples tried at both commits, 10 pass both
+  times, 6 fail both times (already broken, e.g. `GRAPH.EXPLAIN`, `GRAPH.CONSTRAINT CREATE`), 3 can't be installed
+  together at those commits (GraphRAG-SDK 1.4.0 requires `falkordb>=1.8.0`; falkordb-py was 1.7.0 there) and 2 can't
+  run as written (a placeholder host; a bash block).
+
+## How it works, in plain words
+
+1. **Index.** Clone the organisation's repositories into one graph: Python functions and the calls between them —
+   resolved across repositories — plus every docs section and code example, linked to the code it mentions or calls.
+2. **Impact.** From each function the PR changed, walk back up to three callers, in any repository, to the docs that
+   mention or run them. Each hit carries its **evidence path**: the chain from the change to the paragraph.
+3. **Clearance.** The changed functions that no doc reaches are listed as *cleared* — a proof of absence over the
+   graph, with the `git grep` a reviewer can run to double-check it.
+4. **Prove.** Run each affected example at the commit before the PR and at the PR, in a sandbox. *Passes before, fails
+   after* means the PR broke it; *fails both* means it was already broken.
+5. **Judge, fix, remember.** Every affected section ends with a **verdict** — stale (with the edit), ok, governed by a
+   maintainer decision, or skipped — and the edits become a `git apply`-able patch. Verdicts, runs and decisions are
+   written back to the graph (**verdict memory**), so the next PR cites a decision instead of re-flagging the section.
+
+Two ways to run a check:
+
+| | Agent mode | Graph mode |
+|---|---|---|
+| Who chooses the steps | A model (Claude, or any Anthropic-compatible API) | A fixed order: impact, clearance, ranking, up to three example runs |
+| Covers | Every impacted section gets a verdict or an edit | A sample: findings, ranking and a few runs; no verdicts |
+| Needs | `ANTHROPIC_API_KEY` | Nothing but FalkorDB |
+
+## Quickstart
+
+```bash
+# FalkorDB locally without Docker (falkordblite; uv or pip installs it once)
+npx -y lockstep-docs db start
+
+# Index an organisation's repositories into one graph (index them together so cross-repo calls resolve)
+npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+
+# Check a pull request: graph mode, or the agent with ANTHROPIC_API_KEY set
+npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
+npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267
+
+# Run one docs example before and after a PR
+npx -y lockstep-docs run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267
+
+# Record a maintainer decision; the next check cites it instead of re-flagging
+npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__"
+
+# The docs fix as a patch (and, with GITHUB_TOKEN, a PR in your fork)
+npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/267 [--open-pr]
+
+# The web demo and its API
+npx -y lockstep-docs serve
+```
+
+The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
+
+## Use it where your docs break
+
+| Integration | One line | Guide |
+|---|---|---|
+| CLI | `npx -y lockstep-docs <command>` — index, check, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
+| GitHub Action | A comment on every PR with the docs it can falsify ([`examples/lockstep.yml`](examples/lockstep.yml)) | [docs/github-action.md](docs/github-action.md) |
+| Claude Code (MCP) | `claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y lockstep-docs mcp` | [docs/mcp.md](docs/mcp.md) |
+| HTTP API | `lockstep-docs serve`: JSON API with checks streamed over server-sent events | [docs/http-api.md](docs/http-api.md) |
+| Node.js library | `import { runGraphCheck } from 'lockstep-docs'` | [docs/library.md](docs/library.md) |
+| Self-host | Vercel + FalkorDB Cloud (the live demo), Docker Compose, or a plain VM | [docs/DEPLOY.md](docs/DEPLOY.md) |
+
+Who it is for: SDK and client-library teams whose docs live in another repository, DevRel and docs teams after a
+release, maintainers reviewing pull requests, AI coding agents, and platform teams with many repositories —
+[docs/use-cases.md](docs/use-cases.md).
+
+## Documentation
+
+| Start here | Integrate | How it works | Reference | Operate |
+|---|---|---|---|---|
+| [Introduction](docs/README.md) | [CLI](docs/cli.md) | [Core concepts](docs/concepts.md) | [Tools](docs/tools.md) | [Deploy](docs/DEPLOY.md) |
+| [Quickstart](docs/getting-started.md) | [GitHub Action](docs/github-action.md) | [Indexing](docs/indexing.md) | [Configuration](docs/configuration.md) | [Troubleshooting and FAQ](docs/troubleshooting.md) |
+| [Use cases](docs/use-cases.md) | [MCP server](docs/mcp.md) | [Example runner](docs/example-runner.md) | [Graph model and Cypher](docs/GRAPH-MODEL.md) | |
+| | [HTTP API](docs/http-api.md) | [Decisions and memory](docs/memory.md) | [Facts from the graph](docs/FACTS.md) | |
+| | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
+
+**For LLMs and coding assistants:** [`llms.txt`](llms.txt) indexes every page. The live site serves the same docs as
+plain text — [`/llms.txt`](https://lockstep-rho.vercel.app/llms.txt),
+[`/llms-full.txt`](https://lockstep-rho.vercel.app/llms-full.txt) (everything in one file) and `/docs/<page>.md` — and
+every page on the site has a "Copy as Markdown" button.
 
 ## Why the graph is the product
 
-The question Lockstep answers on every pull request is *which paragraphs, in which repositories, can this change
-make false?* That is a reachability question (excerpt of the `impact` tool's query; the full text is [below](#every-cypher-query-the-product-depends-on)):
+The question asked on every pull request is *which paragraphs, in which repositories, can this change make false?*
+That is a reachability question (excerpt of the `impact` tool's query; the full text is
+[below](#every-cypher-query-the-product-depends-on)):
 
 ```cypher
 MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
@@ -72,38 +167,15 @@ RETURN d.id, length(p) AS hops, [n IN nodes(p) | coalesce(n.qualname, n.id)] AS 
 - **Memory**: every check writes back `PullRequest`, `Run`, `Verdict` and `Check` nodes. The next pull request sees
   what earlier checks concluded, which runs already happened, and what maintainers accepted or rejected.
 
-Take FalkorDB out and Lockstep is a grep over one repository.
-
-## How it works
+Take FalkorDB out and this is a grep over one repository.
 
 ```
-GitHub (public repos) ──index──▶ FalkorDB: one graph per organisation ◀──tools──▶ Agent (LLM tool use: Claude or DeepSeek)
+GitHub (public repos) ──index──▶ FalkorDB: one graph per organisation ◀──tools──▶ Agent (Claude or an Anthropic-compatible model)
                                     ▲                                              │ trace (SSE)
      Sandbox runner ── Run nodes ───┘                                              ▼
-     (uv venv per repo@sha,                                  CLI · MCP server · web demo · GitHub Action
+     (virtualenv per repo@sha,                               CLI · MCP server · web demo · GitHub Action
       scratch FalkorDB, no network)
 ```
-
-1. **Index.** `lockstep-docs index` clones each repository, parses Python with tree-sitter (WASM) into symbols and call
-   sites, and resolves calls across the whole organisation through imports, package re-exports, attribute types,
-   return annotations and base classes (`self._graph = self._driver.select_graph(...)` resolves `self._graph.query` to
-   `AsyncGraph.query` in another repository). Markdown/MDX pages become doc sections; fenced Python examples are
-   resolved like code (cumulatively per page, so a later fragment that uses `g` resolves through the earlier block
-   that defined it). 1,655 of 1,708 call edges and 633 of 716 example edges resolve exactly; the rest are labelled
-   `by-name` and shown as such.
-2. **Ingest the PR.** The diff between the PR's commits becomes symbol-level changes — removed, renamed, signature,
-   modified (own lines only), added, export-removed — attached with `CHANGED_IN`. Symbols the PR removed are recreated
-   and linked to docs that still name them.
-3. **Check.** The agent chooses among eight tools. Each one runs Cypher on FalkorDB and returns the queries it ran.
-   The loop ends only when every impacted section has a verdict or an edit (it reminds the model, then reports
-   *incomplete* honestly), and the full trace is stored on a `Check` node.
-4. **Prove.** `run_example` installs the repositories from source at the commit before the PR and at the PR, runs the
-   docs example in a sandbox whose only reachable server is a scratch FalkorDB answering `localhost:6379`, and records
-   both runs. *Passes before, fails after* is proof; *fails both* means it was already broken; examples that need an
-   LLM key, local files or placeholders are recorded as skipped with the reason.
-5. **Fix.** `propose_edit` is refused unless the graph has a path from the PR's changes to the section. The docs patch
-   is a `git apply`-able diff with the evidence path, runs and cited decisions per section; `--open-pr` opens it in
-   your fork, never upstream unless you ask.
 
 ### The tools
 
@@ -119,63 +191,52 @@ GitHub (public repos) ──index──▶ FalkorDB: one graph per organisation 
 | `record_verdict` | ok / governed / skipped, with the reason |
 
 `write_decision` (humans record decisions; future checks cite them) and `docs_patch` are available over MCP, the CLI
-and the web demo.
+and the web demo. Parameters, results and errors for each: [docs/tools.md](docs/tools.md).
 
-## Use it
+## Status
 
-```bash
-# Local FalkorDB without Docker (falkordblite binaries; uv fetches Python 3.12)
-npx -y lockstep-docs db start
+| Status | What |
+|---|---|
+| **Built and run** (against FalkorDB's real repositories) | Indexer, cross-repo impact, clearance, PageRank ranking, sandboxed example runs before/after a PR, decisions and verdict memory, docs patch, CLI, MCP server, web demo, graph-mode checks. Covered by `npm run verify`. |
+| **Agent mode, run with a real model** | `deepseek-v4-pro` through DeepSeek's Anthropic-compatible API ([how](docs/agent.md)), on the CLI and the live site. Each PR got a different tool order: #262 impact → read_section → decisions_for → run_example → record_verdict (5 calls, 1 verdict); #267 15 calls, 3 verdicts, each citing its before/after runs; #276 38 calls paging through 43 sections, all with verdicts. The first #276 run stopped at 40 turns with 21 sections open: `impact` capped results at 40 and the model's invented paging arguments were dropped silently; `impact` now pages, unknown arguments are an error, and the loop tracks every impacted section itself. Every verdict on these four PRs is `ok` — they are fixes, and FalkorDB updates its docs in the same PR — so the live graph holds no proposed edit; edits and the docs patch are exercised on the test fixture organisation. |
+| **Live** | [lockstep-rho.vercel.app](https://lockstep-rho.vercel.app) on Vercel, deployed from `main`, querying the org graph on FalkorDB Cloud (4.22). Published on npm as [`lockstep-docs`](https://www.npmjs.com/package/lockstep-docs). |
+| **Multi-tenant** | One graph per organisation: a second graph (`encode`, from [encode/httpx](https://github.com/encode/httpx)) sits next to `falkordb` on the same server — [docs/FACTS-encode.md](docs/FACTS-encode.md). |
+| **Written, not exercised** | The GitHub Action and the Docker image (no Docker on the development machine). |
+| **Designed** | Issue/discussion → symbol links ("asked about but undocumented"); hosted multi-org service. See [VISION.md](VISION.md). |
 
-# Index an organisation's repositories into one graph
-npx -y lockstep-docs index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+Built for [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB), tracks 01 and 03.
 
-# Check a pull request: the agent with ANTHROPIC_API_KEY set, or graph mode without a model
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267
-npx -y lockstep-docs check https://github.com/FalkorDB/falkordb-py/pull/267 --no-agent
+## Limits, stated plainly
 
-# Run one docs example before and after a PR
-npx -y lockstep-docs run "FalkorDB/docs:commands/graph.explain.mdx:0" --pr https://github.com/FalkorDB/falkordb-py/pull/267
+- **Python code only.** Docs can be any Markdown/MDX; code repositories are parsed as Python. JavaScript examples in
+  the docs are indexed but not linked or run.
+- **Call resolution is static.** Dynamic dispatch the types don't reveal falls back to by-name edges inside repositories
+  the module imports (labelled `by-name` everywhere they appear), or to no edge.
+- **Index an organisation's repositories together.** Calls between repositories resolve only among repositories passed
+  to the same `index` command; re-indexing one repository alone (as the Action's `reindex` does, at the default
+  branch's head) drops its cross-repository edges and the late links made when a PR was checked.
+- **Change detection is per definition.** A moved file reads as every definition removed and added again;
+  `export-removed` also fires when any module stops importing a name from its own package; a section longer than 8,000
+  characters always shows as a conflict in the docs patch.
+- **Graph mode samples.** It ranks the first page of impact and runs at most three examples; the agent covers every
+  impacted section. `check --no-agent --format markdown` (what the Action runs without a key) renders the comment
+  only: no stored check, no example runs.
+- **The sandbox is a guard, not a security boundary.** The example process refuses network connections and DNS at the
+  Python socket level, gets no inherited secrets and a temp HOME, and is killed on timeout; the install step before it
+  (which runs the repositories' build code at the PR's commits) gets only an allow-listed environment, so PR build
+  code never sees the server's credentials. Run it inside a container for untrusted code.
+- **Runs use today's third-party dependencies.** Repositories are installed from source at the exact commits; their
+  dependencies resolve at run time.
+- **On the live site, examples are not executed** (a Vercel Function has no sandbox): their before/after results come
+  from runs recorded on the graph by a local host. If the database is unreachable the page falls back to a labelled
+  snapshot.
+- **The agent was written for Claude** (`claude-sonnet-5-5`, adaptive thinking, refusal fallback); that path is tested
+  against a local fake API only. The real runs above used `deepseek-v4-pro`.
+- **Public repositories only.** Nothing private, login-protected or personal is indexed.
 
-# Record a maintainer decision; the next check cites it instead of re-flagging
-npx -y lockstep-docs decide "The async client keeps positional kwargs until 2.0" --governs "FalkorDB/falkordb-py:falkordb.asyncio.falkordb.FalkorDB.__init__"
+More, with workarounds: [docs/troubleshooting.md](docs/troubleshooting.md).
 
-# The docs fix as a patch (and, with GITHUB_TOKEN, a PR in your fork)
-npx -y lockstep-docs patch https://github.com/FalkorDB/falkordb-py/pull/267 [--open-pr]
-
-# Web demo and API
-npx -y lockstep-docs serve
-```
-
-**Claude Code (MCP):**
-
-```bash
-claude mcp add lockstep -e FALKORDB_URL=falkor://localhost:6379 -- npx -y lockstep-docs mcp
-```
-
-Every MCP tool description includes its Cypher, and every result lists the queries it ran with their timings.
-
-**GitHub Action:** [`examples/lockstep.yml`](examples/lockstep.yml) comments on each pull request with the docs it can
-falsify, across every repository in your graph. Configuration and deployment: [docs/DEPLOY.md](docs/DEPLOY.md).
-
-## Graph model
-
-Nodes: `Repo`, `File`, `Symbol{repo, qualname, kind, signature, status}`, `DocSection{repo, path, heading_path, anchor, body, idents}`,
-`CodeExample{repo, path, index, lang, code}`, `PullRequest{url, before_sha, after_sha}`, `Decision{text, source_url, author, status}`,
-`Verdict{verdict, reason, new_text, evidence, status}`, `Run{status, error, traceback, installed, side}`, `Check{model, status, trace}`.
-
-Edges: `(Symbol)-[:DEFINED_IN]->(File)-[:IN_REPO]->(Repo)`, `(Symbol)-[:CALLS {resolved}]->(Symbol)`,
-`(Repo)-[:DEPENDS_ON]->(Repo)`, `(DocSection)-[:MENTIONS]->(Symbol)`, `(CodeExample)-[:USES]->(Symbol)`,
-`(CodeExample)-[:IN_SECTION]->(DocSection)`, `(DocSection)-[:LINKS_TO]->(DocSection)`,
-`(Symbol)-[:CHANGED_IN {kind}]->(PullRequest)`, `(Decision)-[:GOVERNS]->(DocSection|Symbol)`,
-`(Decision)-[:SUPERSEDES]->(Decision)`, `(Verdict)-[:ABOUT]->(DocSection)`, `(Verdict)-[:FOR]->(PullRequest)`,
-`(Verdict)-[:CITES]->(Decision)`, `(Verdict)-[:EVIDENCE]->(Run)`, `(Run)-[:OF]->(CodeExample)`,
-`(Run)-[:AT]->(PullRequest)`, `(Check)-[:FOR]->(PullRequest)`, `(Check)-[:PRODUCED]->(Verdict)`.
-
-Symbols and sections that disappear on a re-index are marked `gone`, never deleted: decisions and verdicts keep
-pointing at them.
-
-### Every Cypher query the product depends on
+## Every Cypher query the product depends on
 
 <!-- generated:cypher:start -->
 <!-- Generated by `npm run docs` from src/graph/queries.ts. Do not edit by hand. -->
@@ -509,26 +570,13 @@ RETURN DISTINCT d.id AS id
 Indexing and reporting queries (36 more) are in [docs/GRAPH-MODEL.md](docs/GRAPH-MODEL.md).
 <!-- generated:cypher:end -->
 
-## Limits, stated plainly
-
-- **Python code only.** Docs can be any Markdown/MDX; code repositories are parsed as Python. JavaScript examples in
-  the docs are indexed but not linked or run.
-- **Call resolution is static.** Dynamic dispatch the types don't reveal falls back to by-name edges inside repositories
-  the module imports (labelled `by-name` everywhere they appear), or to no edge.
-- **The sandbox is a guard, not a security boundary.** It refuses network connections and DNS at the Python socket
-  level, runs with no inherited secrets and a temp HOME, and kills on timeout. Run it inside a container for untrusted
-  code.
-- **Runs use today's third-party dependencies.** Repositories are installed from source at the exact commits; their
-  dependencies resolve at run time.
-- **Public repositories only.** Nothing private, login-protected or personal is indexed.
-
 ## Develop
 
 ```bash
 npm install
 npm run verify      # typecheck (engine + web) and the test suite; starts a local FalkorDB on :6380 without Docker
-npm run build       # dist/ and web/dist/
-npm run docs        # regenerate the Cypher section above and docs/GRAPH-MODEL.md from src/graph/queries.ts
+npm run build       # dist/, web/dist/ (with /llms.txt, /llms-full.txt, /docs/*.md) and the prerendered home page
+npm run docs        # regenerate the Cypher section above, docs/GRAPH-MODEL.md, docs/tools.md and llms.txt from the code
 ```
 
 Architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

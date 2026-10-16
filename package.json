@@ -31,14 +31,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup && vite build web",
+    "build": "tsup && vite build web && npm run prerender",
     "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json --noEmit",
     "test": "vitest run",
     "verify": "npm run typecheck && npm run test",
     "dev": "tsx src/cli.ts",
     "db:start": "bash scripts/falkordb-local.sh start",
     "db:stop": "bash scripts/falkordb-local.sh stop",
-    "build:web": "vite build web",
+    "build:web": "vite build web && npm run prerender",
+    "prerender": "tsx --tsconfig web/tsconfig.json scripts/prerender.ts",
     "serve": "tsx src/cli.ts serve",
     "docs": "tsx scripts/gen-docs.ts",
     "snapshot": "tsx scripts/snapshot.ts"
@@ -70,6 +71,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "marked": "^15.0.12",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tree-sitter-python": "^0.25.0",

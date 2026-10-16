@@ -3,9 +3,46 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Lockstep: an agent that keeps docs true to code. It walks a FalkorDB graph of code, docs and decisions across repositories, runs the examples, and proposes the fix with the path behind each paragraph." />
+    <title>{{PRODUCT}} — keep docs true to code</title>
+    <meta
+      name="description"
+      content="{{PRODUCT}} finds the docs a pull request can make false, across every repository of an organisation, proves it by running the examples before and after the change, and proposes the fix with the evidence path behind each paragraph. Open source, built on FalkorDB."
+    />
+    <meta name="theme-color" content="#0f766e" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Lockstep</title>
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="Documentation index for LLMs (llms.txt)" />
+    <link rel="alternate" type="text/plain" href="/llms-full.txt" title="Full documentation as plain text" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="{{PRODUCT}} — keep docs true to code" />
+    <meta
+      property="og:description"
+      content="Find the docs a pull request can make false, across repositories. Prove it by running the examples before and after. Get the fix with the evidence."
+    />
+    <meta property="og:url" content="{{SITE_URL}}/" />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "{{PRODUCT}}",
+        "alternateName": "{{PACKAGE}}",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Node.js 20+",
+        "description": "An agent that keeps a software organisation's docs true to its code: it walks a FalkorDB graph of code, docs and decisions across repositories, runs the docs examples before and after a pull request, and proposes the docs fix with the graph path behind each paragraph.",
+        "url": "{{SITE_URL}}/",
+        "downloadUrl": "https://www.npmjs.com/package/{{PACKAGE}}",
+        "codeRepository": "{{REPO_URL}}",
+        "license": "https://opensource.org/licenses/MIT",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+    <script>
+      // Routes other than the home page hide the prerendered home until the app renders them.
+      (function () {
+        var h = location.hash.replace(/^#\/?/, '').replace(/\/$/, '');
+        if (h && !/^(try|problem|how-it-works|use-cases|benefits|integrations|compare|for-llms|faq)$/.test(h)) document.documentElement.setAttribute('data-app-route', '');
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

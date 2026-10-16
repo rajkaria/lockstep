@@ -200,7 +200,7 @@ function DecisionForm({ section, existing }: { section: string; existing?: Decis
             setState({ busy: true });
             try {
               const r = await api.decide(text, [section]);
-              setState({ ok: `${r.summary} The next check that reaches this section will cite it.` });
+              setState({ ok: `${r.summary} Agent checks that reach this section read it through decisions_for and can cite it instead of re-flagging.` });
               setText('');
             } catch (err) {
               setState({ err: (err as Error).message });

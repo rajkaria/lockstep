@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { AnthropicModel, claudeCredentialsAvailable } from '../agent/anthropic.js';
 import { runGraphCheck } from '../agent/graph-check.js';
@@ -230,6 +230,18 @@ export function createApp(opts: AppOptions): Hono {
     const root = relative(process.cwd(), webDir) || '.';
     app.use('/assets/*', serveStatic({ root }));
     app.get('/favicon.svg', serveStatic({ root }));
+    // The docs as plain text for LLMs (emitted by the web build): /llms.txt, /llms-full.txt, /docs/<slug>.md, and crawler files.
+    const text = (file: string, type: string) => async (c: Context) => {
+      const path = join(webDir, file);
+      if (!existsSync(path)) return c.notFound();
+      return c.body(await readFile(path, 'utf8'), 200, { 'content-type': `${type}; charset=utf-8` });
+    };
+    app.get('/llms.txt', text('llms.txt', 'text/plain'));
+    app.get('/llms-full.txt', text('llms-full.txt', 'text/plain'));
+    app.get('/robots.txt', text('robots.txt', 'text/plain'));
+    app.get('/sitemap.xml', text('sitemap.xml', 'application/xml'));
+    app.get('/snapshot.json', text('snapshot.json', 'application/json'));
+    app.get('/docs/:page{[a-z0-9-]+\\.md}', (c) => text(join('docs', c.req.param('page')), 'text/markdown')(c));
     app.get('*', async (c) => c.html(await readFile(join(webDir, 'index.html'), 'utf8')));
   } else {
     app.get('/', (c) => c.text('Lockstep API is running. The web UI is not built (run `npm run build:web`).'));
