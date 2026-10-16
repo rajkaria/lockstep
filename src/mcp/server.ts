@@ -150,7 +150,12 @@ export async function serveMcp(store: GraphStore, config: Config, opts: { org?: 
   const server = createMcpServer(async (tool, input) => {
     const prUrl = typeof input.pr_url === 'string' ? input.pr_url : undefined;
     // Like the CLI: the graph named by --org/STALEPROOF_ORG, else the owner of the repository the call is about.
-    const owner = repoOfArgs(input)?.split('/')[0];
+    // check_changes on a checkout names its repository through the checkout's origin remote.
+    const checkoutRepo =
+      tool.name === 'check_changes' && typeof input.repo !== 'string'
+        ? await repoOfCheckout(typeof input.dir === 'string' ? input.dir : process.cwd()).catch(() => undefined)
+        : undefined;
+    const owner = (repoOfArgs(input) ?? checkoutRepo)?.split('/')[0];
     const graph = store.org(opts.org ?? owner ?? config.org);
     if (prUrl && ['check_pull_request', 'impact', 'clearance'].includes(tool.name)) {
       await ensureIndexed(graph, config, [parsePrUrl(prUrl).fullName], (p) => process.stderr.write(`staleproof: ${p.message}\n`));
@@ -159,7 +164,8 @@ export async function serveMcp(store: GraphStore, config: Config, opts: { org?: 
     const progress = (p: { message: string }) => process.stderr.write(`staleproof: ${p.message}\n`);
     if ((tool.name === 'audit_docs' || tool.name === 'docs_for_symbol') && repos.length) await ensureIndexed(graph, config, repos, progress);
     if (tool.name === 'check_changes') {
-      const repo = typeof input.repo === 'string' ? input.repo : await repoOfCheckout(typeof input.dir === 'string' ? input.dir : process.cwd());
+      const repo = typeof input.repo === 'string' ? input.repo : checkoutRepo;
+      if (!repo) throw new Error('name the repository (repo: owner/name), or run the server inside a GitHub checkout');
       await ensureIndexed(graph, config, [repo], progress);
     }
     if (prUrl) input.pr_url = await canonicalPrUrl(graph, prUrl);
