@@ -44,3 +44,12 @@ describe('sandbox shim', () => {
     expect(slow.timedOut).toBe(true);
   });
 });
+
+describe('runProcess', () => {
+  it('reports a process that exits before reading its input instead of crashing on EPIPE', async () => {
+    const { runProcess } = await import('../src/runner/sandbox.js');
+    const r = await runProcess('sh', ['-c', 'echo bye >&2; exit 3'], { timeoutMs: 10_000, input: 'x'.repeat(4 * 1024 * 1024) });
+    expect(r.code).toBe(3);
+    expect(r.stderr).toContain('bye');
+  });
+});

@@ -58,6 +58,9 @@ export function runProcess(
       clearTimeout(timer);
       resolve({ code, stdout, stderr, timedOut, durationMs: Date.now() - started });
     });
+    // A process that exits before reading its input closes the pipe (EPIPE): its exit status and
+    // stderr say what happened, so the write error itself is not the result.
+    child.stdin.on('error', () => undefined);
     child.stdin.end(opts.input ?? '');
   });
 }

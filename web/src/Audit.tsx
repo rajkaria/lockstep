@@ -130,7 +130,9 @@ export function AuditPage({ initialRepo, health }: { initialRepo?: string; healt
 }
 
 function AuditReport({ repo, summary, data, indexedMs }: { repo: string; summary: string; data: Omit<AuditData, 'summary'>; indexedMs?: number }) {
-  const badge = `[![docs health](${SITE_URL}/api/badge/${repo}.svg)](${SITE_URL}/#/audit?repo=${encodeURIComponent(repo)})`;
+  // The host serving this page serves the badge too (the canonical domain may not point here yet).
+  const site = typeof window !== 'undefined' && /^https?:/.test(window.location.origin) ? window.location.origin : SITE_URL;
+  const badge = `[![docs health](${site}/api/badge/${repo}.svg)](${site}/#/audit?repo=${encodeURIComponent(repo)})`;
   const failing = data.runs.filter((r) => r.status === 'fail' || r.status === 'timeout');
   return (
     <div className="audit-report">
