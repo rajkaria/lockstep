@@ -50,7 +50,7 @@ describe('MCP server (stdio, FalkorDB)', () => {
   it('answers impact and clearance over MCP with the Cypher it ran', async () => {
     const r = await client.callTool({ name: 'impact', arguments: { pr_url: PR.url } });
     const texts = (r.content as { type: string; text: string }[]).map((c) => c.text);
-    expect(texts[0]).toMatch(/^1 changed symbols reach 1 doc sections \(1 breaking/);
+    expect(texts[0]).toMatch(/^1 changed symbol reaches 1 doc section \(1 breaking/);
     expect(JSON.parse(texts[1]!).sections[0].section).toBe('acme/mini-docs:docs/getting-started.mdx#read-only-queries');
     expect(texts[2]).toContain('Cypher run on FalkorDB:');
     const c = await client.callTool({ name: 'clearance', arguments: { pr_url: PR.url } });
@@ -61,5 +61,11 @@ describe('MCP server (stdio, FalkorDB)', () => {
     const r = await client.callTool({ name: 'impact', arguments: {} });
     expect(r.isError).toBe(true);
     expect((r.content as { text: string }[])[0]!.text).toMatch(/^invalid input: pr_url/);
+  });
+
+  it('rejects parameters a tool does not have, like the agent loop does', async () => {
+    const r = await client.callTool({ name: 'impact', arguments: { pr_url: PR.url, page: 2 } });
+    expect(r.isError).toBe(true);
+    expect((r.content as { text: string }[])[0]!.text).toBe('impact has no parameter page; its parameters are pr_url, max_hops, offset');
   });
 });

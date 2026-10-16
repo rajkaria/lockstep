@@ -82,6 +82,12 @@ describe('scratch guard', () => {
     expect(scratchIsOrgServer(loadConfig({}))).toBe(false);
   });
 
+  it('reads a scratch URL without credentials and refuses one with them', async () => {
+    const { loadConfig } = await import('../src/config.js');
+    expect(loadConfig({ LOCKSTEP_SCRATCH_URL: 'redis://scratch.internal:6400' }).scratch).toEqual({ host: 'scratch.internal', port: 6400, managed: false });
+    expect(() => loadConfig({ LOCKSTEP_SCRATCH_URL: 'redis://user:pw@scratch.internal:6400' })).toThrow(/must not carry credentials/);
+  });
+
   it('removes UDF libraries between runs (FLUSHALL keeps them)', async () => {
     const { ensureScratchDb, flushScratchDb } = await import('../src/runner/scratch.js');
     const { loadConfig } = await import('../src/config.js');

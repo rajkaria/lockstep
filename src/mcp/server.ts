@@ -10,6 +10,7 @@ import { parsePrUrl } from '../pr/github.js';
 import { packageVersion } from '../pkg.js';
 import { ALL_TOOLS, inputJsonSchema } from '../tools/index.js';
 import type { ToolDef, ToolResult } from '../tools/types.js';
+import { unknownParamsError } from '../tools/types.js';
 
 /** A tool only MCP clients get: the docs patch, for the human driving Claude Code to apply locally. */
 const docsPatchTool: ToolDef<{ pr_url: string }, { diff: string; title: string; body: string; files: string[] }> = {
@@ -76,7 +77,10 @@ export function createMcpServer(graph: OrgGraph, config: Config): Server {
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const tool = MCP_TOOLS.find((t) => t.name === req.params.name);
     if (!tool) return { isError: true, content: [{ type: 'text', text: `unknown tool ${req.params.name}` }] };
-    const parsed = tool.input.safeParse(req.params.arguments ?? {});
+    const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    const unknownError = unknownParamsError(tool, args);
+    if (unknownError) return { isError: true, content: [{ type: 'text', text: unknownError }] };
+    const parsed = tool.input.safeParse(args);
     if (!parsed.success) {
       return {
         isError: true,

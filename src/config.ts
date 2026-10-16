@@ -62,6 +62,8 @@ export function orgSlug(raw: string): string {
 }
 
 function hostPort(url: string): { host: string; port: number } {
+  // Docs examples connect to localhost:6379 without credentials, so the scratch server can't require any.
+  if (/^(?:\w+:\/\/)?[^/]*@/.test(url)) throw new Error('LOCKSTEP_SCRATCH_URL must not carry credentials: docs examples connect to the scratch server without a password');
   const m = /^(?:\w+:\/\/)?([^:/]+)(?::(\d+))?/.exec(url);
   if (!m) throw new Error(`invalid LOCKSTEP_SCRATCH_URL: ${url}`);
   return { host: m[1]!, port: Number(m[2] ?? 6379) };

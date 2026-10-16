@@ -177,10 +177,13 @@ export const impactTool: ToolDef<{ pr_url: string; max_hops?: number; offset?: n
       counts,
     };
     const crossRepo = sections.filter((s) => s.crossRepo).length;
+    // Added symbols can't make an existing doc false; count them apart.
+    const added = changes.rows.filter((c) => c.change === 'added').length;
+    const changedCount = changes.rows.length - added;
     const summary =
       changes.rows.length === 0
         ? `${url} changed no Python symbols in ${pr.repo}; no docs can be falsified through code.`
-        : `${changes.rows.length} changed symbols reach ${sections.length} doc sections ` +
+        : `${changedCount} changed symbol${changedCount === 1 ? '' : 's'}${added ? ` (and ${added} added)` : ''} reach${changedCount === 1 ? 'es' : ''} ${sections.length} doc section${sections.length === 1 ? '' : 's'} ` +
           `(${counts.breaking} breaking, ${counts.api} signature, ${counts.behavior} behavior; ${crossRepo} in other repositories).` +
           (sections.length > MAX_SECTIONS || offset > 0
             ? ` Showing ${page.length ? `${offset + 1}–${offset + page.length}` : 'none'} of ${sections.length}` +

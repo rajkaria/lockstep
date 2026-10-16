@@ -154,7 +154,7 @@ export const recordVerdictTool: ToolDef<
     'Pass several section_ids when one reason covers them all. Every impacted section needs a verdict or an edit before you finish.',
   input: z
     .object({
-      pr_url: z.string().optional(),
+      pr_url: z.string().optional().describe('The pull request; defaults to the one under check in agent mode, required over MCP'),
       section_id: z.string().optional(),
       section_ids: z.array(z.string()).optional().describe('Several sections sharing one verdict and reason'),
       verdict: z.enum(['ok', 'governed', 'skipped']),
@@ -189,7 +189,7 @@ export const proposeEditTool: ToolDef<VerdictInput & { pr_url?: string; new_text
     'Refused unless the graph has a path from this pull request\'s changes to the section: Lockstep never edits a paragraph without one. ' +
     'Keep everything that is still true; change only what the PR falsified, or what makes an already-broken example fail (fails before and after: say so). Cite the runs that prove it.',
   input: z.object({
-    pr_url: z.string().optional(),
+    pr_url: z.string().optional().describe('The pull request; defaults to the one under check in agent mode, required over MCP'),
     section_id: z.string(),
     new_text: z.string().min(1),
     reason: z.string().min(3),

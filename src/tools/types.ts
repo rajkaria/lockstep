@@ -45,6 +45,16 @@ export interface ToolDef<I = any, O = any> {
   run(ctx: ToolContext, input: I): Promise<ToolResult<O>>;
 }
 
+/**
+ * The error for parameters a tool does not declare (zod would drop them silently, and the
+ * caller would get the same answer again), or undefined when every parameter is known.
+ */
+export function unknownParamsError(tool: ToolDef, input: Record<string, unknown>): string | undefined {
+  const known = 'shape' in tool.input ? Object.keys((tool.input as unknown as { shape: object }).shape) : undefined;
+  const unknown = known ? Object.keys(input).filter((k) => !known.includes(k)) : [];
+  return unknown.length ? `${tool.name} has no parameter ${unknown.join(', ')}; its parameters are ${known!.join(', ')}` : undefined;
+}
+
 /** A traced view of the org graph: every query any helper runs through it is recorded. */
 export class Tracer {
   readonly queries: QueryTrace[] = [];

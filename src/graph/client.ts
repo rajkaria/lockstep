@@ -101,7 +101,7 @@ export class OrgGraph {
     return result;
   }
 
-  /** Delete the whole graph (tests and `index --fresh` only). */
+  /** Delete the whole graph (tests only). */
   async drop(): Promise<void> {
     try {
       await this.graph.delete();
