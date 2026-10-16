@@ -121,6 +121,16 @@ describe('agent loop (scripted model, FalkorDB)', () => {
     expect(checks.rows.length).toBe(3);
   });
 
+  it('stops at its time budget before the next model turn and reports the open sections', async () => {
+    const scripted = new ScriptedModel(() => ({ calls: [{ name: 'impact', input: {} }] }));
+    // The first turn starts inside the budget and outlasts it; the second must not start.
+    const slow = { name: 'slow', turn: async (...a: Parameters<ScriptedModel['turn']>) => (await new Promise((r) => setTimeout(r, 400)), scripted.turn(...a)) };
+    const r = await runAgentCheck(ctx, slow, PR_REMOVE.url, { budgetMs: 200 });
+    expect(r.status).toBe('incomplete');
+    expect(r.summary).toMatch(/^Stopped at this server's 0 s time limit after 1 model turns with 1 impacted section\(s\) still open/);
+    expect(r.missing).toEqual([LISTING]);
+  });
+
   it('rejects a parameter a tool does not have, naming the ones it does, instead of silently answering the same', async () => {
     // Found on the first real run: paging past 40 sections, the model invented limit/offset/repo and got page one again.
     const model = new ScriptedModel((history, turn) =>

@@ -16,6 +16,8 @@ export interface CheckOptions {
   maxSteps?: number;
   /** Reminders sent when the model finishes with sections still lacking a verdict. */
   maxNudges?: number;
+  /** Wall-clock budget: past it no new model turn starts and the check ends incomplete (serverless time limits). */
+  budgetMs?: number;
   onEvent?: (e: TraceEvent) => void;
 }
 
@@ -60,6 +62,8 @@ export async function runAgentCheck(ctx: ToolContext, model: ModelClient, prUrl:
   const pr = parsePrUrl(prUrl).url;
   const maxSteps = opts.maxSteps ?? 40;
   const maxNudges = opts.maxNudges ?? 2;
+  const deadline = opts.budgetMs === undefined ? Infinity : Date.now() + opts.budgetMs;
+  let outOfTime = false;
   const events: TraceEvent[] = [];
   const emit = (e: TraceEvent) => {
     events.push(e);
@@ -93,6 +97,11 @@ export async function runAgentCheck(ctx: ToolContext, model: ModelClient, prUrl:
 
   try {
     for (step = 1; step <= maxSteps; step++) {
+      if (Date.now() > deadline) {
+        outOfTime = true;
+        step--;
+        break;
+      }
       let message;
       try {
         message = await model.turn(
@@ -182,11 +191,13 @@ export async function runAgentCheck(ctx: ToolContext, model: ModelClient, prUrl:
       }
       messages.push({ role: 'user', content: results });
     }
-    if (step > maxSteps) {
+    if (outOfTime || step > maxSteps) {
       const done = new Set((await ctx.graph.run<{ id: string }>(Q.sectionsWithVerdict, { id })).rows.map((r) => r.id));
       missing = [...impacted].filter((s) => !done.has(s));
       status = 'incomplete';
-      summary ||= `Stopped after ${maxSteps} model turns with ${missing.length} impacted section(s) still open.`;
+      summary ||= outOfTime
+        ? `Stopped at this server's ${Math.round(opts.budgetMs! / 1000)} s time limit after ${step} model turns with ${missing.length} impacted section(s) still open; the CLI has no time limit.`
+        : `Stopped after ${maxSteps} model turns with ${missing.length} impacted section(s) still open.`;
     }
   } catch (err) {
     status = 'error';

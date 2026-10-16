@@ -172,7 +172,7 @@ export function createApp(opts: AppOptions): Hono {
       try {
         await mutex.run(async () => {
           const ctx = { graph, config };
-          if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send });
+          if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send, budgetMs: config.checkBudgetMs });
           else await runGraphCheck(ctx, pr, { onEvent: send });
         });
       } catch (err) {

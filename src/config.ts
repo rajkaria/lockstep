@@ -22,6 +22,8 @@ export interface Config {
   /** Scratch FalkorDB that docs examples run against (never the org graph's server). */
   scratch: { host: string; port: number; managed: boolean };
   runTimeoutMs: number;
+  /** Wall-clock budget for one agent check in the server (Vercel Functions stop at 300 s). */
+  checkBudgetMs?: number;
 }
 
 export const DEFAULT_MODEL = 'claude-sonnet-5-5';
@@ -43,6 +45,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ? { ...hostPort(env.LOCKSTEP_SCRATCH_URL), managed: false }
       : { host: '127.0.0.1', port: Number(env.LOCKSTEP_SCRATCH_PORT ?? 6390), managed: true },
     runTimeoutMs: Number(env.LOCKSTEP_RUN_TIMEOUT_MS ?? 30_000),
+    // Leave a model turn's worth of headroom under the 300 s function limit.
+    checkBudgetMs: env.LOCKSTEP_CHECK_BUDGET_MS ? Number(env.LOCKSTEP_CHECK_BUDGET_MS) : env.VERCEL ? 240_000 : undefined,
   };
 }
 

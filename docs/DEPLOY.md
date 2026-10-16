@@ -18,6 +18,7 @@ repository commit and runs each docs example in it).
 | `LOCKSTEP_PRELOADED` | three FalkorDB PRs | Comma-separated PR URLs shown on the home page |
 | `LOCKSTEP_HOME` | `~/.lockstep` | Clones, response cache, virtualenvs |
 | `LOCKSTEP_RUN_TIMEOUT_MS` | `30000` | Per-example timeout |
+| `LOCKSTEP_CHECK_BUDGET_MS` | `240000` on Vercel, none elsewhere | Wall-clock budget for one agent check in the server: no model turn starts after it, and the check ends incomplete with its open sections listed (a Vercel Function stops at 300 s; a 43-section check takes about 6 minutes) |
 | `PORT` / `HOST` | `8080` / `127.0.0.1` | Bind address for `serve` (`0.0.0.0` in the Docker image) |
 
 ## Vercel
