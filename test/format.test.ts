@@ -98,6 +98,30 @@ describe('checkMarkdown', () => {
     const fixed = checkMarkdown({ impact: { ...impact, pr: { ...impact.pr, repo: 'acme/docs', docsTouched: ['a.mdx'] } }, summary: 's', cleared: [], org: 'acme' });
     expect(fixed.split('\n')[1]).toBe('### Staleproof: the doc section this pull request reaches is on pages it edits');
     expect(md).toContain('(page edited in this PR)');
-    expect(md).toContain('This pull request also edits `a.mdx`: examples on those pages are run after the change as the pull request leaves them;');
+    expect(md).toContain(
+      'This pull request also edits `a.mdx`: examples on those pages are run after the change as the pull request leaves them; the sections above are linked as they are on the default branch.',
+    );
+  });
+
+  // Found in the GitHub App end-to-end run (2026-10-17): the App runs no example and its
+  // report had no sections, yet it said examples were run and pointed at "the sections above".
+  it('says only what applies to the pages the pull request edits', () => {
+    const edits = { ...impact.pr, repo: 'acme/docs', docsTouched: ['README.md', 'a.mdx'] };
+    const none = { sections: [], totalSections: 0, counts: { breaking: 0, api: 0, behavior: 0 } };
+    const passes = { example: 'acme/docs:a.mdx:0', url: 'u', verdict: 'passes' as const, before: { status: 'pass' as const, error: '', reason: '' }, after: { status: 'pass' as const, error: '', reason: '' } };
+    // Graph mode, no doc reached: no example ran, no section listed, nothing to say about the edited pages.
+    const graphOnly = checkMarkdown({ impact: { ...impact, ...none, pr: edits }, summary: 's', cleared: [], org: 'acme' });
+    expect(graphOnly).not.toContain('also edits');
+    // A section on an edited page and no runs (graph mode, the GitHub App): the links note only.
+    const sectionsOnly = checkMarkdown({ impact: { ...impact, pr: edits }, summary: 's', cleared: [], org: 'acme' });
+    expect(sectionsOnly).toContain('This pull request also edits `README.md`, `a.mdx`: the sections above are linked as they are on the default branch.');
+    expect(sectionsOnly).not.toContain('are run after the change');
+    // A run on an edited page and no section listed: the runs note only.
+    const runsOnly = checkMarkdown({ impact: { ...impact, ...none, pr: edits }, summary: 's', cleared: [], runs: [passes], org: 'acme' });
+    expect(runsOnly).toContain('This pull request also edits `README.md`, `a.mdx`: examples on those pages are run after the change as the pull request leaves them.');
+    expect(runsOnly).not.toContain('sections above');
+    // Sections and runs only on pages the pull request does not edit: nothing to say about its edits.
+    const elsewhere = checkMarkdown({ impact: { ...impact, pr: { ...edits, docsTouched: ['other.md'] } }, summary: 's', cleared: [], runs: [passes], org: 'acme' });
+    expect(elsewhere).not.toContain('also edits');
   });
 });

@@ -147,7 +147,11 @@ export function checkMarkdown(opts: {
     if (opts.verdicts.some((v) => v.verdict === 'stale')) out.push('Proposed edits: `npx staleproof patch ' + impact.pr.url + '`', '');
   }
   if (impact.pr.docsTouched.length) {
-    out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: examples on those pages are run after the change as the pull request leaves them; the sections above are linked as they are on the default branch.`, '');
+    // Only what applies: graph mode (the GitHub App, `runs: 0`) runs no example, and a report may list no section.
+    const notes: string[] = [];
+    if (runs.some((r) => onTouchedPage(r.example))) notes.push('examples on those pages are run after the change as the pull request leaves them');
+    if (impact.sections.some((s) => onTouchedPage(s.section.replace('#', ':')))) notes.push('the sections above are linked as they are on the default branch');
+    if (notes.length) out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: ${notes.join('; ')}.`, '');
   }
   if (opts.agentSummary) out.push(opts.agentSummary, '');
   const lintNote = opts.newFindings
