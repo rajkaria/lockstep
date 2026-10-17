@@ -5,6 +5,9 @@ web/dist/
 scratch/
 coverage/
 *.tgz
+*.vsix
+editors/zed/target/
+editors/zed/extension.wasm
 .env
 .env.*
 !.env.example

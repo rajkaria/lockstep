@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "type": "staleproof.digest",
+  "text": "Docs health for acme/app: 81/100 (B), down 7 since the last digest (2026-10-10, 88/100). 4 new since then, 1 fixed. 5 open problems: 3 docs references, 1 example line, 1 failing example. 1 verified fix ready (staleproof fix).",
+  "scope": "acme/app",
+  "commits": [
+    "acme/app@abc1234"
+  ],
+  "score": 81,
+  "grade": "B",
+  "previous": {
+    "score": 88,
+    "grade": "B",
+    "at": "2026-10-10T09:00:00.000Z"
+  },
+  "delta": -7,
+  "new": [
+    {
+      "kind": "reference",
+      "repo": "acme/app",
+      "path": "AGENTS.md",
+      "line": 4,
+      "message": "`npm run lint:docs` is not a script in package.json.",
+      "url": "https://github.com/acme/app/blob/abc1234def5678/AGENTS.md#L4",
+      "rule": "command-missing"
+    },
+    {
+      "kind": "reference",
+      "repo": "acme/app",
+      "path": "README.md",
+      "line": 21,
+      "message": "`STALE_URL` is not read anywhere in the code.",
+      "url": "https://github.com/acme/app/blob/abc1234def5678/README.md#L21",
+      "rule": "env-unused"
+    },
+    {
+      "kind": "example",
+      "repo": "acme/app",
+      "path": "docs/api.md",
+      "line": 44,
+      "message": "Example: `connect` has no parameter `tls`.",
+      "url": "https://github.com/acme/app/blob/abc1234def5678/docs/api.md#L44"
+    },
+    {
+      "kind": "run",
+      "repo": "acme/app",
+      "path": "docs/run.md",
+      "line": 0,
+      "message": "Example fails when run: TypeError: connect() got an unexpected keyword argument 'tls'",
+      "url": "https://github.com/acme/app/blob/abc1234def5678/docs/run.md#L5"
+    }
+  ],
+  "newTotal": 4,
+  "fixed": 1,
+  "open": {
+    "references": 3,
+    "examples": 1,
+    "failing": 1
+  },
+  "fixes": [
+    {
+      "repo": "acme/app",
+      "path": "AGENTS.md",
+      "line": 4,
+      "description": "Rename to `npm run lint-docs` (script renamed in package.json)",
+      "url": "https://github.com/acme/app/blob/abc1234def5678/AGENTS.md#L4"
+    }
+  ],
+  "fixesTotal": 1,
+  "link": "https://github.com/acme/app/issues/7",
+  "generatedAt": "2026-10-17T09:00:00.000Z"
+}

@@ -6,6 +6,7 @@ import { INDEX_VERSION, indexOrg, type IndexProgress, type IndexReport } from '.
 import { parseRepoName, type Checkout } from '../indexer/repo.js';
 import { RepoTooLargeError, type TarballLimits } from '../indexer/tarball.js';
 import { downloadTree } from '../lint/sources.js';
+import { assertPublicGraph, isPrivateGraph } from '../app/guard.js';
 
 /**
  * Hosted workspaces: the graph that answers for a repository.
@@ -110,10 +111,11 @@ export class Workspaces {
     this.limits = { ...DEFAULT_HOSTED_LIMITS, ...opts.limits, tarball: { ...DEFAULT_HOSTED_LIMITS.tarball, ...opts.limits?.tarball } };
     this.prefix = opts.prefix ?? HOSTED_PREFIX;
     this.fetchImpl = opts.fetchImpl;
+    if (isPrivateGraph(curated.name) || isPrivateGraph(this.prefix)) throw new Error('a private (ghp-) graph cannot be a hosted or curated workspace');
   }
 
   graph(name: string): OrgGraph {
-    return this.store.org(name);
+    return this.store.org(assertPublicGraph(name));
   }
 
   /** The workspace graph name a repository is indexed into when it isn't anywhere yet. */
@@ -127,7 +129,7 @@ export class Workspaces {
     const inCurated = await this.curated.run<{ n: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS n LIMIT 1`, { name });
     if (inCurated.rows.length) return { graph: this.curated, curated: true };
     const entry = await this.entry(name);
-    if (!entry) return undefined;
+    if (!entry || isPrivateGraph(entry.graph)) return undefined;
     return { graph: this.graph(entry.graph), curated: false, entry };
   }
 
@@ -164,7 +166,7 @@ export class Workspaces {
       )
     ).rows;
     const byGraph = new Map<string, WorkspaceRepo[]>();
-    for (const r of rows) byGraph.set(r.graph, [...(byGraph.get(r.graph) ?? []), r]);
+    for (const r of rows) if (!isPrivateGraph(r.graph)) byGraph.set(r.graph, [...(byGraph.get(r.graph) ?? []), r]);
     for (const [graph, repos] of byGraph) out.push({ graph, curated: false, repos: repos.sort((a, b) => a.name.localeCompare(b.name)) });
     return out;
   }

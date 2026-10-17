@@ -117,7 +117,7 @@ describe('coding-agent hooks', () => {
     expect(out?.reason).toBe(
       [
         'Staleproof: 1 doc reference this session made wrong (new since HEAD):',
-        '- README.md:8:8 `connect` has no parameter `timeout`. [example-unknown-keyword]',
+        '- README.md:8:8 `connect` has no parameter `timeout`. [example-unknown-keyword] Fix: Rename to `deadline=` (renamed in the signature of `demo.client.connect`)',
         '- docs/usage.md:3 still names `timeout` of `connect`; demo/client.py changed it to `def connect(host, deadline=10)`.',
         'Update the docs and agent files above in this change (apply the fixes listed), or explain why they stay as they are.',
       ].join('\n'),

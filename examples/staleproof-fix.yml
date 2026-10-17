@@ -1,0 +1,20 @@
+# .github/workflows/staleproof-fix.yml: Renovate for docs. Once a week (and on demand), Staleproof
+# lints the default branch, applies every fix it could re-check, and keeps one pull request
+# from the branch staleproof/fix-docs up to date. It closes the pull request when nothing is left.
+name: Staleproof fix docs
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write          # push the staleproof/fix-docs branch (never any other branch)
+  pull-requests: write     # open, update and close the one fix pull request
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rajkaria/staleproof@v1
+        with:
+          mode: fix

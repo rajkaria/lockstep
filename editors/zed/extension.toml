@@ -1,0 +1,11 @@
+id = "staleproof"
+name = "Staleproof"
+version = "0.6.0"
+schema_version = 1
+authors = ["Raj Karia"]
+description = "Stale docs references as you type: paths, links, commands, CLI flags, env vars, symbols and docstrings your docs and AI agent files get wrong."
+repository = "https://github.com/rajkaria/staleproof"
+
+[language_servers.staleproof]
+name = "Staleproof"
+languages = ["Markdown", "Python", "TypeScript", "TSX", "JavaScript", "Go"]

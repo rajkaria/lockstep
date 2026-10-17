@@ -328,10 +328,16 @@ exclusive), `surface` (`agent`, `readme`, `docs`, `example`, `docstring`, `confi
 to), `evidence` (where Staleproof looked, and a link to the line) and a `fingerprint` that stays the same when lines
 are added above the finding. Fields are only ever added to this format.
 
+## Fixing what lint finds
+
+`staleproof fix` applies the fixes it can re-check; `staleproof lint --fixes` shows them without applying (`fix:` lines in text, `Fix:` in annotations, `fixes` in SARIF). [Fix stale docs](fix.md) has the details.
+
 ## Related
 
 - [Lint rules](rules.md): every rule with an example.
 - [Docs audit](audit.md): a health score, example runs and API coverage, using the graph.
 - [Configuration](configuration.md): `.staleproof.toml`.
+- [Editors (LSP)](editors.md): the same findings in VS Code, Cursor, Neovim, Zed, Helix and JetBrains while you type.
+- [Fix stale docs](fix.md): the fixes `staleproof fix` applies, re-checked first.
 - [Claude Code plugin](claude-code.md): these findings after every edit an agent makes, and before it stops.
 - [Pre-commit hooks](pre-commit.md): `lint --new --staged` on every commit.

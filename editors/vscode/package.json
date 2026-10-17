@@ -1,0 +1,138 @@
+{
+  "name": "staleproof",
+  "displayName": "Staleproof",
+  "description": "Stale docs references as you type: paths, links, commands, CLI flags, env vars, symbols and docstrings that your docs and AI agent files (AGENTS.md, CLAUDE.md, Cursor rules) get wrong, with verified fixes.",
+  "version": "0.6.0",
+  "type": "module",
+  "publisher": "staleproof",
+  "license": "MIT",
+  "author": "Raj Karia",
+  "icon": "images/icon.png",
+  "homepage": "https://staleproof.dev/#/docs/editors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajkaria/staleproof.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/rajkaria/staleproof/issues"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "docs",
+    "documentation",
+    "stale",
+    "drift",
+    "markdown",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "cursor rules",
+    "docstrings",
+    "lsp"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "onLanguage:mdx",
+    "onLanguage:restructuredtext",
+    "onLanguage:python",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:go",
+    "workspaceContains:.staleproof.toml",
+    "workspaceContains:**/AGENTS.md",
+    "workspaceContains:**/CLAUDE.md"
+  ],
+  "main": "./dist/extension.cjs",
+  "contributes": {
+    "commands": [
+      {
+        "command": "staleproof.fixAllInFile",
+        "title": "Fix all in file",
+        "category": "Staleproof"
+      },
+      {
+        "command": "staleproof.auditWorkspace",
+        "title": "Audit workspace",
+        "category": "Staleproof"
+      },
+      {
+        "command": "staleproof.restart",
+        "title": "Restart server",
+        "category": "Staleproof"
+      },
+      {
+        "command": "staleproof.showOutput",
+        "title": "Show output",
+        "category": "Staleproof"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "staleproof.fixAllInFile",
+          "when": "editorIsOpen && config.staleproof.enable"
+        },
+        {
+          "command": "staleproof.auditWorkspace",
+          "when": "config.staleproof.enable"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Staleproof",
+      "properties": {
+        "staleproof.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check docs, READMEs, AI agent files and docstrings against the code while you edit."
+        },
+        "staleproof.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show \"N docs reference this\" above functions and classes the docs mention or call."
+        },
+        "staleproof.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `staleproof` executable. Empty: the workspace's `node_modules/.bin/staleproof`, then one on your `PATH`, then `npx -y staleproof@<the version this extension was built for>`."
+        },
+        "staleproof.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the messages between the editor and the Staleproof language server (Output: Staleproof)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "node esbuild.mjs --production && vsce package --no-dependencies",
+    "vscode:prepublish": "node esbuild.mjs --production"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.91.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

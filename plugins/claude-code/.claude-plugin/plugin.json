@@ -1,7 +1,7 @@
 {
   "name": "staleproof",
   "displayName": "Staleproof",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Keeps docs and AI agent files true to the code: after each edit Claude hears which docs it made wrong, and before it stops it is asked to fix them. Local, no account.",
   "author": {
     "name": "Raj Karia",

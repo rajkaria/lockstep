@@ -138,6 +138,17 @@ function GitHubInstall({ initialRepo, health }: { initialRepo?: string; health?:
             request gets a comment like the one below — the docs it can make false, the path from the changed code to each one, and the examples run before and
             after.
           </p>
+          {health?.githubApp?.installUrl && (
+            <div className="app-install">
+              <a className="btn btn-primary" href={health.githubApp.installUrl} target="_blank" rel="noreferrer">
+                Install the GitHub App
+              </a>
+              <p className="muted small">
+                No workflow file: a check run and, when there is something to say, a comment on every pull request, public or private repositories.
+                It does not run examples; the Action below does. <a href="#/docs/github-app">How the App works</a>
+              </p>
+            </div>
+          )}
           <form className="repo-form" onSubmit={(e) => e.preventDefault()}>
             <label htmlFor="repo-input">Repository</label>
             <div className="repo-input-row">

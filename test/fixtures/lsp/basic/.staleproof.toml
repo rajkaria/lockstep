@@ -1,0 +1,3 @@
+# The LSP reads the workspace's config like `staleproof lint` does.
+[rules]
+"anchor-missing" = "error"

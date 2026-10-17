@@ -1,0 +1,21 @@
+{
+  "name": "Staleproof",
+  "url": "https://staleproof.dev",
+  "description": "Checks every pull request for the docs it makes wrong: commands, paths, links, env vars, CLI flags and examples in READMEs, docs and AI agent files. One check run, one comment, suggested fixes. No workflow file.",
+  "public": true,
+  "hook_attributes": {
+    "url": "https://staleproof.dev/api/github/webhook",
+    "active": true
+  },
+  "setup_url": "https://staleproof.dev/#/docs/github-app",
+  "setup_on_update": false,
+  "request_oauth_on_install": false,
+  "default_permissions": {
+    "checks": "write",
+    "contents": "write",
+    "pull_requests": "write",
+    "issues": "write",
+    "metadata": "read"
+  },
+  "default_events": ["pull_request", "push", "check_run", "check_suite"]
+}

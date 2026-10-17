@@ -42,6 +42,8 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 | `GET /api/lint` | Graph-free lint of any public repository (its tarball): the stale paths, links, commands and env vars its docs and AI agent files name | yes, `lint` bucket, cache misses only |
 | `POST /api/audit` | Audit a repository and stream the progress (SSE); hosted, index it first | yes, `audit` bucket |
 | `GET /api/badge/:owner/:name.svg` | The README badge: the repository's docs health score | no |
+| `GET /api/verified/:owner/:name.json` | The checked stamp's data: per-page status from the cached audit | no |
+| `GET /api/verified/:owner/:name/stamp.js` | The embeddable stamp script | no |
 | `GET /api/docs-for` | Which docs depend on a symbol, with the evidence path for each | no |
 | `POST /api/mcp` | MCP over Streamable HTTP | yes, `mcp` bucket (10 times the others) |
 | `GET /api/sections` | The text and examples of one doc section | no |
@@ -49,6 +51,8 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 | `POST /api/decisions` | Record a maintainer decision | yes, `write` bucket |
 | `POST /api/verdicts/:id/review` | Accept or reject a verdict | yes, `write` bucket |
 | `GET /api/model` | Every named Cypher query and every tool | no |
+| `POST /api/github/webhook` | The GitHub App's webhook: signed deliveries in, `202` at once, the work in the background (404 while the App is not configured) | no (signature checked) |
+| `GET /api/github/cron` | The App's daily job: docs fix pull requests, audit issues, dirty indexes (`Authorization: Bearer $CRON_SECRET`) | no |
 | `GET /`, `/llms.txt`, `/llms-full.txt`, `/docs/<slug>.md`, `/robots.txt`, `/sitemap.xml`, `/favicon.svg`, `/assets/*`, anything else | The web app and its static files | no |
 
 ## Conventions
@@ -111,6 +115,7 @@ A server without model credentials and without hosted mode answers:
 | `agent.provider` | string | The host of `ANTHROPIC_BASE_URL` for an Anthropic-compatible provider (for example `api.deepseek.com`), else `api.anthropic.com` |
 | `busy` | boolean | A check (or, hosted, an indexing run) is running |
 | `hosted` | object | `{enabled: false}`, or in hosted mode `{enabled: true, limits: {maxRepos, maxFiles, maxGraphMb}, memory: {used, max}, githubToken}`: the workspace limits, the FalkorDB server's memory in MB (`max` is 0 when uncapped; `memory` is left out when the server does not report it), and whether the server has a GitHub token |
+| `githubApp` | object | The [GitHub App](github-app.md): `{enabled: false}`, or `{enabled: true, appSlug, installUrl}` when the server has the App's credentials (`appSlug` and `installUrl` only when `GITHUB_APP_SLUG` is set; the web install page shows its button from it). Never a secret |
 
 `available: true` means credentials were found, not that they work. A `claude-*` model name with a compatible provider still reports `available: true`, and every agent check then fails with an `error` event (see [Troubleshooting](troubleshooting.md#common-errors)).
 
@@ -408,6 +413,12 @@ The README badge: `docs health | <score> <grade>` in the shields.io flat style, 
 
 It always answers `200` with `content-type: image/svg+xml; charset=utf-8`. For an indexed repository it computes the audit (cached 10 minutes) and sends `cache-control: public, max-age=3600, s-maxage=3600`. For a repository this server has not indexed, or a malformed name, it sends a grey `docs health | not audited` badge with `max-age=300`: audit the repository once (the page, `POST /api/audit` or the CLI against this server's graph) and the next request after the cache expires shows the score.
 
+## GET /api/verified/:owner/:name.json
+
+The [checked stamp](verified-stamp.md)'s data: which docs pages of an audited repository were checked, against which commit and when, and how many references on each are out of date (`version: 1`; fields in [the stamp's page](verified-stamp.md#the-json)). CORS `*`, `cache-control: public, max-age=300, s-maxage=600`. From the same cached audit as the badge; it never starts indexing. A repository this server has not audited (or one in a private `ghp-` graph) answers `404` `{"error": ..., "indexed": false}`; an unreachable graph `503`.
+
+`GET /api/verified/:owner/:name/stamp.js` serves the script (`text/javascript`, under 4 KB, `max-age=3600, s-maxage=86400`).
+
 ## GET /api/docs-for
 
 Which doc sections and examples depend on a symbol, with the evidence path for each: the CLI's [`docs-for`](cli.md#docs-for) and the MCP tool [`docs_for_symbol`](tools.md#docs_for_symbol) over HTTP.
@@ -534,6 +545,18 @@ curl -s http://127.0.0.1:8080/api/model
 ```
 
 `200 {queries: [{name, group, purpose, cypher}], tools: [{name, description, queries}]}`. `queries` is every named Cypher statement (`group` is `schema`, `index`, `tool`, `memory` or `report`); `tools` lists the nine tools of the agent and MCP (`check_pull_request`, `check_changes`, `docs_for_symbol`, `audit_docs` and `docs_patch`, which only MCP has, are not included), each with the names of the queries it can run. The same statements are in [Graph model and Cypher](GRAPH-MODEL.md).
+
+## POST /api/github/webhook
+
+The [GitHub App](github-app.md)'s webhook. Answers `404` unless `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` and `GITHUB_APP_WEBHOOK_SECRET` are set. Needs the headers `X-GitHub-Event` and `X-GitHub-Delivery` (`400` without them) and `X-Hub-Signature-256`, the HMAC-SHA256 of the raw body with the webhook secret, compared in constant time (`401` when it does not match). Bodies over 25 MB are refused (`413`). A `ping` answers `200 {"ok": true, "event": "ping"}`. A delivery id seen in the last 24 hours answers `200 {"duplicate": true, "delivery": "<id>"}` and does nothing. Anything else answers `202 {"accepted": true, "event": "<event>", "delivery": "<id>"}` at once; the work (`pull_request`, `check_run`, `check_suite`, `push`, `installation`, `installation_repositories`) goes on in the background, and its results appear on GitHub only.
+
+## GET /api/github/cron
+
+The App's daily job, called by Vercel Cron (`vercel.json` `crons`). Needs `Authorization: Bearer <CRON_SECRET>` (`401` otherwise; `503` when `CRON_SECRET` is not set; `404` when the App is not configured). Visits every installation's repositories, least recently visited first, for up to 240 s, and answers with what it did:
+
+    {"installations": 1, "repos": 3, "refreshed": [], "fixPrs": [{"repo": "acme/app", "action": "opened", "url": "https://github.com/acme/app/pull/12"}],
+     "auditIssues": [{"repo": "acme/app", "action": "updated", "number": 4, "title": "Docs health 82/100: 2 docs reference(s) no longer match the repository"}],
+     "errors": [], "partial": false}
 
 ## Static routes
 

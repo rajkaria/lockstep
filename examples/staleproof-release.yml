@@ -1,0 +1,31 @@
+# .github/workflows/staleproof-release.yml: the release gate. When a release is published (or by hand),
+# compare it with the previous tag: are its breaking API changes in the changelog, and do the docs still
+# call or name what it removed or changed? The report goes to the job summary; the job fails per release-fail-on.
+name: Staleproof release gate
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Compare with this tag or commit (default the latest tag before the release)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # The gate reads both commits from the clone: all history and tags.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: rajkaria/staleproof@v1
+        with:
+          mode: release
+          release-from: ${{ inputs.from }}
+          # release-fail-on: undocumented-breaking,stale-docs   # the default; `never` only reports
+          # changelog: CHANGELOG.md                              # default: CHANGELOG.md, CHANGES.md, HISTORY.md, ...

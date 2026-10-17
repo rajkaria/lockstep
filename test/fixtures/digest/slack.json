@@ -1,0 +1,42 @@
+{
+  "text": "Docs health for acme/app: 81/100 (B), down 7 since the last digest (2026-10-10, 88/100). 4 new since then, 1 fixed. 5 open problems: 3 docs references, 1 example line, 1 failing example. 1 verified fix ready (staleproof fix).",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Staleproof docs digest: acme/app"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Docs health 81/100 (B)*, down 7 since the last digest (2026-10-10, 88/100)\n4 new since then, 1 fixed. 5 open problems: 3 docs references, 1 example line, 1 failing example. 1 verified fix ready (staleproof fix)."
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*New since the last digest*\n• <https://github.com/acme/app/blob/abc1234def5678/AGENTS.md#L4|AGENTS.md:4> `npm run lint:docs` is not a script in package.json.\n• <https://github.com/acme/app/blob/abc1234def5678/README.md#L21|README.md:21> `STALE_URL` is not read anywhere in the code.\n• <https://github.com/acme/app/blob/abc1234def5678/docs/api.md#L44|docs/api.md:44> Example: `connect` has no parameter `tls`.\n• <https://github.com/acme/app/blob/abc1234def5678/docs/run.md#L5|docs/run.md> Example fails when run: TypeError: connect() got an unexpected keyword argument 'tls'"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Verified fixes* (`staleproof fix` applies them)\n• <https://github.com/acme/app/blob/abc1234def5678/AGENTS.md#L4|AGENTS.md:4> Rename to `npm run lint-docs` (script renamed in package.json)"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "<https://github.com/acme/app/issues/7|Full report> · checked at acme/app@abc1234 · Staleproof"
+        }
+      ]
+    }
+  ]
+}

@@ -33,6 +33,7 @@ import { impactTool } from './tools/graph-tools.js';
 import type { ToolContext } from './tools/types.js';
 import { auditDocs } from './audit.js';
 import { auditMarkdown, auditText } from './format/audit.js';
+import { insertBeforeFooter, ownersForAudit } from './codeowners.js';
 import { docsForTool } from './tools/docs-for.js';
 import { analyzeChanges, localChanges, worktreeFindings } from './pr/local.js';
 import { checkMarkdown } from './format/markdown.js';
@@ -344,8 +345,14 @@ program
         if (report) log(`indexed ${report.repos.map((r) => `${r.repo}@${r.sha.slice(0, 7)}`).join(', ')} into graph "${org}" in ${(report.ms / 1000).toFixed(1)}s`);
       }
       const r = await auditDocs(ctx, { repos: names.length ? names : undefined, run: Number(opts.run), limit: Number(opts.limit) });
+      // The issue body groups the docs to fix by CODEOWNERS (plain text unless [audit] mention-owners = true).
+      const owners = opts.format === 'markdown' ? await ownersForAudit(r.data, { home: config.home, token: config.githubToken }).catch(() => '') : '';
       const body =
-        opts.format === 'json' ? JSON.stringify({ summary: r.summary, ...r.data }, null, 2) : opts.format === 'markdown' ? auditMarkdown(r.data, r.summary) : auditText(r.data, r.summary);
+        opts.format === 'json'
+          ? JSON.stringify({ summary: r.summary, ...r.data }, null, 2)
+          : opts.format === 'markdown'
+            ? insertBeforeFooter(auditMarkdown(r.data, r.summary), owners)
+            : auditText(r.data, r.summary);
       if (opts.out) {
         await writeFile(opts.out, `${body}\n`);
         log(`wrote ${opts.out}: ${r.summary}`);
@@ -361,6 +368,65 @@ program
         process.exitCode = 1;
       }
     });
+  });
+
+program
+  .command('digest')
+  .description(
+    'Post what changed in the docs health since the last digest to Slack, Discord or any webhook: score and change, new drift with links, verified fixes. Run after staleproof audit.',
+  )
+  .argument('[repos...]', 'repositories to digest as owner/name (default: every repository in the graph); audit them first')
+  .option('--webhook <url>', 'post here (Slack or Discord by host, else JSON); default: STALEPROOF_DIGEST_WEBHOOK. Never printed')
+  .option('--as <kind>', 'payload shape: auto | slack | discord | json (a relay in front of Slack, say)', 'auto')
+  .option('--format <format>', 'what to print: text | markdown | json | slack | discord', 'text')
+  .option('--previous <file>', 'the previous state: the audit issue body (or a state file) holding <!-- staleproof:state ... -->')
+  .option('--state-out <file>', 'append the new state line to this file (the audit report the issue is written from)')
+  .option('--graph-state', 'read and write the state in the graph (a persistent FalkorDB)')
+  .option('--link <url>', 'the full report to link to (the audit issue, the workflow run)')
+  .action(
+    async (
+      repos: string[],
+      opts: { webhook?: string; as: string; format: string; previous?: string; stateOut?: string; graphState?: boolean; link?: string },
+    ) => {
+      if (repos[0]) aboutRepo(repos[0]);
+      const { runDigestCommand } = await import('./digest.js');
+      await withGraph(async (store, org) => {
+        const r = await runDigestCommand({
+          graph: store.org(org),
+          config: settings(),
+          repos: repos.map(parseRepoName),
+          webhook: opts.webhook ?? (process.env.STALEPROOF_DIGEST_WEBHOOK || undefined),
+          as: opts.as as 'auto',
+          format: opts.format as 'text',
+          previous: opts.previous,
+          stateOut: opts.stateOut,
+          graphState: opts.graphState,
+          link: opts.link,
+          log,
+        });
+        if (r.output) console.log(r.output);
+      });
+    },
+  );
+
+program
+  .command('release')
+  .description(
+    'Release gate: breaking public API changes since the last tag, whether the changelog names them, docs still relying on what changed, lint at the release. No graph, no network.',
+  )
+  .argument('[dir]', 'the git checkout', '.')
+  .option('--from <ref>', 'the previous release (default: the latest tag reachable from --to, not on it; stable releases skip prereleases)')
+  .option('--to <ref>', 'the release (default HEAD; left out, an edited and uncommitted changelog on disk is read)')
+  .option('--changelog <file>', 'the changelog (default: CHANGELOG.md, CHANGES.md, HISTORY.md, NEWS.md, ... at --to)')
+  .option('--fail-on <gates>', 'undocumented-breaking,stale-docs (the default: both) | never')
+  .option('--format <format>', 'text | markdown | json', 'text')
+  .option('--out <file>', 'write the report to a file instead of stdout')
+  .option('--repo <owner/name>', 'the GitHub repository (default: from the origin remote)')
+  .action(async (dir: string, opts: { from?: string; to?: string; changelog?: string; failOn?: string; format: string; out?: string; repo?: string }) => {
+    const { runReleaseCommand } = await import('./release.js');
+    const r = await runReleaseCommand({ dir, ...opts, repo: opts.repo ? parseRepoName(opts.repo) : undefined, log });
+    if (r.output) console.log(r.output);
+    process.exitCode = r.exitCode;
   });
 
 program
@@ -380,10 +446,26 @@ program
   .option('--base <ref>', 'with --new: the commit to compare with (default: HEAD with uncommitted changes, else the merge base with the default branch)')
   .option('--staged', 'lint the git index (what the next commit contains) instead of the files on disk')
   .option('--no-cache', 'parse every file again instead of reading the local parse cache (.staleproof/cache)')
+  .option('--fixes', 'attach the verified fix to each finding it can fix (two more lints; renames detected against the --new base)')
   .action(
     async (
       dir: string,
-      opts: { format: string; out?: string; failOn: string; rule?: string[]; disable?: string[]; files?: string[]; with: string[]; examples: boolean; repo?: string; new?: boolean; base?: string; staged?: boolean; cache: boolean },
+      opts: {
+        format: string;
+        out?: string;
+        failOn: string;
+        rule?: string[];
+        disable?: string[];
+        files?: string[];
+        with: string[];
+        examples: boolean;
+        repo?: string;
+        new?: boolean;
+        base?: string;
+        staged?: boolean;
+        cache: boolean;
+        fixes?: boolean;
+      },
     ) => {
       if (opts.base && !opts.new) throw new Error('--base needs --new (compare with that commit)');
       if (!LINT_FORMATS.includes(opts.format as LintFormat)) throw new Error(`unknown --format ${opts.format} (${LINT_FORMATS.join(', ')})`);
@@ -407,7 +489,12 @@ program
       };
       // --new: findings absent at the base commit; --staged: the index instead of the disk (src/lint/diff.ts).
       const diff = opts.new ? await lintNew({ ...lintOpts, base: opts.base, staged: opts.staged }) : undefined;
-      const r = diff ?? (opts.staged ? await lintStaged(lintOpts) : await lintRepo(lintOpts));
+      let r = diff ?? (opts.staged ? await lintStaged(lintOpts) : await lintRepo(lintOpts));
+      if (opts.fixes && !opts.staged) {
+        const { addFixes } = await import('./lint/fixes.js');
+        const { worktreeTree } = await import('./lint/sources.js');
+        r = { ...r, findings: (await addFixes(r, worktreeTree(dir, r.repo), { lint: lintOpts, cache: lintOpts.cache ?? false })).findings };
+      }
       if (diff) log(`new findings only: ${diff.head.label} against ${diff.base.label} (${diff.base.why}); ${diff.fixed} fixed`);
       const body = formatLint(r, opts.format as LintFormat);
       if (opts.out) {
@@ -417,6 +504,57 @@ program
         console.log(body);
       }
       process.exitCode = lintExitCode(r, opts.failOn as 'error' | 'warning' | 'info' | 'never');
+    },
+  );
+
+program
+  .command('fix')
+  .description(
+    'Apply the fixes Staleproof could re-check to the docs, READMEs, AI agent files and docstrings: renamed scripts, targets, flags, files, headings, env vars, symbols and parameters, and close typos. --dry-run prints the diff. No graph, no network.',
+  )
+  .argument('[dir]', 'the checkout to fix', '.')
+  .option('--dry-run', 'print the unified diff of the fixes and write nothing')
+  .option('--rule <ids...>', 'only fix findings of these rules')
+  .option('--disable <ids...>', 'skip these rules')
+  .option('--new', 'only fix what the changes introduced: findings absent at the base commit')
+  .option('--base <ref>', 'the commit renames are detected against (and, with --new, compared with); default: HEAD with uncommitted changes, else the merge base with the default branch')
+  .option('--fail-on <level>', 'exit 1 when a finding at or above this is left: error | warning | info | never', 'error')
+  .option('--format <format>', 'text | json', 'text')
+  .option('--with <dirs...>', 'other local checkouts whose code the docs examples call', [])
+  .option('--no-examples', 'skip the static checks of docs code examples (no code parsing)')
+  .option('--repo <owner/name>', 'the GitHub repository the checkout is (default: from its origin remote)')
+  .option('--no-cache', 'parse every file again instead of reading the local parse cache (.staleproof/cache)')
+  .action(
+    async (
+      dir: string,
+      opts: { dryRun?: boolean; rule?: string[]; disable?: string[]; new?: boolean; base?: string; failOn: string; format: string; with: string[]; examples: boolean; repo?: string; cache: boolean },
+    ) => {
+      if (!['text', 'json'].includes(opts.format)) throw new Error(`unknown --format ${opts.format} (text, json)`);
+      if (!['error', 'warning', 'info', 'never'].includes(opts.failOn)) throw new Error(`--fail-on must be error, warning, info or never (got ${opts.failOn})`);
+      const ids = (xs?: string[]): RuleId[] | undefined => {
+        if (!xs) return undefined;
+        const bad = xs.filter((x) => !isRuleId(x));
+        if (bad.length) throw new Error(`unknown rule ${bad.join(', ')} (see https://staleproof.dev/#/docs/rules)`);
+        return xs as RuleId[];
+      };
+      const { runFixCommand } = await import('./lint/fix-command.js');
+      const r = await runFixCommand({
+        dir,
+        dryRun: opts.dryRun,
+        rules: ids(opts.rule),
+        disable: ids(opts.disable),
+        new: opts.new,
+        base: opts.base,
+        with: opts.with,
+        examples: opts.examples,
+        ...(opts.repo ? { repo: parseRepoName(opts.repo) } : {}),
+        cache: opts.cache,
+        failOn: opts.failOn as 'error' | 'warning' | 'info' | 'never',
+        format: opts.format as 'text' | 'json',
+      });
+      if (r.base) log(`renames detected against ${r.base.label} (${r.base.why})`);
+      if (r.output) console.log(r.output);
+      process.exitCode = r.exitCode;
     },
   );
 
@@ -556,6 +694,58 @@ program
   });
 
 program
+  .command('suggest')
+  .description(
+    'Post the verified fixes for the docs a pull request makes wrong as GitHub suggestions on its diff (one review per push; earlier ones updated, never repeated). Needs GITHUB_TOKEN with pull-requests: write.',
+  )
+  .argument('<pr-url>', 'https://github.com/<owner>/<repo>/pull/<n> or owner/repo#n')
+  .option('--dry-run', 'plan the suggestions and post nothing')
+  .option('--out <file>', 'write the Markdown about fixes outside the diff (for the pull request comment) to this file')
+  .option('--author <login>', 'only comments by this account count as earlier Staleproof suggestions')
+  .option('--json', 'print the findings, the plan and what was posted as JSON')
+  .action(async (prUrl: string, opts: { dryRun?: boolean; out?: string; author?: string; json?: boolean }) => {
+    const config = settings();
+    if (!config.githubToken && !opts.dryRun) throw new Error('suggest needs GITHUB_TOKEN (pull-requests: write)');
+    const { runSuggestCommand } = await import('./pr/suggest.js');
+    const r = await runSuggestCommand({ pr: prUrl, token: config.githubToken ?? '', home: config.home, dryRun: opts.dryRun, ...(opts.author ? { author: opts.author } : {}) });
+    if (opts.out) await writeFile(opts.out, r.markdown ? `${r.markdown}\n` : '');
+    if (r.warning) log(r.warning);
+    if (opts.json) {
+      console.log(JSON.stringify({ version: 1, findings: r.findings, comments: r.plan.comments, outside: r.plan.outside, posted: r.posted ?? null }, null, 2));
+      return;
+    }
+    const verified = r.findings.filter((f) => f.fix?.verified).length;
+    const p = r.posted;
+    console.log(
+      `${r.findings.length} new finding(s), ${verified} with a verified fix: ${r.plan.comments.length} suggestion(s) on the diff, ${r.plan.outside.length} outside it` +
+        (p ? ` (posted ${p.created}, updated ${p.updated}, already there ${p.unchanged}, superseded ${p.superseded}${p.review?.url ? `: ${p.review.url}` : ''})` : opts.dryRun ? ' (dry run: nothing posted)' : ''),
+    );
+  });
+
+program
+  .command('fix-pr')
+  .description(
+    'Renovate for docs: lint the default branch, apply every verified fix on the branch staleproof/fix-docs and keep one pull request up to date ("Staleproof: fix N stale docs references"); close it when nothing is left. Needs GITHUB_TOKEN with contents: write and pull-requests: write.',
+  )
+  .argument('<repo>', 'owner/name')
+  .option('--dir <dir>', 'a checkout of the default branch to use as it is (default: clone or download it)')
+  .option('--branch <name>', 'the fix branch; must start with staleproof/', 'staleproof/fix-docs')
+  .option('--dry-run', 'say what would change and write nothing')
+  .option('--json', 'print the result as JSON')
+  .action(async (repoArg: string, opts: { dir?: string; branch: string; dryRun?: boolean; json?: boolean }) => {
+    const config = settings();
+    if (!config.githubToken) throw new Error('fix-pr needs GITHUB_TOKEN (contents: write, pull-requests: write)');
+    const { runFixPrCommand } = await import('./pr/fix-pr.js');
+    const r = await runFixPrCommand({ repo: parseRepoName(repoArg), token: config.githubToken, home: config.home, ...(opts.dir ? { dir: opts.dir } : {}), branch: opts.branch, dryRun: opts.dryRun });
+    if (opts.json) {
+      const { output, ...rest } = r;
+      console.log(JSON.stringify({ version: 1, ...rest, fixes: r.fixes.length, output }, null, 2));
+      return;
+    }
+    console.log(r.output);
+  });
+
+program
   .command('mcp')
   .description('Serve the Staleproof tools over MCP (stdio). Claude Code: claude mcp add staleproof -- npx -y staleproof mcp')
   .action(async () => {
@@ -564,6 +754,20 @@ program
       log(`staleproof mcp: serving ${org ? `graph "${orgSlug(org)}"` : "each repository's owner graph"} from ${redact(settings().falkordbUrl)}`);
       await serveMcp(store, settings(), { org: org ? orgSlug(org) : undefined });
     });
+  });
+
+program
+  .command('lsp')
+  .description(
+    'Language server for editors (VS Code, Cursor, Windsurf, Neovim, Zed, Helix, JetBrains): what lint finds, while you type, from the unsaved text; verified fixes as code actions; hover, definitions and references between docs and code. Local only: no graph, no network.',
+  )
+  .option('--stdio', 'talk LSP over stdin and stdout (the default and only transport)')
+  // Editors' launchers add their own flags (--clientProcessId=<pid>, --node-ipc): accept and ignore them.
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async () => {
+    const { startLsp } = await import('./lsp/index.js');
+    startLsp();
   });
 
 program

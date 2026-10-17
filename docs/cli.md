@@ -36,6 +36,15 @@ npx -y staleproof lint
 ```
 
 It checks every path, link, anchor, command (scripts, make targets, the repository's own CLI and its flags) and code example in the docs, READMEs and AI agent files against the checkout ([`lint`](#lint), [Lint docs and agent files](lint.md)).
+Fix what lint found, after a look at the diff:
+
+```bash
+npx -y staleproof fix --dry-run
+npx -y staleproof fix
+```
+
+Each fix is checked again before it is applied ([`fix`](#fix), [Fix stale docs](fix.md)). Before tagging a release, `npx -y staleproof release` lists the breaking API changes since the last tag that the changelog does not name, and the docs still relying on them ([`release`](#release)); after an audit, `staleproof digest` posts what changed to Slack, Discord or any webhook ([`digest`](#digest)).
+
 
 The first checks the working tree of the checkout you are in (uncommitted and unpushed changes) and exits 1 when an example is predicted to break, which makes it a pre-push hook ([below](#check-without-a-pull-request)); the second lists the docs that depend on a symbol before you change it; the third audits the docs as they are ([Docs audit](audit.md)).
 
@@ -43,7 +52,7 @@ The first checks the working tree of the checkout you are in (uncommitted and un
 
 | How | Command | Notes |
 |---|---|---|
-| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.4.0 <command>`. |
+| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.6.0 <command>`. |
 | Global install | `npm install -g staleproof`, then `staleproof <command>` | Puts `staleproof` on your `PATH`. |
 | From a clone | `npm install && npm run build`, then `node dist/cli.js <command>` | Or `npm run dev -- <command>` to run the TypeScript source. |
 
@@ -408,6 +417,7 @@ staleproof lint [options] [dir]
 | `--base <ref>` | `HEAD` with uncommitted changes, else the merge base with the default branch | With `--new`: the commit to compare with (read from the local clone, never fetched). `--base` without `--new` is a usage error |
 | `--staged` | off | Lint the git index (what the next commit contains) instead of the files on disk; with `--new` the base is `HEAD` |
 | `--no-cache` | cache on | Parse every file again instead of reading the local parse cache in `.staleproof/cache/` (also `STALEPROOF_CACHE=off`); see [Lint: the parse cache](lint.md#the-parse-cache) |
+| `--fixes` | off | Attach the verified fix to each finding it can fix (two more lints): `fix:` lines in text, `Fix:` in `github` annotations, `fixes` in SARIF. Ignored with `--staged`. See [Fix stale docs](fix.md) |
 
 **Examples.**
 
@@ -423,6 +433,37 @@ npx -y staleproof lint --rule path-missing link-broken --fail-on warning
 **Prints.** Findings grouped by section (AI agent instructions first, then READMEs, docs, code examples), each as `line:column  severity  message  [rule]`, then a summary: `<n> errors, <n> warnings in <files> files (<checked> files checked, <ms> ms)`, or `No stale references in <n> files`. Config warnings (unknown keys) are printed as `warning: …` and never stop the run. Unknown rule ids fail with `unknown rule <id>`; a bad `--format` or `--fail-on` with the allowed values. With `--new`, only the new findings are printed and stderr says what was compared: `new findings only: <working tree|index> against <base> (<why>); <n> fixed`. [Lint: only what a change introduced](lint.md#only-what-a-change-introduced) explains the base and the fingerprints.
 
 **Exit status.** 1 when a finding is at or above `--fail-on`; 2 on a usage or internal error; otherwise 0.
+
+### `fix`
+
+Apply the fixes Staleproof could re-check: a renamed script, Make or just target, CLI flag or subcommand, file, heading, environment variable, symbol or parameter written the new way, and close typos (`npm run buld` → `npm run build`). Each fix is applied in a mirror of the checkout and linted again first; only fixes whose finding goes away and that add none are applied. [Fix stale docs](fix.md) explains where fixes come from and when Staleproof refuses one.
+
+```text
+staleproof fix [options] [dir]
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--dry-run` | off | Print the unified diff and write nothing |
+| `--rule <ids...>` | all fixable | Only fix findings of these rules |
+| `--disable <ids...>` | none | Skip these rules |
+| `--new` | off | Only fix what the changes introduced (findings absent at the base) |
+| `--base <ref>` | `HEAD` with uncommitted changes, else the merge base with the default branch | The commit renames are detected against (and `--new` compares with); read from the local clone, never fetched |
+| `--fail-on <level>` | `error` | Exit 1 when a finding at or above this is left |
+| `--format <format>` | `text` | `text` or `json` |
+| `--with <dirs...>`, `--no-examples`, `--repo <owner/name>`, `--no-cache` | | As for `lint` |
+
+**Examples.**
+
+```bash
+npx -y staleproof fix --dry-run
+npx -y staleproof fix
+npx -y staleproof fix --new --rule command-missing path-missing
+```
+
+**Prints.** With `--dry-run`, the unified diff first. Then one line per fix, `fixed  path:line:column  rule  description` (`would fix` with `--dry-run`), a `hint` line for each fix that did not pass re-checking (not applied), and a summary: `Fixed <n> findings in <files> files; <n> findings left.` A second run prints `Nothing to fix automatically; <n> findings left (run staleproof lint to see them).` or `Nothing to fix.` On stderr: `renames detected against <base> (<why>)`. A file edited while Staleproof worked is skipped (`skipped <path>: …`), never overwritten.
+
+**Exit status.** As for `lint`, measured after the fixes: 1 when a finding at or above `--fail-on` is left (with `--dry-run`: would be left); a usage or internal error exits non-zero as `lint` does; otherwise 0.
 
 ### `hook`
 
@@ -511,6 +552,36 @@ npx -y staleproof audit acme/acme-client acme/acme-docs --fail-under 80 --fail-o
 **Prints.** The score and grade, the indexed commits, a summary, the deductions, every example line that no longer fits the code (`✗ <path>:<index> line <n> · <repo>`, then the detail, its kind and the call), the failing runs, API coverage with the most used undocumented symbols, and for one repository the README badge Markdown. [Docs audit](audit.md#the-cli) shows a full report and the JSON shape. `--format`, `--run`, `--limit` and `--fail-under` are validated before anything runs: `unknown --format <x> (text, markdown or json)`, `--run must be a whole number, got <x>`, `--fail-under must be a score from 0 to 100, got <x>`.
 
 **Exit status.** 1 when the score is below `--fail-under` (logs `health score <s> is below --fail-under <n>`) or, with `--fail-on-mismatch`, when any line no longer fits (logs `<n> example(s) no longer fit the code (--fail-on-mismatch)`); the report is printed or written first. Otherwise 0, whatever the score.
+
+### `digest`
+
+Post what changed in the docs health since the last digest: score and change, new drift with links, problems fixed, verified fixes. [Docs audit](audit.md#weekly-digest-to-slack-or-discord) explains the payloads and the state.
+
+```text
+staleproof digest [options] [repos...]
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--webhook <url>` | `STALEPROOF_DIGEST_WEBHOOK` | Post there: Slack and Discord by host, JSON otherwise. Logged by host only |
+| `--as <kind>` | `auto` | Force the payload: `slack`, `discord` or `json` |
+| `--format <format>` | `text` | What to print: `text`, `markdown`, `json`, or the `slack`/`discord` payload |
+| `--previous <file>` | none | The previous state: an audit issue body or a state file |
+| `--state-out <file>` | none | Append the new `<!-- staleproof:state ... -->` line to this file |
+| `--graph-state` | off | Read and write the state in the graph |
+| `--link <url>` | none | The full report to link to |
+
+The repositories must be indexed (`staleproof audit` first). Exit status 1 when the webhook refuses the post.
+
+### `release`
+
+The release gate: breaking public API changes since the last tag, whether the changelog names them, docs still relying on what changed, lint at the release. No graph, no network. See [Release gate](release.md).
+
+```text
+staleproof release [dir] [--from <ref>] [--to <ref>] [--changelog <file>] [--fail-on <gates>] [--format text|markdown|json] [--out <file>] [--repo <owner/name>]
+```
+
+**Exit status.** 0 when no selected gate fails, 1 when `undocumented-breaking` or `stale-docs` fails, 2 for a usage error or unreadable commits.
 
 ### `run`
 
@@ -643,6 +714,40 @@ npx -y staleproof patch <pr-url> --open-pr --in-repo --base my-feature --only ac
 - `--in-repo` creates or resets the branch `staleproof/docs-<owner>-<repo>-<number>` in the docs repository at the head of `--base` (default: its default branch), commits each edited file, and opens a pull request into `--base`, or reuses the open one from that branch. The token needs `contents: write` and `pull-requests: write` on that repository. This is how the GitHub Action's `open-docs-pr` puts the docs fix into the checked pull request's branch ([GitHub Action](github-action.md#open-the-docs-fix-as-a-pull-request)).
 - Fails with `<url> has not been checked` for a pull request the graph has never read.
 
+### `suggest`
+
+Post the verified fixes for the docs references a pull request makes wrong as GitHub suggestions on its diff: lint base and head (the local clone, else the archives), keep the new findings, fix them with renames detected between the two commits, and post one review on the head commit. A suggestion already posted on the same lines is updated (or left when it says the same); one on lines that changed is left as it is; nothing is posted twice. The GitHub Action runs it in check mode (`suggestions: true`).
+
+```text
+staleproof suggest [options] <pr-url>
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--dry-run` | off | Plan the suggestions, post nothing |
+| `--out <file>` | none | Write the Markdown that lists the verified fixes outside the diff (for the pull request comment) |
+| `--author <login>` | any | Only comments by this account count as earlier Staleproof suggestions |
+| `--json` | off | Print the findings, the planned comments, the fixes outside the diff and what was posted |
+
+Needs `GITHUB_TOKEN` with `pull-requests: write`. **Prints** `<n> new finding(s), <n> with a verified fix: <n> suggestion(s) on the diff, <n> outside it (posted <n>, updated <n>, already there <n>, superseded <n>: <review url>)`. A read-only token (a fork's) prints a warning and exits 0.
+
+### `fix-pr`
+
+Renovate for docs: lint the default branch, apply every verified fix on the branch `staleproof/fix-docs` (rebuilt from the default branch on every run), and keep one pull request, `Staleproof: fix <n> stale docs references`, with a table of the fixes and the evidence for each. Closes it when nothing is left; does not reopen fixes someone closed without merging until they change. Writes no ref outside `staleproof/` and never touches another branch. The Action runs it with `mode: fix`.
+
+```text
+staleproof fix-pr [options] <owner/name>
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--dir <dir>` | clone or download | A checkout of the default branch to use as it is |
+| `--branch <name>` | `staleproof/fix-docs` | The fix branch; must start with `staleproof/` |
+| `--dry-run` | off | Say what would change, write nothing |
+| `--json` | off | Print the result as JSON |
+
+Needs `GITHUB_TOKEN` with `contents: write` and `pull-requests: write`. **Prints** one line: `Opened the fix pull request with <n> verified fixes in <n> files: <url>`, `Updated …`, `The fix pull request is up to date …`, `Nothing left to fix at <branch>: closed <url>`, or `Nothing to fix at <branch> (<sha>).`
+
 ### `mcp`
 
 Serve the tools over the Model Context Protocol on stdio.
@@ -658,6 +763,25 @@ claude mcp add staleproof -- npx -y staleproof mcp
 ```
 
 **Prints.** On stderr, `staleproof mcp: serving graph "<org>" from <url>` (or `serving each repository's owner graph`) with any password masked, and `staleproof: <message>` lines while it indexes. Stdout carries the protocol. It connects to FalkorDB at start ([FalkorDB on first use](#falkordb-on-first-use)) and uses the graph named by `--org` or `STALEPROOF_ORG`, else the graph of the owner of the repository each call is about (as `check` does). `check_pull_request`, `impact` and `clearance` index the pull request's repository into that graph the first time they see it; `audit_docs` and `docs_for_symbol` index the repositories named in `repos`, and `check_changes` the repository it checks (named in `repo`, or the `origin` of the checkout in `dir`, default the directory the server runs in). [MCP server](mcp.md) covers clients, tools, the hosted server and security.
+
+### `lsp`
+
+Serve the [language server](editors.md) on stdin and stdout, for editors: diagnostics for the docs pages, READMEs, AI agent files and docstrings open in the editor (re-checked from the unsaved text 300 ms after the last edit), verified fixes and "ignore this rule here" as code actions, hover and go to definition from a docs code span to the code, and "documented in N places", find references and a code lens from the code to the docs. Reads the files, git and the parse cache (`.staleproof/cache`); needs no FalkorDB and sends nothing anywhere.
+
+```text
+staleproof lsp [--stdio]
+```
+
+**Example.** Neovim 0.11:
+
+```lua
+vim.lsp.config('staleproof', { cmd = { 'staleproof', 'lsp' }, filetypes = { 'markdown', 'python', 'typescript' }, root_markers = { '.git' } })
+vim.lsp.enable('staleproof')
+```
+
+**Prints.** Stdout carries the protocol; anything else goes to stderr. Each workspace folder is linted once at start (like `lint`), then again in the background after a save or a file change. The VS Code extension, other editors' setup and the server's commands (`staleproof.fixAll`, `staleproof.audit`) are in [Editors](editors.md).
+
+**Exit status.** 0 after the client's `shutdown` and `exit`; 1 when the client exits without `shutdown`.
 
 ### `serve`
 
@@ -752,3 +876,6 @@ The variables most commands read. [Configuration](configuration.md) lists all of
 - [Tools reference](tools.md)
 - [GitHub Action](github-action.md)
 - [Troubleshooting and FAQ](troubleshooting.md)
+- [Fix stale docs](fix.md)
+- [Editors (LSP)](editors.md)
+- [Release gate](release.md)

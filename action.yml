@@ -7,7 +7,7 @@ branding:
 
 inputs:
   mode:
-    description: "`auto` (default): check the pull request on pull_request events, audit the docs otherwise (schedule, workflow_dispatch, push); `check` or `audit` to force one."
+    description: "`auto` (default): check pull requests, audit otherwise. Or `check`, `audit`, `fix` (docs fix PR), `release` (release gate)."
     default: auto
   also-index:
     description: Other repositories to index together with this one, space- or comma-separated (e.g. your docs site `acme/docs`), so links across them resolve.
@@ -39,6 +39,9 @@ inputs:
   open-docs-pr:
     description: Agent mode on a pull request from this repository. Open the proposed docs edits as a pull request into the checked pull request's branch. Needs `contents write`.
     default: 'false'
+  suggestions:
+    description: Check mode. Post each verified docs fix as a suggestion on the diff, never twice. Needs pull-requests write.
+    default: 'true'
   comment:
     description: Post (and keep updating) one pull request comment. The report always goes to the job summary.
     default: 'true'
@@ -59,10 +62,25 @@ inputs:
     default: ${{ github.token }}
   version:
     description: The staleproof npm version to run, or `source` to build the CLI from this action's checkout.
-    default: '0.5.0'
+    default: '0.6.0'
   cache:
     description: "Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the base commit: a later run on the same base skips indexing, an older dump is re-indexed with only changed files parsed again. `false` to index from scratch every run. Ignored with falkordb-url."
     default: 'true'
+  digest-webhook:
+    description: Audit mode. A Slack, Discord or other webhook URL (pass a secret) to post the docs digest to after each audit.
+    default: ''
+  release-from:
+    description: Release mode. The previous release to compare with (default the latest tag before the release).
+    default: ''
+  release-to:
+    description: Release mode. The release commit or tag (default the checkout's HEAD).
+    default: ''
+  release-fail-on:
+    description: "Release mode. `undocumented-breaking,stale-docs` (default), one of them, or `never`."
+    default: 'undocumented-breaking,stale-docs'
+  changelog:
+    description: Release mode. The changelog file (default CHANGELOG.md, CHANGES.md, HISTORY.md, ... in the checkout).
+    default: ''
 
 outputs:
   report:
@@ -77,12 +95,24 @@ outputs:
   findings:
     description: How many docs references the pull request makes wrong (new lint findings in its docs, READMEs and AI agent files; also shown as annotations).
     value: ${{ steps.check.outputs.findings }}
+  fix-pr:
+    description: Fix mode. The URL of the docs fix pull request (empty when nothing is left to fix).
+    value: ${{ steps.fix.outputs.pr }}
   score:
     description: Audit mode. The docs health score (0-100).
     value: ${{ steps.audit.outputs.score }}
   mismatched:
     description: Audit mode. How many examples no longer fit the code.
     value: ${{ steps.audit.outputs.mismatched }}
+  breaking:
+    description: Release mode. How many breaking public API changes the release makes.
+    value: ${{ steps.release.outputs.breaking }}
+  undocumented:
+    description: Release mode. How many of them the changelog does not name.
+    value: ${{ steps.release.outputs.undocumented }}
+  stale-docs:
+    description: Release mode. How many docs references still rely on what the release changed.
+    value: ${{ steps.release.outputs.stale-docs }}
 
 runs:
   using: composite
@@ -124,7 +154,8 @@ runs:
 
     - name: Restore the graph and the parse cache
       id: cache-restore
-      if: steps.cache-key.outputs.key != ''
+      # Fix and release modes need no graph.
+      if: steps.cache-key.outputs.key != '' && inputs.mode != 'fix' && inputs.mode != 'release'
       uses: actions/cache/restore@v6
       with:
         path: ${{ steps.cache-key.outputs.dir }}
@@ -133,6 +164,7 @@ runs:
 
     - name: Start FalkorDB
       id: db
+      if: inputs.mode != 'fix' && inputs.mode != 'release'
       shell: bash
       env:
         FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
@@ -215,7 +247,7 @@ runs:
           fi
         fi
 
-    - name: Choose check or audit
+    - name: Choose the mode
       id: mode
       shell: bash
       env:
@@ -223,9 +255,9 @@ runs:
         PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
       run: |
         case "$MODE" in
-          check|audit) mode="$MODE" ;;
+          check|audit|fix|release) mode="$MODE" ;;
           auto|'') if [ -n "$PR_URL" ]; then mode=check; else mode=audit; fi ;;
-          *) echo "::error::mode must be auto, check or audit (got $MODE)"; exit 1 ;;
+          *) echo "::error::mode must be auto, check, audit, fix or release (got $MODE)"; exit 1 ;;
         esac
         echo "Staleproof mode: $mode"
         echo "mode=$mode" >> "$GITHUB_OUTPUT"
@@ -308,6 +340,24 @@ runs:
         [ "$status" != "0" ] && echo "::warning::staleproof check ended with exit $status; the report may be incomplete."
         exit 0
 
+    - name: Suggest the fixes
+      if: steps.mode.outputs.mode == 'check' && inputs.suggestions == 'true' && steps.check.outputs.report != '' && steps.check.outputs.findings != '0'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR_URL: ${{ inputs.pr-url || github.event.pull_request.html_url }}
+        REPORT: ${{ steps.check.outputs.report }}
+        CLI: ${{ steps.cli.outputs.cli }}
+      run: |
+        # Older CLIs have no suggest command.
+        if ! $CLI --help 2>/dev/null | grep -q '^  suggest'; then echo "This staleproof version cannot suggest fixes."; exit 0; fi
+        outside="$RUNNER_TEMP/staleproof-outside.md"
+        if ! $CLI suggest "$PR_URL" --out "$outside"; then
+          echo "::warning::Could not suggest the docs fixes (pull requests from forks get a read-only token); see the log above."
+          exit 0
+        fi
+        if [ -s "$outside" ] && [ -f "$REPORT" ]; then printf '\n%s\n' "$(cat "$outside")" >> "$REPORT"; fi
+
     - name: Post or update the comment
       if: always() && steps.mode.outputs.mode == 'check' && inputs.comment == 'true' && steps.check.outputs.report != ''
       shell: bash
@@ -319,8 +369,9 @@ runs:
         [ -f "$REPORT" ] || exit 0
         repo=$(echo "$PR_URL" | sed -E 's#https://github.com/([^/]+/[^/]+)/pull/.*#\1#')
         number=$(echo "$PR_URL" | sed -E 's#.*/pull/([0-9]+).*#\1#')
+        # The GitHub App's comment starts with the same marker; it carries <!-- staleproof:app --> and is left to the App.
         existing=$(gh api "repos/$repo/issues/$number/comments" --paginate \
-          --jq '[.[] | select(.body | startswith("<!-- staleproof -->") or startswith("<!-- lockstep-docs -->"))][0].id // empty' 2>/dev/null || true)
+          --jq '[.[] | select((.body | startswith("<!-- staleproof -->") or startswith("<!-- lockstep-docs -->")) and ((.body | contains("<!-- staleproof:app -->")) | not))][0].id // empty' 2>/dev/null || true)
         if [ -n "$existing" ]; then
           gh api -X PATCH "repos/$repo/issues/comments/$existing" -F body=@"$REPORT" >/dev/null && echo "Updated the Staleproof comment." && exit 0
         else
@@ -376,6 +427,32 @@ runs:
         echo "mismatched=$mismatched" >> "$GITHUB_OUTPUT"
         echo "failing=$failing" >> "$GITHUB_OUTPUT"
 
+    - name: Post the docs digest
+      if: steps.mode.outputs.mode == 'audit' && inputs.digest-webhook != '' && steps.audit.outputs.report != ''
+      shell: bash
+      env:
+        FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
+        ORG: ${{ inputs.org }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        WITH: ${{ inputs.also-index }}
+        REPORT: ${{ steps.audit.outputs.report }}
+        CLI: ${{ steps.cli.outputs.cli }}
+        STALEPROOF_DIGEST_WEBHOOK: ${{ inputs.digest-webhook }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        [ -n "$FALKORDB_URL_INPUT" ] && export FALKORDB_URL="$FALKORDB_URL_INPUT"
+        [ -n "$FALKORDB_URL_INPUT" ] && [ -n "$ORG" ] && export STALEPROOF_ORG="$ORG"
+        # The last digest's state is a hidden line in the audit issue's body (open or closed); with a persistent graph, there too.
+        previous="$RUNNER_TEMP/staleproof-previous-audit.md"
+        gh api "repos/$REPO/issues?state=all&sort=updated&per_page=100" \
+          --jq '[.[] | select(.pull_request == null) | select((.body // "") | startswith("<!-- staleproof-audit -->"))][0].body // ""' > "$previous" 2>/dev/null || : > "$previous"
+        state=(--previous "$previous" --state-out "$REPORT")
+        [ -n "$FALKORDB_URL_INPUT" ] && state+=(--graph-state)
+        $CLI digest "$REPO" $(echo "$WITH" | tr ',' ' ') --link "$RUN_URL" "${state[@]}" \
+          || echo "::warning::Could not post the docs digest (see the log above); the audit report is in the job summary."
+
     - name: Keep the audit issue up to date
       if: steps.mode.outputs.mode == 'audit' && inputs.issue == 'true' && steps.audit.outputs.report != ''
       shell: bash
@@ -420,6 +497,27 @@ runs:
         echo "::error::Docs health $SCORE/100; $MISMATCHED example(s) no longer fit the code. See the report in the job summary."
         exit 1
 
+    - name: Fix the docs
+      id: fix
+      if: steps.mode.outputs.mode == 'fix'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        CLI: ${{ steps.cli.outputs.cli }}
+      run: |
+        out="$RUNNER_TEMP/staleproof-fix.json"
+        if ! $CLI fix-pr "$REPO" --json > "$out"; then
+          echo "::error::staleproof fix-pr failed; the job needs contents: write and pull-requests: write (see examples/staleproof-fix.yml)."
+          exit 1
+        fi
+        node -e '
+          const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+          console.log(r.output);
+          require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `pr=${r.pr && r.action !== "closed" ? r.pr.url : ""}\nfixes=${r.fixes}\naction=${r.action}\n`);
+          require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Staleproof fix\n\n${r.output}\n`);
+        ' "$out"
+
     - name: Fail on broken examples
       if: steps.mode.outputs.mode == 'check' && (inputs.fail-on == 'breaks' || inputs.fail-on == 'predicted') && steps.check.outputs.breaks != '0' && steps.check.outputs.breaks != ''
       shell: bash
@@ -445,6 +543,51 @@ runs:
         FINDINGS: ${{ steps.check.outputs.finding-errors }}
       run: |
         echo "::error::This pull request makes $FINDINGS docs reference(s) wrong (paths, links, commands or settings the docs and agent files still name). See the annotations and the report in the job summary."
+        exit 1
+
+    - name: Release gate
+      id: release
+      if: steps.mode.outputs.mode == 'release'
+      shell: bash
+      env:
+        FROM: ${{ inputs.release-from }}
+        TO: ${{ inputs.release-to }}
+        FAIL_ON: ${{ inputs.release-fail-on }}
+        CHANGELOG: ${{ inputs.changelog }}
+        REPO: ${{ github.repository }}
+        CLI: ${{ steps.cli.outputs.cli }}
+      run: |
+        if ! git -C "$GITHUB_WORKSPACE" rev-parse --git-dir >/dev/null 2>&1; then
+          echo "::error::mode: release reads the repository's history: add actions/checkout with fetch-depth: 0 before this step."
+          exit 1
+        fi
+        report="$RUNNER_TEMP/staleproof-release.md"
+        args=(--format markdown --out "$report" --fail-on "${FAIL_ON:-undocumented-breaking,stale-docs}" --repo "$REPO")
+        [ -n "$FROM" ] && args+=(--from "$FROM")
+        [ -n "$TO" ] && args+=(--to "$TO")
+        [ -n "$CHANGELOG" ] && args+=(--changelog "$CHANGELOG")
+        status=0
+        $CLI release "$GITHUB_WORKSPACE" "${args[@]}" || status=$?
+        if [ ! -f "$report" ]; then
+          echo "::error::staleproof release failed (exit $status); see the log above."
+          exit 1
+        fi
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        counts=$(grep -o '<!-- staleproof:release [^>]*-->' "$report" | tail -1)
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        echo "breaking=$(echo "$counts" | sed -E 's/.*breaking=([0-9]+).*/\1/')" >> "$GITHUB_OUTPUT"
+        echo "undocumented=$(echo "$counts" | sed -E 's/.*undocumented=([0-9]+).*/\1/')" >> "$GITHUB_OUTPUT"
+        echo "stale-docs=$(echo "$counts" | sed -E 's/.* stale=([0-9]+).*/\1/')" >> "$GITHUB_OUTPUT"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+
+    - name: Fail on the release gate
+      if: steps.mode.outputs.mode == 'release' && steps.release.outputs.status == '1'
+      shell: bash
+      env:
+        UNDOCUMENTED: ${{ steps.release.outputs.undocumented }}
+        STALE: ${{ steps.release.outputs.stale-docs }}
+      run: |
+        echo "::error::Release gate: $UNDOCUMENTED breaking change(s) not in the changelog, $STALE docs reference(s) still relying on what changed. See the report in the job summary."
         exit 1
 
     - name: Prepare the graph for the cache

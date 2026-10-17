@@ -156,6 +156,8 @@ export interface Health {
   busy: boolean;
   /** Hosted mode: any public repository is indexed on demand. */
   hosted?: { enabled: boolean; limits?: { maxRepos: number; maxFiles: number; maxGraphMb: number }; githubToken?: boolean };
+  /** The GitHub App: on when the server has its credentials; `installUrl` when GITHUB_APP_SLUG is set. */
+  githubApp?: { enabled: boolean; appSlug?: string; installUrl?: string };
   /** Set when the UI is showing the bundled snapshot because the live API is unreachable. */
   snapshot?: { takenAt: string };
 }

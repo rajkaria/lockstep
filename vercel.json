@@ -46,5 +46,11 @@
       "source": "/api/:path*",
       "destination": "/api"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/github/cron",
+      "schedule": "23 3 * * *"
+    }
   ]
 }

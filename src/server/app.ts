@@ -31,7 +31,12 @@ import { formatJson, formatLint, LINT_FORMATS, type LintFormat } from '../lint/f
 import { isRuleId } from '../lint/rules.js';
 import type { RuleId } from '../lint/types.js';
 import { healthBadge } from './badge.js';
+import { graphVerifiedSource, registerVerifiedRoutes } from './verified.js';
 import { docsForTool } from '../tools/docs-for.js';
+import { githubAppHealth } from '../app/env.js';
+import { assertPublicGraph, isPrivateGraph, PrivateGraphError, publicGraphs } from '../app/guard.js';
+import { registerGitHubAppRoutes } from '../app/routes.js';
+import type { GitHubAppDeps } from '../app/service.js';
 
 export const DEFAULT_PRELOADED = [
   'https://github.com/FalkorDB/falkordb-py/pull/262',
@@ -56,6 +61,11 @@ export interface AppOptions {
   workspaces?: Workspaces;
   /** Hosted mode: agent checks per day across the service (they cost model tokens). */
   agentChecksPerDay?: number;
+  /**
+   * The GitHub App (src/app/): its routes answer 404 unless GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY and
+   * GITHUB_APP_WEBHOOK_SECRET are set (or `env` is given). On Vercel pass `waitUntil` from `@vercel/functions`.
+   */
+  githubApp?: Omit<Partial<GitHubAppDeps>, 'store' | 'config' | 'workspaces'>;
 }
 
 /** One check at a time: example runs share a scratch database and the model budget is shared. */
@@ -134,10 +144,12 @@ export function createApp(opts: AppOptions): Hono {
   /** The graph holding a repository: its hosted workspace, or the org graph. */
   const graphForRepo = async (repo: string): Promise<OrgGraph | undefined> => {
     if (!hosted) return graph;
-    return (await hosted.locate(repo))?.graph;
+    const g = (await hosted.locate(repo))?.graph;
+    // Private repositories the GitHub App indexed (`ghp-<installation>`) never answer a public endpoint.
+    return g && !isPrivateGraph(g.name) ? g : undefined;
   };
-  /** Graphs to search for an id (check, verdict) that doesn't name its repository. */
-  const searchGraphs = async (): Promise<OrgGraph[]> => (hosted ? hosted.graphs() : [graph]);
+  /** Graphs to search for an id (check, verdict) that doesn't name its repository (never a private one). */
+  const searchGraphs = async (): Promise<OrgGraph[]> => publicGraphs(hosted ? await hosted.graphs() : [graph]);
   const findIn = async <T>(query: string, params: Record<string, unknown>): Promise<{ graph: OrgGraph; row: T } | undefined> => {
     for (const g of await searchGraphs()) {
       const row = (await g.run<T>(query, params)).rows[0];
@@ -154,7 +166,7 @@ export function createApp(opts: AppOptions): Hono {
       : message;
   const userError = (err: unknown) => err instanceof HostedLimitError || err instanceof RepoTooLargeError || err instanceof NotIndexedError;
 
-  app.onError((err, c) => c.json({ error: err.message }, userError(err) ? 400 : 500));
+  app.onError((err, c) => c.json({ error: err.message }, err instanceof PrivateGraphError ? 404 : userError(err) ? 400 : 500));
 
   app.get('/api/health', async (c) => {
     const memory = hosted ? await store.memoryMb().catch(() => undefined) : undefined;
@@ -175,6 +187,7 @@ export function createApp(opts: AppOptions): Hono {
             githubToken: !!config.githubToken,
           }
         : { enabled: false },
+      githubApp: githubAppHealth(opts.githubApp?.env ?? process.env),
     });
   });
 
@@ -240,7 +253,7 @@ export function createApp(opts: AppOptions): Hono {
       return c.json({ name, indexed: !!row, graph: graph.name, curated: true, sha: row?.sha ?? null, indexedAt: row?.at ?? null });
     }
     const found = await hosted.locate(name);
-    if (!found) return c.json({ name, indexed: false, graph: hosted.graphNameFor(name), curated: false, sha: null, indexedAt: null });
+    if (!found || isPrivateGraph(found.graph.name)) return c.json({ name, indexed: false, graph: hosted.graphNameFor(name), curated: false, sha: null, indexedAt: null });
     const row = (await found.graph.run<{ sha: string; at: number; name: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name, r.sha AS sha, r.indexed_at AS at`, { name })).rows[0];
     const others = (await found.graph.run<{ name: string }>(`MATCH (r:Repo) RETURN r.name AS name ORDER BY name`)).rows.map((r) => r.name);
     return c.json({ name: row?.name ?? name, indexed: true, graph: found.graph.name, curated: found.curated, sha: row?.sha ?? null, indexedAt: row?.at ?? null, workspace: others });
@@ -248,7 +261,7 @@ export function createApp(opts: AppOptions): Hono {
 
   app.get('/api/workspaces', async (c) => {
     if (!hosted) return c.json({ workspaces: [] });
-    const list = await hosted.list();
+    const list = publicGraphs(await hosted.list());
     return c.json({ workspaces: list.map((w) => ({ graph: w.graph, curated: w.curated, repos: w.repos.map((r) => ({ name: r.name, sha: r.sha, indexedAt: r.indexedAt, lastUsed: r.lastUsed })) })) });
   });
 
@@ -310,6 +323,7 @@ export function createApp(opts: AppOptions): Hono {
       try {
         await mutex.run(async () => {
           const target = hosted ? await hosted.ensure(repo, { with: withRepos, onEvent: send }) : { graph, curated: true };
+          assertPublicGraph(target.graph.name);
           const ctx = { graph: target.graph, config };
           pr = await canonicalPrUrl(target.graph, pr);
           await refreshIfMoved(target.graph, config, pr);
@@ -369,6 +383,7 @@ export function createApp(opts: AppOptions): Hono {
       try {
         if (hosted && mutex.busy) send({ type: 'queued' });
         const target = hosted ? await mutex.run(() => hosted.ensure(repo, { with: withRepos, onEvent: send })) : { graph };
+        assertPublicGraph(target.graph.name);
         const known = (await target.graph.run(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name`, { name: repo })).rows.length > 0;
         if (!known) throw new Error(`${repo} is not indexed in the "${target.graph.name}" graph: staleproof index ${repo}`);
         const a = await cachedAudit(target.graph, repo, true);
@@ -463,6 +478,14 @@ export function createApp(opts: AppOptions): Hono {
     return svg(healthBadge(a.data), 3600);
   });
 
+  /** The checked stamp: per-page status from the cached audit (src/server/verified.ts), and the embeddable script. */
+  registerVerifiedRoutes(app, {
+    load: async (repo) => {
+      const g = await graphForRepo(repo).catch(() => undefined);
+      return g ? graphVerifiedSource(g, repo, async (name) => (await cachedAudit(g, name)).data) : undefined;
+    },
+  });
+
   app.get('/api/sections', async (c) => {
     const id = c.req.query('id');
     if (!id) return c.json({ error: 'id required' }, 400);
@@ -527,6 +550,9 @@ export function createApp(opts: AppOptions): Hono {
       tools: ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, queries: t.queries.map((q) => q.name) })),
     }),
   );
+
+  // The GitHub App (spec F6): POST /api/github/webhook and GET /api/github/cron; 404 while it is not configured.
+  registerGitHubAppRoutes(app, { store, config, ...(hosted ? { workspaces: hosted } : {}), ...opts.githubApp });
 
   const webDir = opts.webDir ?? join(packageRoot(), 'web', 'dist');
   if (existsSync(webDir)) {

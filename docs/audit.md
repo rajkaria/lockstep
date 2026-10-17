@@ -211,6 +211,41 @@ jobs:
 
 Every Monday at 06:00 UTC it indexes the repository (and `also-index`), runs up to 20 examples at the default branch (`audit-runs`), writes the report to the job summary and keeps one issue up to date: opened when an example no longer fits or fails, updated on every run, and closed with a comment once all is clear. `fail-on: mismatches` and `fail-under: <score>` fail the job; the outputs `score` and `mismatched` carry the numbers.
 
+## Owners of the docs to fix
+
+When the repository has a CODEOWNERS file (GitHub's lookup order: `.github/CODEOWNERS`, then the root, then
+`docs/`; the last matching pattern wins, a pattern with no owners leaves its paths unowned), the Markdown report
+(the Action's issue body) ends with **Docs to fix, by owner**: each owner with the references, example lines and
+failing examples on the pages they own, unowned pages last. Owners are written as code (`` `@acme/docs` ``), so
+nobody is notified; with
+
+```toml
+[audit]
+mention-owners = true
+```
+
+in `.staleproof.toml` (or `[tool.staleproof.audit]`) they become @-mentions and GitHub notifies them. A pull
+request comment lists the **Owners of affected docs** the same way, from the CODEOWNERS file at the pull request's
+base commit.
+
+## Weekly digest to Slack or Discord
+
+`staleproof digest` posts what changed since the last digest: the score and its change, the drift that appeared
+since then (with links to the lines), how many problems were fixed, and the verified fixes ready to apply. The
+payload follows the webhook's host: Slack incoming webhooks (`hooks.slack.com/services/...`) get `{text, blocks}`,
+Discord webhooks get `{content, embeds}` (with mentions disabled), anything else gets JSON
+(`{"type": "staleproof.digest", "text": ..., "score": ..., "new": [...], ...}`).
+
+```bash
+STALEPROOF_DIGEST_WEBHOOK=https://hooks.slack.com/services/... npx -y staleproof digest acme/app
+```
+
+The previous digest is remembered as a hidden `<!-- staleproof:state {...} -->` line: `--state-out` appends it
+to the audit report (the issue body), `--previous` reads it back, and `--graph-state` keeps it in a persistent
+graph instead. In the Action, set `digest-webhook: ${{ secrets.DOCS_DIGEST_WEBHOOK }}` on the scheduled audit:
+the state rides in the audit issue (open or closed). With no issue (nothing ever needed fixing) and no persistent
+graph, each digest compares with nothing and lists what is open.
+
 ## Reading the report
 
 Start with the docs references in AI agent instructions: every agent session reads them, so one stale path misleads every run. Then the mismatches: each one is a line a reader will copy and see fail. A docs reference names its fix in the message when there is one (`it moved to docs/guides/setup.md`); `staleproof lint` in the checkout shows the same findings, and `<!-- staleproof: ignore rule-id -->` silences one that is intentional ([Lint: configure and silence](lint.md#configure-and-silence)).
@@ -254,3 +289,5 @@ Lines the static checks report on repositories as they are today (checked on 202
 - [GitHub Action](github-action.md#audit-the-docs-on-a-schedule): the scheduled audit and its issue
 - [Configuration](configuration.md#repository-configuration): directives and `.staleproof.toml`
 - [Core concepts](concepts.md#static-checks-and-the-audit)
+- [Checked stamp](verified-stamp.md): the audit's result as a one-line stamp on each docs page
+- [Release gate](release.md): breaking changes the changelog does not name, before a tag

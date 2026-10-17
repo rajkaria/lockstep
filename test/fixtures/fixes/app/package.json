@@ -1,0 +1,11 @@
+{
+  "name": "fix-app",
+  "private": true,
+  "scripts": {
+    "lint:docs": "staleproof lint",
+    "test": "vitest",
+    "build": "tsc",
+    "dev": "vite",
+    "doc": "typedoc"
+  }
+}

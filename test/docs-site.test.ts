@@ -62,7 +62,13 @@ describe('the documentation set', () => {
       const md = await readFile(join(docsDir, d.file), 'utf8');
       const lines = md.split('\n');
       expect(lines[0], `${d.file} starts with its H1`).toMatch(/^# \S/);
-      expect(lines.filter((l) => /^# /.test(l)).length, `${d.file} has one H1`).toBe(1);
+      // A `# comment` line inside a code block (YAML, shell) is not a heading.
+      let inCode = false;
+      const h1s = lines.filter((l) => {
+        if (/^\s*```/.test(l)) inCode = !inCode;
+        return !inCode && /^# /.test(l);
+      });
+      expect(h1s.length, `${d.file} has one H1`).toBe(1);
       const firstText = lines.slice(1).find((l) => l.trim());
       expect(firstText, `${d.file} opens with a paragraph`).toMatch(/^[A-Za-z*`[]/);
     }

@@ -7,16 +7,19 @@ const root = join(import.meta.dirname, '..');
 
 describe('GitHub Action', () => {
   it('is valid YAML with the shape GitHub loads (a broken manifest fails every run)', async () => {
-    for (const file of ['action.yml', 'examples/staleproof.yml']) {
+    for (const file of ['action.yml', 'examples/staleproof.yml', 'examples/staleproof-fix.yml', 'examples/staleproof-release.yml']) {
       const text = await readFile(join(root, file), 'utf8');
       expect(() => parse(text, { strict: true, uniqueKeys: true }), file).not.toThrow();
     }
     const action = parse(await readFile(join(root, 'action.yml'), 'utf8')) as {
+      description: string;
       inputs: Record<string, { description: string; default?: string }>;
       outputs: Record<string, { value: string }>;
       runs: { using: string; steps: { name?: string; uses?: string; run?: string; shell?: string }[] };
     };
     expect(action.runs.using).toBe('composite');
+    // The Marketplace refuses a description over 125 characters.
+    expect(action.description.length).toBeLessThanOrEqual(125);
     for (const [name, input] of Object.entries(action.inputs)) expect(typeof input.description, name).toBe('string');
     // Composite run steps must name their shell.
     for (const step of action.runs.steps) if (step.run) expect(step.shell, step.name).toBe('bash');
@@ -32,7 +35,7 @@ describe('GitHub Action', () => {
     expect(yml).toContain('using: composite');
     // Zero configuration: no input is required.
     expect(yml).not.toMatch(/required: true/);
-    for (const input of ['mode:', 'also-index:', 'anthropic-api-key:', 'model:', 'base-url:', 'runs:', 'fail-on:', 'fail-under:', 'audit-runs:', 'issue:', 'open-docs-pr:', 'comment:', 'pr-url:', 'falkordb-url:', 'org:', 'reindex:', 'github-token:', 'version:']) {
+    for (const input of ['mode:', 'also-index:', 'anthropic-api-key:', 'model:', 'base-url:', 'runs:', 'fail-on:', 'fail-under:', 'audit-runs:', 'issue:', 'open-docs-pr:', 'suggestions:', 'comment:', 'pr-url:', 'falkordb-url:', 'org:', 'reindex:', 'github-token:', 'version:', 'digest-webhook:', 'release-from:', 'release-to:', 'release-fail-on:', 'changelog:']) {
       expect(yml).toContain(`\n  ${input}`);
     }
   });
@@ -40,7 +43,7 @@ describe('GitHub Action', () => {
   it('calls real CLI commands and flags', async () => {
     const yml = await readFile(join(root, 'action.yml'), 'utf8');
     const cli = await readFile(join(root, 'src', 'cli.ts'), 'utf8');
-    for (const cmd of ['index', 'check', 'audit', 'patch']) expect(cli).toContain(`.command('${cmd}')`);
+    for (const cmd of ['index', 'check', 'audit', 'patch', 'suggest', 'fix-pr', 'digest', 'release']) expect(cli).toContain(`.command('${cmd}')`);
     for (const flag of ['--no-agent', '--format', '--out', '--runs', '--with', '--run', '--open-pr', '--in-repo', '--base', '--only']) {
       expect(yml).toContain(flag);
       expect(cli).toContain(`'${flag}`);

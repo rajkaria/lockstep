@@ -75,6 +75,13 @@ export const DOCS: DocEntry[] = [
     group: 'Start here',
   },
   {
+    slug: 'fix',
+    file: 'fix.md',
+    title: 'Fix stale docs',
+    summary: 'staleproof fix: the edits that make stale docs references true again (renamed scripts, flags, files, headings, env vars, symbols and parameters, and close typos), each re-checked before it is applied; suggestions on pull requests and a weekly fix pull request (Renovate for docs).',
+    group: 'Start here',
+  },
+  {
     slug: 'cli',
     file: 'cli.md',
     title: 'CLI',
@@ -89,6 +96,14 @@ export const DOCS: DocEntry[] = [
     group: 'Integrate',
   },
   {
+    slug: 'github-app',
+    file: 'github-app.md',
+    title: 'GitHub App',
+    summary:
+      'Install once, no workflow file: a Staleproof check run on every pull request with the docs references it makes wrong as annotations, a comment only when there is something to say, suggestions and an Apply fixes button for verified fixes; the permissions and why, private repositories, the [app] settings, App or Action.',
+    group: 'Integrate',
+  },
+  {
     slug: 'claude-code',
     file: 'claude-code.md',
     title: 'Claude Code plugin',
@@ -100,6 +115,30 @@ export const DOCS: DocEntry[] = [
     file: 'pre-commit.md',
     title: 'Pre-commit hooks',
     summary: 'Stop a commit that makes the docs wrong: the staleproof hook for pre-commit, lefthook, husky or a plain git hook, linting the staged changes against HEAD, and an optional pre-push hook for examples predicted to break.',
+    group: 'Integrate',
+  },
+  {
+    slug: 'editors',
+    file: 'editors.md',
+    title: 'Editors (LSP)',
+    summary:
+      'staleproof lsp in VS Code, Cursor, Windsurf, Neovim, Zed, Helix and JetBrains IDEs: stale docs references as diagnostics while you type, verified quick fixes and "ignore this rule here", hover and go to definition from docs to code, "documented in N places" and a code lens from code to docs; local only.',
+    group: 'Integrate',
+  },
+  {
+    slug: 'verified-stamp',
+    file: 'verified-stamp.md',
+    title: 'Checked stamp',
+    summary:
+      'A one-line stamp on each docs page: what Staleproof checked against which commit and when, or how many references are out of date. Docusaurus and MkDocs plugins, a Mintlify and plain-HTML snippet, the JSON, privacy.',
+    group: 'Integrate',
+  },
+  {
+    slug: 'release',
+    file: 'release.md',
+    title: 'Release gate',
+    summary:
+      "staleproof release: breaking public API changes since the last tag, whether the changelog names them, docs still relying on what changed, lint at the release; the Action's release mode.",
     group: 'Integrate',
   },
   {

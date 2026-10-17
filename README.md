@@ -119,6 +119,11 @@ npx -y staleproof lint            # --format github | sarif | json | markdown
 
 [docs/lint.md](docs/lint.md) has the rules, the precision guards and CI recipes.
 
+**Fix, don't just flag.** `npx -y staleproof fix` applies the fixes it can re-check: a renamed script, flag, file,
+heading, environment variable, symbol or parameter written the new way, each linted again before it is written.
+Pull requests get one-click suggestions, and the Action's `mode: fix` keeps a weekly fix pull request
+([docs/fix.md](docs/fix.md)).
+
 **Check before you push.** `staleproof check` with no URL checks your uncommitted and unpushed changes against the
 graph and lists the examples they break, with the line and the reason. From the test fixtures, after adding a
 required `timeout` to `Graph.query`:
@@ -136,10 +141,12 @@ pull request for the before/after runs.
 
 ## Quickstart
 
-Three ways to start:
+Four ways to start:
 
 - **No install.** Paste a pull request URL of any public Python, TypeScript or JavaScript repository on [staleproof.dev](https://staleproof.dev).
   It is indexed on the fly and checked in graph mode; examples are not run on the hosted service.
+- **No workflow file.** Install the [GitHub App](docs/github-app.md) on a repository, public or private: every pull
+  request gets a check run with the docs it makes wrong and a comment when there is something to say (no example runs).
 - **One click.** On [staleproof.dev/#/install](https://staleproof.dev/#/install), type your repository and commit the
   workflow GitHub opens (or copy [`examples/staleproof.yml`](examples/staleproof.yml)). Every pull request then gets
   a comment with the docs it can make false and the examples run before and after it. No secrets, no database.
@@ -189,8 +196,11 @@ The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
 | Website | Paste a pull request URL on [staleproof.dev](https://staleproof.dev), or audit a repository at [#/audit](https://staleproof.dev/#/audit) — no install, any public repository | [docs/install.md](docs/install.md) |
 | CLI | `npx -y staleproof <command>` — lint, index, check (a PR or your working tree), audit, docs-for, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
 | GitHub Action | `uses: rajkaria/staleproof@v1` — zero config: a comment on every PR with the docs it can make false, the examples predicted to break and the examples run before and after ([`examples/staleproof.yml`](examples/staleproof.yml)); on a schedule, a docs audit kept in one issue | [docs/github-action.md](docs/github-action.md) |
+| GitHub App | Install it on a repository, no YAML: a check run and, when there is something to say, a comment on every pull request, public or private; one-click suggestions for verified fixes | [docs/github-app.md](docs/github-app.md) |
 | Claude Code plugin | `/plugin marketplace add rajkaria/staleproof`, then `/plugin install staleproof@staleproof` — after every edit Claude hears which docs and agent files it made wrong, and fixes them before it stops | [docs/claude-code.md](docs/claude-code.md) |
 | pre-commit | `staleproof init`, or `repo: https://github.com/rajkaria/staleproof` with hook `staleproof` — blocks a commit that makes a docs reference wrong | [docs/pre-commit.md](docs/pre-commit.md) |
+| Editors | `staleproof lsp` and the VS Code / Cursor extension: stale docs references as you type, verified quick fixes, hover from docs to code; also Neovim, Zed, Helix, JetBrains | [docs/editors.md](docs/editors.md) |
+| Docs site | A one-line "checked against `abc1234`" stamp on each page: Docusaurus and MkDocs plugins, any HTML | [docs/verified-stamp.md](docs/verified-stamp.md) |
 | MCP, hosted | `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` — nothing to install | [docs/mcp.md](docs/mcp.md) |
 | MCP, local (Claude Code) | `claude mcp add staleproof -- npx -y staleproof mcp` — runs examples too | [docs/mcp.md](docs/mcp.md) |
 | HTTP API | `staleproof serve`: JSON API with checks and audits streamed over server-sent events, and the README badge | [docs/http-api.md](docs/http-api.md) |
@@ -211,7 +221,10 @@ they push, and platform teams with many repositories —
 | [Install](docs/install.md) | [MCP server](docs/mcp.md) | [Example runner](docs/example-runner.md) | [Graph model and Cypher](docs/GRAPH-MODEL.md) | |
 | [Use cases](docs/use-cases.md) | [HTTP API](docs/http-api.md) | [Decisions and memory](docs/memory.md) | [Facts from the graph](docs/FACTS.md) | |
 | [Docs audit](docs/audit.md) | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
-| [Lint docs and agent files](docs/lint.md) | | | [Lint rules](docs/rules.md) | |
+| [Lint docs and agent files](docs/lint.md) | [GitHub App](docs/github-app.md) | | [Lint rules](docs/rules.md) | |
+| [Fix stale docs](docs/fix.md) | [Editors (LSP)](docs/editors.md) | | | |
+| | [Checked stamp](docs/verified-stamp.md) | | | |
+| | [Release gate](docs/release.md) | | | |
 
 **For LLMs and coding assistants:** [`llms.txt`](llms.txt) indexes every page. The live site serves the same docs as
 plain text — [`/llms.txt`](https://staleproof.dev/llms.txt),

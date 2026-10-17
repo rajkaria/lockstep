@@ -1,7 +1,7 @@
 # Staleproof hooks for pre-commit (https://pre-commit.com). In .pre-commit-config.yaml:
 #
 #   - repo: https://github.com/rajkaria/staleproof
-#     rev: v0.5.0
+#     rev: v0.6.0
 #     hooks:
 #       - id: staleproof            # on commit: docs and agent files the staged changes make wrong
 #       - id: staleproof-predicted  # on push: docs examples the changes are predicted to break (needs a graph)

@@ -1,0 +1,42 @@
+{
+  "name": "docusaurus-plugin-staleproof",
+  "version": "0.1.0",
+  "description": "A Staleproof \"checked\" stamp on every Docusaurus doc: what was checked against which commit, or what is out of date.",
+  "license": "MIT",
+  "author": "Raj Karia",
+  "homepage": "https://staleproof.dev/#/docs/verified-stamp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rajkaria/staleproof.git",
+    "directory": "integrations/docusaurus"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "docusaurus",
+    "docusaurus-plugin",
+    "docs",
+    "documentation",
+    "staleproof"
+  ],
+  "peerDependencies": {
+    "@docusaurus/core": "^3.0.0",
+    "@docusaurus/plugin-content-docs": "^3.0.0",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -30,6 +30,11 @@ export { createApp, defaultModelFactory, DEFAULT_PRELOADED } from './server/app.
 export { collectFacts, factsMarkdown } from './facts.js';
 export { auditDocs, auditTool, scoreAudit, type AuditData } from './audit.js';
 export { auditMarkdown, auditText } from './format/audit.js';
+export { registerVerifiedRoutes, graphVerifiedSource, verifiedData, type VerifiedData, type VerifiedPage } from './server/verified.js';
+export { stampScript } from './server/stamp.js';
+export { runDigestCommand, buildDigest, digestState, slackPayload, discordPayload, jsonPayload, webhookKind, type Digest, type DigestState } from './digest.js';
+export { parseCodeowners, loadCodeowners, ownersOf, ownersForAudit, ownersForCheck, affectedOwnersMarkdown, auditOwnersMarkdown, type Codeowners } from './codeowners.js';
+export { releaseReport, runReleaseCommand, formatRelease, type ReleaseReport, type BreakingChange } from './release.js';
 export { docsForTool } from './tools/docs-for.js';
 export { analyzeChanges, checkChangesTool, localChanges, contentSource, worktreeSource } from './pr/local.js';
 export { predictBreaks, type PredictedBreak } from './pr/predict.js';
@@ -39,3 +44,13 @@ export * from './lint/index.js';
 export { ParseCache } from './lint/cache.js';
 export { runHook, type HookEvent, type HookResult } from './hooks/index.js';
 export { runInit } from './init/index.js';
+export {
+  registerGitHubAppRoutes,
+  GitHubAppService,
+  githubAppEnv,
+  githubAppHealth,
+  isPrivateGraph,
+  assertPublicGraph,
+  privateGraphName,
+  type GitHubAppDeps,
+} from './app/index.js';

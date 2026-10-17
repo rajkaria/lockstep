@@ -4,7 +4,8 @@ import { parseRepo } from '../indexer/index.js';
 import { workingFiles } from '../lint/engine.js';
 import { ParseCache } from '../lint/cache.js';
 import { lintTargets } from '../lint/files.js';
-import { gitRoot } from '../lint/sources.js';
+import { addFixes } from '../lint/fixes.js';
+import { gitRoot, refTree, worktreeTree } from '../lint/sources.js';
 import type { Finding } from '../lint/types.js';
 import { lintAgainstHead, pruneRecords, type DiffLint } from './diff-lint.js';
 import { predictedFromLocalGraph } from './graph.js';
@@ -150,6 +151,23 @@ async function repoRelative(root: string, path: string): Promise<string | undefi
   return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : undefined;
 }
 
+/**
+ * `findings` with the verified fixes Staleproof can find before `deadline` (renames against HEAD when `renames`);
+ * the findings as they were on any error. Nothing leaves the machine: the fixes are checked in a local mirror.
+ */
+async function withFixes(d: DiffLint, findings: Finding[], deadline: number, renames: boolean): Promise<Finding[]> {
+  if (!findings.length || Date.now() > deadline) return findings;
+  const base = renames && d.sha ? await refTree(d.root, d.sha).catch(() => undefined) : undefined;
+  try {
+    const r = await addFixes({ ...d.head, findings }, worktreeTree(d.root, d.head.repo), { ...(base ? { baseTree: base } : {}), cache: d.cache, lint: { config: d.config }, deadline });
+    return r.findings;
+  } catch {
+    return findings;
+  } finally {
+    await base?.dispose();
+  }
+}
+
 function contextOutput(dialect: HookDialect, text: string): string {
   return JSON.stringify(dialect === 'cursor' ? { additional_context: text } : { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } });
 }
@@ -201,7 +219,12 @@ async function postEdit(input: HookInput, env: NodeJS.ProcessEnv): Promise<strin
     edited: true,
   }));
   if (!items.length && !mentions.length) return '';
-  const text = [`Staleproof: this edit leaves docs out of date (checked against HEAD, nothing left the machine):`, itemList(items, mentions), 'Update them in the same change, or say why they stay.'].join('\n');
+  const fixed = await withFixes(d, items, Date.now() + 1200, false);
+  const text = [
+    `Staleproof: this edit leaves docs out of date (checked against HEAD, nothing left the machine):`,
+    itemList(fixed, mentions),
+    fixed.some((f) => f.fix?.verified) ? 'Apply the fixes listed (or run `npx staleproof fix`), or say why they stay.' : 'Update them in the same change, or say why they stay.',
+  ].join('\n');
   return contextOutput(input.dialect, text);
 }
 
@@ -227,7 +250,7 @@ async function stop(input: HookInput, env: NodeJS.ProcessEnv, opts: HookOptions)
   // Docs naming a symbol whose signature the session changed: listed with the errors, never a reason to block alone.
   const mentions = state.files?.length ? await mentionsFor(d, state.files, await codeView(d)) : [];
   if (!errors.length && !extra.length && !mentions.length) return '';
-  const list = itemList(errors, mentions, extra);
+  const list = itemList(await withFixes(d, errors, Date.now() + 20_000, true), mentions, extra);
   const count = errors.length + extra.length;
   const summary = count
     ? `Staleproof: ${count} doc reference${count === 1 ? '' : 's'} this session made wrong (new since HEAD):`

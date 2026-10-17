@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mkdocs-staleproof"
+version = "0.1.0"
+description = "A Staleproof \"checked\" stamp on every MkDocs page: what was checked against which commit, or what is out of date."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Raj Karia" }]
+requires-python = ">=3.9"
+dependencies = ["mkdocs>=1.5"]
+keywords = ["mkdocs", "mkdocs-plugin", "docs", "documentation", "staleproof"]
+classifiers = [
+  "Framework :: MkDocs",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Documentation",
+]
+
+[project.urls]
+Homepage = "https://staleproof.dev"
+Documentation = "https://staleproof.dev/#/docs/verified-stamp"
+Source = "https://github.com/rajkaria/staleproof/tree/main/integrations/mkdocs"
+
+[project.entry-points."mkdocs.plugins"]
+staleproof = "mkdocs_staleproof.plugin:StaleproofPlugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mkdocs_staleproof"]

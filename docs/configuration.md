@@ -42,6 +42,12 @@ Staleproof was first published as Lockstep (npm `lockstep-docs`). Every `STALEPR
 | `STALEPROOF_HOOK` | — | `off`, `warn` or `block`: what the coding-agent hooks do, over `[hooks] stop` in the repository ([Hooks](#hooks)); `off` silences the edit hook too | `hook` |
 | `STALEPROOF_CACHE` | on | `off`: parse every file on every run instead of reading the local parse cache (`.staleproof/cache/`) | `lint`, `hook` |
 | `STALEPROOF_CACHE_DIR` | — | Keep the parse cache in this folder instead of the checkout's `.staleproof/cache/`; indexing uses the cache only when it is set (the GitHub Action sets it, and keeps the folder between runs) | `lint`, `hook`, `index`, `check`, `audit` |
+| `STALEPROOF_DIGEST_WEBHOOK` | — | The Slack, Discord or other webhook `staleproof digest` posts to when `--webhook` is not given; logged by host only ([Docs audit](audit.md#weekly-digest-to-slack-or-discord)) | `digest` |
+| `GITHUB_APP_ID` | — | The GitHub App's numeric id; with the two below it turns the App's webhook and cron on ([GitHub App](github-app.md#run-your-own-app)) | `serve`, Vercel |
+| `GITHUB_APP_PRIVATE_KEY` | — | The App's private key: a PEM, a PEM with `\n` on one line, or base64 | `serve`, Vercel |
+| `GITHUB_APP_WEBHOOK_SECRET` | — | Checks every webhook delivery's `X-Hub-Signature-256` | `serve`, Vercel |
+| `GITHUB_APP_SLUG` | — | Shows the install button on `#/install` (via `/api/health`) | `serve`, Vercel |
+| `CRON_SECRET` | — | Protects `GET /api/github/cron` (Vercel Cron sends it as a bearer token); without it the App's daily job is off | `serve`, Vercel |
 | `PORT` | `8080` | Port `serve` listens on | `serve` (`--port` overrides) |
 | `HOST` | `127.0.0.1` | Interface `serve` binds | `serve` (`--host` overrides) |
 | `VERCEL` | — | Set by Vercel; changes the defaults of `STALEPROOF_HOME` and `STALEPROOF_CHECK_BUDGET_MS` | all |
@@ -256,11 +262,22 @@ agent-files = ["prompts/*.md"]     # extra AI agent instruction files
 | `lint.agent-files` | list of globs | Files reported under "AI agent instructions" (listed first, and checked strictly: see [Lint](lint.md#precision-first)) |
 | `rules.<rule-id>` | `off`, `info`, `warning` or `error` | Turn a [rule](rules.md) off or change its severity |
 
+`staleproof fix`, the suggestions and the fix pull request follow the same settings: a rule turned `"off"` is neither reported nor fixed, and files under `ignore`, `[lint] exclude` or a `<!-- staleproof: ignore-file -->` comment are never edited. Fixes are never made on migration guides, release notes and old versions' docs (they name what is gone on purpose).
+
 - **Which file**: `.staleproof.toml` when it exists, even if empty; otherwise `[tool.staleproof]` when it is present. Unknown keys and values of the wrong type are reported as warnings (`staleproof lint` prints them) and ignored.
 - **Globs** are matched against repository-relative paths, gitignore style: `**` matches any number of directories, `*` anything within one path segment, `?` one character; a leading `./` or `/` is dropped; a pattern also matches everything under it, so `docs/v1` covers `docs/v1/guide.md` (but not `docs/v10/`).
 - **When**: read at index time. After editing it, index the repository again.
 - **Errors** stop the index: a key that is not a list of strings fails with `<file>: ignore must be a list of glob strings` (or `skip-examples`), and a file that is not valid TOML with the parser's message.
 - **On hosts without git** (tarball downloads: the hosted service, Vercel, `STALEPROOF_INGEST=github`), hidden paths are not extracted except a root `.staleproof.toml`, so both files are read there too.
+
+### Audit
+
+```toml
+[audit]
+mention-owners = true   # owners in the audit issue and the PR comment become @-mentions
+```
+
+Without it, owners from CODEOWNERS are shown as code and nobody is notified ([Docs audit](audit.md#owners-of-the-docs-to-fix)).
 
 ### Hooks
 
@@ -276,6 +293,20 @@ stop = "block"   # block | warn | off
 | `hooks.stop` | `block` (default), `warn` or `off` | What the hook before an agent stops does with the docs references the session made wrong: ask the agent to fix them (once), only show them to you, or nothing. `STALEPROOF_HOOK` overrides it |
 
 The hooks keep a parse cache and their state in `.staleproof/cache/` at the top of the checkout ([Claude Code plugin: how it works](claude-code.md#how-it-works)); the folder ignores itself in git and is safe to delete.
+
+### GitHub App
+
+The [GitHub App](github-app.md#configuration) reads `[app]` (in `pyproject.toml`, `[tool.staleproof.app]`) from the default branch:
+
+| Key | Values | Effect |
+|---|---|---|
+| `app.comment` | `findings` (default), `always`, `never` | When the App comments on a pull request |
+| `app.fail-on` | `never` (default), `findings`, `predicted` | When its check run fails |
+| `app.suggestions` | `true` (default) / `false` | Verified fixes as review suggestions |
+| `app.drafts` | `false` (default) / `true` | Check draft pull requests |
+| `app.also-index` | list of `owner/name` | Repositories indexed with this one |
+| `app.fix-prs` | `false` (default) / `true` | Daily docs fix pull request |
+| `app.audit-issue` | `false` (default) / `true` | Daily audit issue |
 
 ### Example directives
 
@@ -349,6 +380,11 @@ vercel env add STALEPROOF_MODEL production
 vercel env add STALEPROOF_PRELOADED production    # optional
 vercel env add STALEPROOF_AGENT_CHECKS_PER_DAY production   # optional, default 50
 vercel env add STALEPROOF_HOSTED production       # optional: `off` serves the curated graph only
+vercel env add GITHUB_APP_ID production           # optional: the GitHub App (scripts/github-app-register.ts writes .env.app)
+vercel env add GITHUB_APP_PRIVATE_KEY production
+vercel env add GITHUB_APP_WEBHOOK_SECRET production
+vercel env add GITHUB_APP_SLUG production
+vercel env add CRON_SECRET production             # the App's daily job (vercel.json crons)
 ```
 
 Vercel sets `VERCEL`, so `STALEPROOF_HOME` is `/tmp/staleproof` and agent checks stop at 240 s. Hosted mode is on unless `STALEPROOF_HOSTED=off`. `PORT`, `HOST` and the scratch variables are not used: the function serves no static files and executes no examples. [Deploy](DEPLOY.md#vercel) has the full procedure.

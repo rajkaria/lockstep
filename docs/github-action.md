@@ -1,6 +1,6 @@
 # GitHub Action
 
-The composite action in [action.yml](../action.yml), `uses: rajkaria/staleproof@v1`, comments on every pull request with the docs it can make false: the references in its docs, READMEs and AI agent files it makes wrong (also as annotations), the doc sections its code changes reach with the evidence path for each, the examples whose calls no longer fit the changed code, and the result of running the affected docs examples before and after the change. On a schedule it audits the whole docs instead and keeps one issue up to date. It needs no inputs, no secrets and no database: it starts a FalkorDB inside the job and indexes the repository itself. This page is for maintainers adding it to a repository: installing it, what a run does, the inputs and outputs, permissions, agent mode and the docs fix pull request, the scheduled audit, keeping a graph between runs, and the comment format. Status: it has run end to end on a private test repository, from the one-click workflow with no inputs: the comment named a README example the pull request broke, and updated in place when the same pull request fixed the README.
+The composite action in [action.yml](../action.yml), `uses: rajkaria/staleproof@v1`, comments on every pull request with the docs it can make false: the references in its docs, READMEs and AI agent files it makes wrong (also as annotations), the doc sections its code changes reach with the evidence path for each, the examples whose calls no longer fit the changed code, and the result of running the affected docs examples before and after the change. On a schedule it audits the whole docs instead and keeps one issue up to date. It needs no inputs, no secrets and no database: it starts a FalkorDB inside the job and indexes the repository itself. This page is for maintainers adding it to a repository: installing it, what a run does, the inputs and outputs, permissions, agent mode and the docs fix pull request, the scheduled audit, keeping a graph between runs, and the comment format. Status: it has run end to end on a private test repository, from the one-click workflow with no inputs: the comment named a README example the pull request broke, and updated in place when the same pull request fixed the README. No workflow file? The [GitHub App](github-app.md) runs the same check (without example runs) on every pull request once installed.
 
 ## Install it
 
@@ -42,12 +42,12 @@ For a weekly audit of the whole docs as well, add [examples/staleproof-audit.yml
 
 ## What a run does
 
-The steps of [action.yml](../action.yml), in order, on a pull request (`mode: check`; in [audit mode](#audit-the-docs-on-a-schedule) the audit's steps replace steps 6 to 10):
+The steps of [action.yml](../action.yml), in order, on a pull request (`mode: check`; in [audit mode](#audit-the-docs-on-a-schedule) the audit's steps replace steps 6 to 12, and `mode: fix` and `mode: release` skip FalkorDB and run one step of their own: [Fix the docs every week](#fix-the-docs-every-week), [Release gate](#release-gate)):
 
 1. **Set up Node.js and uv**: `actions/setup-node@v7` with Node 22, and `astral-sh/setup-uv@v10.3.0` (the example runner builds its virtualenvs with uv).
 2. **Start FalkorDB**, unless `falkordb-url` is set. With Docker on the runner (GitHub's Ubuntu runners have it), two containers from `falkordb/falkordb:latest`: `staleproof-graph` on port 6379 holds the graph, and `staleproof-scratch` on port 6390 is the disposable server the docs examples run against. The step waits up to 90 seconds for both ports, then sets `FALKORDB_URL=falkor://localhost:6379` and `STALEPROOF_SCRATCH_URL=falkor://localhost:6390` for the next steps. Without Docker it starts nothing, and the CLI starts both servers itself from falkordblite.
-3. **Install staleproof**: `npm install -g staleproof@<version>` (default `0.5.0`). With `version: source`, the CLI is built from the action's own checkout instead (`npm ci`, then `tsup`). When the version cannot be installed from npm, the step warns `staleproof@<version> is not on npm; building it from this action's source instead.` and builds it the same way.
-4. **Choose check or audit**: with `mode: auto` (the default), `check` when there is a pull request (the `pull_request` event, or `pr-url`), else `audit`. Any other value than `auto`, `check` or `audit` fails with `mode must be auto, check or audit (got <mode>)`.
+3. **Install staleproof**: `npm install -g staleproof@<version>` (default `0.6.0`). With `version: source`, the CLI is built from the action's own checkout instead (`npm ci`, then `tsup`). When the version cannot be installed from npm, the step warns `staleproof@<version> is not on npm; building it from this action's source instead.` and builds it the same way.
+4. **Choose the mode**: with `mode: auto` (the default), `check` when there is a pull request (the `pull_request` event, or `pr-url`), else `audit`. Any other value than `auto`, `check`, `audit`, `fix` or `release` fails with `mode must be auto, check, audit, fix or release (got <mode>)`.
 5. **Re-index**, only with `reindex: 'true'` and `falkordb-url` set: `staleproof index <this repository> <also-index...>`. See [Keep the graph between runs](#keep-the-graph-between-runs).
 6. **Check the pull request**:
 
@@ -56,11 +56,12 @@ The steps of [action.yml](../action.yml), in order, on a pull request (`mode: ch
    ```
 
    `--no-agent` is left out when `anthropic-api-key` is set, and `--annotations` is added when the installed CLI has it (0.5 and later). When the graph does not have the pull request's repository yet, the CLI first indexes it together with the `also-index` repositories, at their default branch heads; with the default throwaway FalkorDB that happens on every run. Then it runs the check (graph mode: the docs references the pull request makes wrong, impact, clearance, ranking, then up to `runs` examples before and after the pull request, those predicted to break first), prints one workflow command per new finding (the annotations), writes the report, and the step appends the report to the job summary and reads the examples that break and the examples predicted to break from the report's last line (`<!-- staleproof:counts breaks=<n> predicted=<n> … -->`) and the new findings from the line before it (`<!-- staleproof:findings new=<n> errors=<n> warnings=<n> -->`).
-7. **Post or update the comment**, when `comment` is `'true'`: the GitHub CLI lists the pull request's comments (all pages), takes the first whose body starts with `<!-- staleproof -->` (or `<!-- lockstep-docs -->`, the marker from before the rename) and replaces its body with the report. If there is none, it posts a new comment. This step runs even when an earlier step failed, as long as a report was written.
-8. **Open the docs fix as a pull request**, only with `open-docs-pr: 'true'`, an `anthropic-api-key`, and a pull request from this repository (not a fork), when the agent proposed edits: see [Open the docs fix as a pull request](#open-the-docs-fix-as-a-pull-request).
-9. **Fail on broken examples**, with `fail-on: breaks` or `predicted`: the step fails with `This pull request breaks <n> docs example(s): they pass before it and fail after. See the report in the job summary.` when the report has any.
-10. **Fail on predicted breaks**, with `fail-on: predicted`: the step fails with `A static check predicts this pull request breaks <n> docs example(s): their calls no longer fit the changed code. See the report in the job summary.` when any example is predicted to break.
-11. **Fail on docs references the pull request makes wrong**, with `fail-on: findings`: the step fails with `This pull request makes <n> docs reference(s) wrong (paths, links, commands or settings the docs and agent files still name). See the annotations and the report in the job summary.` when the pull request adds any error-level finding.
+7. **Suggest the fixes**, when `suggestions` is `'true'` (the default) and the pull request makes a docs reference wrong: `staleproof suggest "$PR_URL" --out <file>` posts the [verified fixes](fix.md) on the diff as GitHub suggestions and lists the fixes outside the diff, which the step appends to the report. A CLI older than 0.6 has no `suggest` and the step does nothing; a read-only token (a fork's) gets a warning.
+8. **Post or update the comment**, when `comment` is `'true'`: the GitHub CLI lists the pull request's comments (all pages), takes the first whose body starts with `<!-- staleproof -->` (or `<!-- lockstep-docs -->`, the marker from before the rename) and is not the [GitHub App](github-app.md)'s (marked `<!-- staleproof:app -->`), and replaces its body with the report. If there is none, it posts a new comment. This step runs even when an earlier step failed, as long as a report was written.
+9. **Open the docs fix as a pull request**, only with `open-docs-pr: 'true'`, an `anthropic-api-key`, and a pull request from this repository (not a fork), when the agent proposed edits: see [Open the docs fix as a pull request](#open-the-docs-fix-as-a-pull-request).
+10. **Fail on broken examples**, with `fail-on: breaks` or `predicted`: the step fails with `This pull request breaks <n> docs example(s): they pass before it and fail after. See the report in the job summary.` when the report has any.
+11. **Fail on predicted breaks**, with `fail-on: predicted`: the step fails with `A static check predicts this pull request breaks <n> docs example(s): their calls no longer fit the changed code. See the report in the job summary.` when any example is predicted to break.
+12. **Fail on docs references the pull request makes wrong**, with `fail-on: findings`: the step fails with `This pull request makes <n> docs reference(s) wrong (paths, links, commands or settings the docs and agent files still name). See the annotations and the report in the job summary.` when the pull request adds any error-level finding.
 
 Because the comment is found by its first-line marker, each run edits the same comment instead of adding a new one.
 
@@ -97,13 +98,15 @@ They show up three ways:
 
 Examples are left to the graph part of the check (predicted breaks and runs), so lint's own example rules are not repeated here. The lint needs no graph and does not depend on `runs`.
 
+**Suggested fixes.** When a finding has a verified fix (see [Fix stale docs](fix.md)) and its lines are on the pull request's diff, the Action posts it as a GitHub suggestion that the author can commit with one click; one review per push, and a suggestion already posted is updated instead of repeated. Fixes outside the diff are listed at the end of the comment with `npx staleproof fix`. Turn suggestions off with `suggestions: false`.
+
 ## Inputs
 
 Every input is optional.
 
 | Input | Default | Meaning |
 |---|---|---|
-| `mode` | `auto` | `auto`: check the pull request when there is one (`pull_request` events, or `pr-url`), audit the docs otherwise (`schedule`, `workflow_dispatch`, `push`). `check` or `audit` forces one. |
+| `mode` | `auto` | `auto`: check the pull request when there is one (`pull_request` events, or `pr-url`), audit the docs otherwise (`schedule`, `workflow_dispatch`, `push`). `check` or `audit` forces one. `fix`: keep one pull request from `staleproof/fix-docs` with every verified docs fix at the default branch ([Fix the docs every week](#fix-the-docs-every-week)). `release`: the [release gate](release.md) (needs `actions/checkout` with `fetch-depth: 0`). |
 | `also-index` | `''` | Other repositories to index together with this one, space- or comma-separated, for example your docs site `acme/docs`, so calls and doc links across them resolve. Passed to `check --with`, audited with this repository in audit mode, and passed to `index` with `reindex`. |
 | `anthropic-api-key` | `''` | Selects the mode. Empty: graph mode (`--no-agent`). Set: agent mode, passed as `ANTHROPIC_API_KEY`. |
 | `model` | `''` | Agent mode's model, passed as `STALEPROOF_MODEL`. Empty: `claude-sonnet-5-5`. Set it whenever you set `base-url`. |
@@ -114,6 +117,7 @@ Every input is optional.
 | `audit-runs` | `'20'` | Audit mode: run up to this many Python, JavaScript and TypeScript examples at the default branch before scoring; `'0'` for static checks only. Passed as `audit --run`. |
 | `issue` | `'true'` | Audit mode: keep one issue up to date with the audit (opened when something needs fixing, updated on each run, closed when all clear). Needs `issues: write`. |
 | `open-docs-pr` | `'false'` | Agent mode, on a pull request from this repository: `'true'` opens the proposed docs edits as a pull request into the checked pull request's branch. Needs `contents: write` and `pull-requests: write`. |
+| `suggestions` | `'true'` | Check mode: post the verified fix for each docs reference the pull request makes wrong as a suggestion on its diff, one review per push (earlier suggestions updated, never repeated); the fixes outside the diff are listed in the comment with `npx staleproof fix`. Needs `pull-requests: write`. |
 | `comment` | `'true'` | Post one pull request comment and keep updating it. Any other value: the report goes to the job summary only. |
 | `pr-url` | `''` | The pull request to check. Empty: the one that triggered the workflow (`github.event.pull_request.html_url`). |
 | `falkordb-url` | `''` | A FalkorDB that keeps the graph between runs (decisions, verdicts, run history). Empty: the throwaway FalkorDB the job starts. |
@@ -121,7 +125,12 @@ Every input is optional.
 | `reindex` | `'false'` | With `falkordb-url`: `'true'` re-indexes this repository and `also-index` at their default branch heads before the check. |
 | `cache` | `'true'` | Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the Staleproof version, the repository, `also-index` and the base commit: a later run on the same base skips indexing, and an older dump is re-indexed with only the changed files parsed. Ignored with `falkordb-url`. |
 | `github-token` | `${{ github.token }}` | Reads the repository (clones, the GitHub API, file contents) and posts the comment. Passed as `GITHUB_TOKEN` to Staleproof and as `GH_TOKEN` to the GitHub CLI. |
-| `version` | `'0.5.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
+| `version` | `'0.6.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
+| `digest-webhook` | `''` | Audit mode: a Slack, Discord or other webhook (use a secret) to post the [docs digest](audit.md#weekly-digest-to-slack-or-discord) to after each audit. The digest's state is kept in the audit issue. |
+| `release-from` | `''` | Release mode: the previous release to compare with. Empty: the latest tag before the release. |
+| `release-to` | `''` | Release mode: the release. Empty: the checkout's `HEAD` (the tag on `release: published`). |
+| `release-fail-on` | `undocumented-breaking,stale-docs` | Release mode: which gates fail the job, or `never`. |
+| `changelog` | `''` | Release mode: the changelog file. Empty: `CHANGELOG.md`, `CHANGES.md`, `HISTORY.md`, ... |
 
 ## Outputs
 
@@ -131,8 +140,12 @@ Every input is optional.
 | `breaks` | Check mode: how many docs examples pass before the pull request and fail after it |
 | `predicted` | Check mode: how many docs examples a static check predicts the pull request breaks (their call no longer fits the changed code) |
 | `findings` | Check mode: how many docs references the pull request makes wrong (new lint findings of every severity; `0` when they were not checked) |
+| `fix-pr` | Fix mode: the URL of the docs fix pull request (empty when nothing is left to fix) |
 | `score` | Audit mode: the docs health score, 0-100 |
 | `mismatched` | Audit mode: how many examples no longer fit the code |
+| `breaking` | Release mode: how many breaking public API changes the release makes |
+| `undocumented` | Release mode: how many of them the changelog does not name |
+| `stale-docs` | Release mode: how many docs references still rely on what the release changed |
 
 `breaks` and `predicted` are read from the report's counts line (`<!-- staleproof:counts breaks=<n> predicted=<n> sections=<n> mismatched=<n> -->`); a report from a CLI older than 0.3.0 has none, and `breaks` then counts the rows marked `**breaks**`. `findings` is read from `<!-- staleproof:findings new=<n> errors=<n> warnings=<n> -->`, which a report has when the docs references were checked (CLI 0.5 and later). `score` and `mismatched` come from the audit report's last line (`<!-- staleproof:audit score=<n> mismatched=<n> failing=<n> coverage=<n> -->`).
 
@@ -150,7 +163,7 @@ Every input is optional.
 | `contents: read` | Read the repository. |
 | `pull-requests: write` | Create and update the comment. |
 | `issues: write` | Audit mode with `issue: 'true'`: open, update and close the audit issue. |
-| `contents: write` | `open-docs-pr: 'true'`: push the docs fix branch (with `pull-requests: write` to open its pull request). |
+| `contents: write` | `open-docs-pr: 'true'`: push the docs fix branch (with `pull-requests: write` to open its pull request). `mode: fix`: push the `staleproof/fix-docs` branch (with `pull-requests: write` to open, update and close its pull request). |
 
 **Private repositories** work with the default token. Staleproof sends it to `https://github.com/` for clones (through git's environment config, never in the remote URL or on the command line), to the GitHub API and to `raw.githubusercontent.com`. The default token reads only the repository the workflow runs in: a private `also-index` repository elsewhere needs a token that can read it, passed as `github-token` (the comment is then posted as that token's account).
 
@@ -235,16 +248,46 @@ jobs:
         #   fail-on: mismatches         # fail the job when an example no longer fits the code
 ```
 
-The steps after **Choose check or audit**:
+The steps after **Choose the mode**:
 
 1. **Audit the docs**: `staleproof audit <this repository> <also-index...> --run <audit-runs> --format markdown --out "$RUNNER_TEMP/staleproof-audit.md"`. With the default throwaway FalkorDB this indexes the repositories at their default branch heads first. The report goes to the job summary, and the step reads `score`, `mismatched` and the number of failing runs from its last line. When the command writes no report, the step fails with `staleproof audit failed (exit <status>); see the log above.`
-2. **Keep the audit issue up to date**, when `issue` is `'true'`: the GitHub CLI looks for an open issue whose body starts with `<!-- staleproof-audit -->`.
+2. **Post the docs digest**, when `digest-webhook` is set: `staleproof digest` posts what changed since the last digest to the webhook (Slack, Discord or JSON by its host) and appends its hidden state line to the report, so the issue keeps it for the next run ([Docs audit](audit.md#weekly-digest-to-slack-or-discord)). A failed post is a warning, never a failed job.
+3. **Keep the audit issue up to date**, when `issue` is `'true'`: the GitHub CLI looks for an open issue whose body starts with `<!-- staleproof-audit -->`.
    - Found: its title becomes `Docs health <score>/100: <n> example(s) no longer fit the code` and its body the new report. When nothing needs fixing any more (no mismatched example and no failing run), it adds the comment `All clear: every docs example fits the code again. Closing.` and closes the issue.
    - Not found, and something needs fixing: it opens one with that title and body. Without `issues: write` it warns `Could not open the audit issue (the job needs issues: write). The report is in the job summary.`
    - Not found, and nothing to fix: `Nothing to fix: no issue opened.`
-3. **Fail on the audit**, with `fail-on: mismatches` when an example no longer fits the code, or with `fail-under` when the score is below it: `Docs health <score>/100; <n> example(s) no longer fit the code. See the report in the job summary.`
+4. **Fail on the audit**, with `fail-on: mismatches` when an example no longer fits the code, or with `fail-under` when the score is below it: `Docs health <score>/100; <n> example(s) no longer fit the code. See the report in the job summary.`
 
 A low API coverage lowers the score but never opens the issue on its own: the issue tracks examples that a reader would copy and see fail. The issue is matched by its body's first line, so editing its title by hand is fine; after you close it by hand, the next run that finds something opens a new one.
+
+## Fix the docs every week
+
+`mode: fix` is Renovate for docs: on a schedule it lints the default branch, applies every fix that passes re-checking on the branch `staleproof/fix-docs`, and keeps one pull request, `Staleproof: fix N stale docs references`, with a table of the fixes and the evidence for each. Each run rebuilds the branch from the default branch and updates the same pull request; when nothing is left it closes it. A pull request you close without merging is not reopened until the fixes change. It needs no FalkorDB and no model key.
+
+```yaml
+# .github/workflows/staleproof-fix.yml
+name: Staleproof fix docs
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rajkaria/staleproof@v1
+        with:
+          mode: fix
+```
+
+The same file is [examples/staleproof-fix.yml](../examples/staleproof-fix.yml). Staleproof writes only the branch `staleproof/fix-docs`; it never pushes to another branch. Pull requests opened with the default `GITHUB_TOKEN` do not start other workflows; use a token of your own (`github-token`) if the fix pull request should run your CI.
+
+## Release gate
+
+`mode: release` runs [`staleproof release`](release.md) on the checked-out repository when a release is published: breaking public API changes since the previous tag, whether the changelog names them, and docs still relying on what changed. Copy [examples/staleproof-release.yml](../examples/staleproof-release.yml); it checks out the repository with `fetch-depth: 0` (the gate reads both commits from the clone). The report goes to the job summary; `release-fail-on` decides what fails the job.
 
 ## Keep the graph between runs
 
@@ -288,19 +331,19 @@ jobs:
         env:
           FALKORDB_URL: ${{ secrets.STALEPROOF_FALKORDB_URL }}
           STALEPROOF_ORG: falkordb
-        run: npx -y staleproof@0.5.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+        run: npx -y staleproof@0.6.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
 This workflow uses only the documented `index` command; unlike the action itself, it has not been run on GitHub. Re-indexing never deletes: what disappeared is marked `gone`, and verdicts and decisions keep pointing at it.
 
 ## Pin the version
 
-`@v1` follows the action's `v1` tag, and the `version` input pins the CLI it installs (default `0.5.0`). For runs that cannot change under you, pin the action to a commit and the CLI to a version:
+`@v1` follows the action's `v1` tag, and the `version` input pins the CLI it installs (default `0.6.0`). For runs that cannot change under you, pin the action to a commit and the CLI to a version:
 
 ```yaml
 - uses: rajkaria/staleproof@<commit-sha>
   with:
-    version: 0.5.0
+    version: 0.6.0
 ```
 
 ## The comment
@@ -412,3 +455,6 @@ This pull request also edits `<path>`, …: examples on those pages are run afte
 - [Indexing](indexing.md)
 - [Deploy](DEPLOY.md)
 - [Troubleshooting and FAQ](troubleshooting.md)
+- [GitHub App](github-app.md)
+- [Fix stale docs](fix.md)
+- [Release gate](release.md)

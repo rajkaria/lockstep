@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.6.0 — 2026-10-17
+
+Fix, don't just flag; a GitHub App with no workflow file; diagnostics while you type; the team sees what was checked.
+
+- **`staleproof fix`** ([docs/fix.md](docs/fix.md)) applies every fix Staleproof could re-check: renamed scripts, Make
+  and just targets, CLI flags and subcommands, files, headings, environment variables, symbols and parameters, and
+  close typos. Each fix is applied in a hard-linked mirror and linted again: its finding must go and nothing new may
+  appear; the others are shown as hints, never applied. `--dry-run` prints the unified diff; `--rule`, `--new`,
+  `--base`, `--format json`. A second run does nothing, and a file edited meanwhile is never overwritten.
+  `staleproof lint --fixes` shows the fixes without applying them. Migration guides, release notes and old versions'
+  docs are never rewritten, and ambiguous cases (ties, far names, short-word swaps) get no fix.
+- **Suggestions on pull requests**: the verified fix for each docs reference a pull request makes wrong is posted as a
+  GitHub suggestion on its diff, one review per push; an earlier suggestion is updated or marked superseded, never
+  repeated, and the fixes outside the diff are listed in the comment (`staleproof suggest`, the Action's
+  `suggestions` input, on by default).
+- **Renovate for docs**: the Action's `mode: fix` and `staleproof fix-pr` keep one pull request from
+  `staleproof/fix-docs` with every verified fix at the default branch, updated on each run and closed when nothing is
+  left; a pull request you close is not reopened until the fixes change. Only `staleproof/*` refs are written
+  ([`examples/staleproof-fix.yml`](examples/staleproof-fix.yml)). The Claude Code hooks name the verified fix
+  (`Fix: …`).
+- **GitHub App** ([docs/github-app.md](docs/github-app.md)): install once, no workflow file. Every pull request gets a
+  "Staleproof" check run with the docs references it makes wrong as line annotations, the doc sections it reaches and
+  the examples predicted to break (success, neutral or failure by `[app] fail-on`); a comment only when there is
+  something to say, updated in place and edited to "All clear" when a later push fixes everything; verified fixes as
+  suggestions, and an **Apply fixes** button that commits them to the branch (never forced; forks get a patch).
+  Private repositories are read with the installation token and indexed into one graph per installation
+  (`ghp-<id>`) that no public endpoint can read; removing the repository or uninstalling the App drops it. A daily
+  `GET /api/github/cron` (`CRON_SECRET`) opens or updates the docs fix pull request (`[app] fix-prs`) and keeps the
+  audit issue (`[app] audit-issue`). The `[app]` settings (`comment`, `fail-on`, `suggestions`, `drafts`,
+  `also-index`, `fix-prs`, `audit-issue`) are read from the default branch. `github-app.json` and
+  `scripts/github-app-register.ts` register your own App; `/api/health` reports `githubApp`, and the install page
+  shows **Install the GitHub App** when `GITHUB_APP_SLUG` is set.
+- **`staleproof lsp`** ([docs/editors.md](docs/editors.md)): a language server for VS Code, Cursor, Windsurf, Neovim,
+  Zed, Helix and JetBrains (LSP4IJ). Diagnostics for docs, READMEs, AI agent files and docstrings from the unsaved
+  text, 300 ms after an edit, the same findings as `staleproof lint` (same fingerprints); verified fixes (re-checked
+  against the buffer), "ignore this rule here" and "fix all in file" (also `source.fixAll`) as code actions; hover
+  and go to definition from a docs code span or example call to the code; "documented in N places", find references
+  and a "N docs reference this" code lens from the code to the docs. Unsaved edits to `package.json`, Makefiles or
+  `pyproject.toml` re-check the open docs at once. A VS Code and Cursor extension in `editors/vscode` (the server
+  from `staleproof.path`, the workspace's `node_modules/.bin`, the `PATH`, then `npx -y staleproof@0.6.0`; settings
+  `staleproof.enable`, `staleproof.codeLens` and `staleproof.path`; commands Fix all in file, Audit workspace and
+  Restart server) and a Zed dev extension in `editors/zed`, both built but not yet published.
+- **Checked stamp** ([docs/verified-stamp.md](docs/verified-stamp.md)): `GET /api/verified/<owner>/<repo>.json`
+  (per-page status from the hosted audit, CORS `*`, a 10-minute CDN cache) and
+  `GET /api/verified/<owner>/<repo>/stamp.js`, a script under 4 KB with no cookies, storage or referrer, light and dark
+  aware, and exact about what was checked. Private (`ghp-`) graphs are never served. A Docusaurus plugin
+  (`docusaurus-plugin-staleproof`) and a MkDocs plugin (`mkdocs-staleproof`) in `integrations/`, and a Mintlify or
+  plain-HTML snippet.
+- **`staleproof digest`**: the docs health change since the last digest, new drift with links, problems fixed and
+  verified fixes, posted to Slack, Discord or any webhook; the state lives in the audit issue or the graph. The
+  Action's `digest-webhook` input posts it after each scheduled audit.
+- **CODEOWNERS routing**: the audit issue groups the docs to fix by owner, and the pull request comment lists "Owners
+  of affected docs"; plain text unless `[audit] mention-owners = true`.
+- **`staleproof release`** ([docs/release.md](docs/release.md)): the release gate. Breaking public API changes since
+  the last tag, whether the changelog names them, docs still relying on what changed, and lint at the release;
+  `--fail-on undocumented-breaking|stale-docs|never`, exit codes 0, 1 and 2. The Action's `mode: release` runs it
+  ([`examples/staleproof-release.yml`](examples/staleproof-release.yml)).
+
 ## 0.5.0 — 2026-10-17
 
 Commands, CLIs, environment variables, symbols and docstrings checked too; only what a change makes wrong in pull

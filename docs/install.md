@@ -1,14 +1,16 @@
 # Install
 
-Four ways to use Staleproof, from nothing installed to one command on your machine: the website, the GitHub Action, an MCP server for your AI assistant, and the CLI. Each section says what it needs, what it does, and what it does not do. The site's install page, [staleproof.dev/#/install](https://staleproof.dev/#/install), has the one-click buttons for the Action and the MCP clients.
+Six ways to use Staleproof, from nothing installed to one command on your machine: the website, the GitHub App, the GitHub Action, an MCP server for your AI assistant, the CLI, and your editor. Each section says what it needs, what it does, and what it does not do. The site's install page, [staleproof.dev/#/install](https://staleproof.dev/#/install), has the one-click buttons for the Action and the MCP clients.
 
 | Way | Needs | Runs examples | Repositories |
 |---|---|---|---|
 | [Website](#website-no-install) | A browser | No | Public |
+| [GitHub App](#github-app-no-workflow-file) | Installing the App on the repository | No | Public and private |
 | [GitHub Action](#github-action-one-click) | A workflow file in the repository | Yes, before and after each pull request | Public and private |
 | [MCP, hosted](#mcp-hosted-no-install) | An MCP client | No | Public |
 | [MCP, local](#mcp-local) | Node.js 20+, git, uv or `python3` | Yes | Public and private (with `GITHUB_TOKEN`) |
 | [CLI](#cli-one-command) | Node.js 20+, git, uv or `python3` | Yes | Public and private (with `GITHUB_TOKEN`) |
+| [Editors](#editors-while-you-type) | Node.js 20+, git, an LSP-capable editor | No | Any local checkout |
 
 ## Website: no install
 
@@ -17,6 +19,13 @@ Open [staleproof.dev](https://staleproof.dev) and paste the URL of a pull reques
 - **What it does.** The first check of a repository downloads it and indexes it on the fly into the workspace graph of its owner (`gh-<owner>`), together with any repositories you name next to it (a docs site, an SDK; up to 4 per workspace), then checks the pull request in graph mode and streams the trace: the impacted doc sections with their evidence paths, the cleared symbols and the ranking. Agent mode is offered when the server has a model key, within a daily budget.
 - **Audit a repository.** [staleproof.dev/#/audit](https://staleproof.dev/#/audit) audits a public repository with no pull request: every docs example checked against the code it calls, API coverage, a 0-100 health score and the README badge ([Docs audit](audit.md)).
 - **What it does not do.** It does not run examples: the hosted service has no sandbox. For FalkorDB's own repositories it shows the runs recorded earlier. It reads public repositories only, and leaves nothing on your repository: no comment, no pull request.
+
+## GitHub App: no workflow file
+
+Install the [GitHub App](github-app.md) from [staleproof.dev/#/install](https://staleproof.dev/#/install) (**Install the GitHub App**, shown once the server has an App), pick the repositories, and click **Install**: no YAML. Or add the [Action](#github-action-one-click) below for example runs.
+
+- **What it does.** Every pull request gets a **Staleproof** check run with the docs references it makes wrong (as annotations), the doc sections its code changes reach and the examples predicted to break, a comment only when there is something to say, and suggestions with an **Apply fixes** button for the fixes Staleproof can verify. Private repositories are read with the installation's token and indexed into a graph no public endpoint can read.
+- **What it does not do.** It runs no examples and has no agent mode: the [GitHub Action](github-action.md) does both, in your own CI.
 
 ## GitHub Action: one click
 
@@ -82,10 +91,16 @@ npx -y staleproof check https://github.com/<owner>/<repo>/pull/<n> --no-agent
 
 The full walkthrough: [Quickstart](getting-started.md). Every command: [CLI](cli.md).
 
+## Editors: while you type
+
+`staleproof lsp` is a language server: the same findings as `staleproof lint`, from the unsaved text, in VS Code, Cursor, Windsurf, Neovim, Zed, Helix and JetBrains IDEs, with the verified fixes as quick fixes. Local only: no graph, no network. Setup for each editor: [Editors (LSP)](editors.md).
+
 ## Related
 
 - [Quickstart](getting-started.md)
 - [GitHub Action](github-action.md)
 - [MCP server](mcp.md)
+- [GitHub App](github-app.md)
+- [Editors (LSP)](editors.md)
 - [CLI](cli.md)
 - [Deploy](DEPLOY.md): run the hosted service yourself

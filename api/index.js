@@ -6,6 +6,7 @@
 // on demand into its own workspace graph.
 import { createApp, defaultModelFactory, GraphStore, loadConfig, setting, Workspaces } from '../dist/index.js';
 import { originalRequest } from './_original.js';
+import { waitUntil } from '@vercel/functions';
 
 let appPromise;
 
@@ -16,7 +17,7 @@ function app() {
     const preloaded = setting('PRELOADED')?.split(',').map((s) => s.trim()).filter(Boolean);
     const workspaces = setting('HOSTED') === 'off' ? undefined : new Workspaces(store, config, store.org(config.org));
     const agentChecksPerDay = Number(setting('AGENT_CHECKS_PER_DAY') ?? 50);
-    return createApp({ store, config, model: defaultModelFactory(config), preloaded, webDir: '/nonexistent', workspaces, agentChecksPerDay });
+    return createApp({ store, config, model: defaultModelFactory(config), preloaded, webDir: '/nonexistent', workspaces, agentChecksPerDay, githubApp: { waitUntil } });
   })().catch((err) => {
     appPromise = undefined;
     throw err;

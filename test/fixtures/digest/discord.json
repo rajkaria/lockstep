@@ -1,0 +1,40 @@
+{
+  "content": "Docs health for acme/app: 81/100 (B), down 7 since the last digest (2026-10-10, 88/100). 4 new since then, 1 fixed. 5 open problems: 3 docs references, 1 example line, 1 failing example. 1 verified fix ready (staleproof fix).",
+  "embeds": [
+    {
+      "title": "Staleproof docs digest: acme/app",
+      "url": "https://github.com/acme/app/issues/7",
+      "color": 9947648,
+      "description": "**New since the last digest**\n• [AGENTS.md:4](https://github.com/acme/app/blob/abc1234def5678/AGENTS.md#L4) `npm run lint:docs` is not a script in package.json.\n• [README.md:21](https://github.com/acme/app/blob/abc1234def5678/README.md#L21) `STALE_URL` is not read anywhere in the code.\n• [docs/api.md:44](https://github.com/acme/app/blob/abc1234def5678/docs/api.md#L44) Example: `connect` has no parameter `tls`.\n• [docs/run.md](https://github.com/acme/app/blob/abc1234def5678/docs/run.md#L5) Example fails when run: TypeError: connect() got an unexpected keyword argument 'tls'\n\n**Verified fixes** (`staleproof fix` applies them)\n• [AGENTS.md:4](https://github.com/acme/app/blob/abc1234def5678/AGENTS.md#L4) Rename to `npm run lint-docs` (script renamed in package.json)",
+      "fields": [
+        {
+          "name": "Score",
+          "value": "81/100 (B)",
+          "inline": true
+        },
+        {
+          "name": "Change",
+          "value": "down 7",
+          "inline": true
+        },
+        {
+          "name": "New",
+          "value": "4",
+          "inline": true
+        },
+        {
+          "name": "Fixed",
+          "value": "1",
+          "inline": true
+        }
+      ],
+      "footer": {
+        "text": "Staleproof · acme/app@abc1234"
+      },
+      "timestamp": "2026-10-17T09:00:00.000Z"
+    }
+  ],
+  "allowed_mentions": {
+    "parse": []
+  }
+}

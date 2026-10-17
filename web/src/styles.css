@@ -2505,6 +2505,12 @@ table.compare thead .us {
 .install-copy > p {
   color: var(--text-2);
 }
+.app-install {
+  margin: 1rem 0 1.5rem;
+}
+.app-install p {
+  margin-top: 0.5rem;
+}
 .install-preview {
   display: grid;
   gap: 16px;

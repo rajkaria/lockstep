@@ -136,6 +136,10 @@ See [examples/staleproof.yml](../examples/staleproof.yml) and [GitHub Action](gi
 - With `reindex: 'true'` and `falkordb-url`, the action re-indexes the pull request's repository and `also-index` before checking, at the remote default branch head (no ref is passed). Repositories of the graph that are not listed are not re-indexed with them, so cross-repository edges into them are dropped until the organisation is indexed together again.
 - The action has run end to end on a private test repository with the one-click workflow (no inputs).
 
+## GitHub App
+
+A deployment can also run its own copy of the [GitHub App](github-app.md): a check run and a comment on every pull request of the repositories it is installed on, with no workflow file. Register it with `npx tsx scripts/github-app-register.ts` (it writes the credentials to the git-ignored `.env.app`), set the five variables `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG` and `CRON_SECRET`, and redeploy; `vercel.json` already schedules the App's daily job (`crons`: `GET /api/github/cron`). Without the first three the App's routes answer 404 and nothing else changes. The steps and the commands are in [GitHub App: run your own App](github-app.md#run-your-own-app).
+
 ## Production checklist
 
 - **A separate scratch database.** Examples run against a FalkorDB that is flushed (`FLUSHALL` and `GRAPH.UDF FLUSH`) before every run. Use a dedicated, unauthenticated server on a private network, or the managed local one (127.0.0.1:6390). Never point it at the org graph's server: Staleproof refuses when the host and port match, but a different address for the same server is not detected.
@@ -155,5 +159,6 @@ See [examples/staleproof.yml](../examples/staleproof.yml) and [GitHub Action](gi
 - [Configuration](configuration.md): every variable and its default
 - [HTTP API](http-api.md): routes, rate limits and snapshot mode
 - [GitHub Action](github-action.md)
+- [GitHub App](github-app.md)
 - [Example runner](example-runner.md): the sandbox and the scratch server
 - [Troubleshooting and FAQ](troubleshooting.md)
