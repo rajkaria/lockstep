@@ -218,6 +218,10 @@ describe('docstring facts', () => {
     const j = docParams('/**\n * @param {string} a The a.\n * @param [b] Optional.\n * @param {number} [c=1] - Default.\n * @param opts.d A property.\n * @param e - TSDoc.\n * @returns nothing\n */', 'ts');
     expect(j.style).toBe('jsdoc');
     expect(j.params.map((p) => `${p.name}${p.dotted ? ' (dotted)' : ''}@${p.line}:${p.column}`)).toEqual(['a@1:19', 'b@2:11', 'c@3:20', 'opts.d (dotted)@4:10', 'e@5:10']);
+    expect(docParams('/** @param a The a. */', 'ts').params.map((p) => p.name)).toEqual(['a']);
+    // A comment that describes the syntax (`@param x` in prose) documents nothing.
+    expect(docParams('/** JSDoc/TSDoc: `@param x`, `@param {T} x`. */', 'ts').params).toEqual([]);
+    expect(docParams('/**\n * Reads tags like `@param x` from a comment.\n */', 'ts').params).toEqual([]);
   });
 
   it('reads the parameters a stored signature declares', () => {

@@ -128,7 +128,8 @@ function sphinxParams(lines: string[], out: DocParams): void {
 /** JSDoc/TSDoc: `@param x`, `@param {T} x`, `@param [x]`, `@param [x=1]`, `@param opts.x`. */
 function jsdocParams(lines: string[], out: DocParams): void {
   for (const [i, line] of lines.entries()) {
-    const tag = /@(param|arg|argument)\b/.exec(line);
+    // A block tag starts its line (after the comment's `/**` or `*`); `@param x` in a sentence or a code span is prose.
+    const tag = /^\s*(?:\/\*\*+|\*+)?\s*@(param|arg|argument)\b/.exec(line);
     if (!tag) continue;
     let k = tag.index + tag[0].length;
     const skipSpace = () => {
