@@ -1,5 +1,5 @@
 name: Staleproof docs check
-description: Comment on each pull request with the docs it makes false, with evidence, and run their examples. Audit the docs on a schedule.
+description: Comment on each pull request with the docs it makes false, with evidence, and run their examples. Audit docs on a schedule.
 author: Raj Karia
 branding:
   icon: book-open
