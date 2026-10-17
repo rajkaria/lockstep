@@ -107,6 +107,18 @@ no example checks until it is indexed again; any other repository is indexed fre
 ([`examples/staleproof-audit.yml`](examples/staleproof-audit.yml)). [docs/audit.md](docs/audit.md) has the checks and
 the score.
 
+**Lint the docs and agent files, in a second.** `staleproof lint` checks every path, link, anchor and code example
+in the docs, READMEs and the files AI coding agents read on every session (`AGENTS.md`, `CLAUDE.md`, Cursor, Copilot,
+Windsurf and Cline rules) against the repository itself. No graph, no network. In docs, a missing path is reported
+only when git history shows the repository had it, with where it went; on eight public repositories every finding was
+real drift (renamed headings under deep links, test files moved under paths `AGENTS.md` still names).
+
+```bash
+npx -y staleproof lint            # --format github | sarif | json | markdown
+```
+
+[docs/lint.md](docs/lint.md) has the rules, the precision guards and CI recipes.
+
 **Check before you push.** `staleproof check` with no URL checks your uncommitted and unpushed changes against the
 graph and lists the examples they break, with the line and the reason. From the test fixtures, after adding a
 required `timeout` to `Graph.query`:
@@ -175,7 +187,7 @@ The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
 | Integration | One line | Guide |
 |---|---|---|
 | Website | Paste a pull request URL on [staleproof.dev](https://staleproof.dev), or audit a repository at [#/audit](https://staleproof.dev/#/audit) — no install, any public repository | [docs/install.md](docs/install.md) |
-| CLI | `npx -y staleproof <command>` — index, check (a PR or your working tree), audit, docs-for, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
+| CLI | `npx -y staleproof <command>` — lint, index, check (a PR or your working tree), audit, docs-for, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
 | GitHub Action | `uses: rajkaria/staleproof@v1` — zero config: a comment on every PR with the docs it can make false, the examples predicted to break and the examples run before and after ([`examples/staleproof.yml`](examples/staleproof.yml)); on a schedule, a docs audit kept in one issue | [docs/github-action.md](docs/github-action.md) |
 | MCP, hosted | `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` — nothing to install | [docs/mcp.md](docs/mcp.md) |
 | MCP, local (Claude Code) | `claude mcp add staleproof -- npx -y staleproof mcp` — runs examples too | [docs/mcp.md](docs/mcp.md) |
@@ -197,6 +209,7 @@ they push, and platform teams with many repositories —
 | [Install](docs/install.md) | [MCP server](docs/mcp.md) | [Example runner](docs/example-runner.md) | [Graph model and Cypher](docs/GRAPH-MODEL.md) | |
 | [Use cases](docs/use-cases.md) | [HTTP API](docs/http-api.md) | [Decisions and memory](docs/memory.md) | [Facts from the graph](docs/FACTS.md) | |
 | [Docs audit](docs/audit.md) | [Node.js library](docs/library.md) | [The agent](docs/agent.md) | [Architecture](docs/ARCHITECTURE.md) | |
+| [Lint docs and agent files](docs/lint.md) | | | [Lint rules](docs/rules.md) | |
 
 **For LLMs and coding assistants:** [`llms.txt`](llms.txt) indexes every page. The live site serves the same docs as
 plain text — [`/llms.txt`](https://staleproof.dev/llms.txt),

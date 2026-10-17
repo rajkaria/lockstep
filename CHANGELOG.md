@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 — 2026-10-17
+
+Every repository, every teammate, every agent.
+
+- **`staleproof lint`**: every path, link, anchor and code example in the docs, READMEs and the files AI coding agents
+  read on every session (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/**`, Cursor, Copilot, Windsurf and Cline
+  rules, `CONVENTIONS.md`) checked against the repository itself, with no graph and no network. Rules `path-missing`
+  (with where the file moved or the commit that deleted it), `line-out-of-range`, `link-broken`, `anchor-missing`,
+  and the static example checks as `example-*` findings. Output as text, JSON (`version: 1`), SARIF 2.1.0, GitHub
+  workflow annotations or Markdown; `--fail-on`, `--rule`, `--disable`, `--files`, `--with`. Agent instruction files
+  are listed first. Precision guards: in docs a missing path counts only with git-history evidence; slugs, MIME
+  types, placeholders, globs, ignored and generated paths, translations, docs-site routes and generated API folders
+  are never reported. On eight public repositories every finding was real drift ([docs/lint.md](docs/lint.md)).
+- **Findings model**: one `Finding` shape (rule, severity, message, exact span, surface, subject, evidence, fix,
+  line-independent fingerprint) that the next surfaces (hooks, editor, PR checks, the GitHub App) share; the rule
+  registry generates [docs/rules.md](docs/rules.md).
+- **`.staleproof.toml`**: new `[lint]` (`include`, `exclude`, `agent-files`) and `[rules]` tables, plus `[hooks]`,
+  `[app]` and `[audit]` read ahead of the features that use them. Unknown keys warn instead of being silently
+  dropped; `<!-- staleproof: ignore [rules] -->` and `ignore-file` comments silence findings.
+
 ## 0.3.0 — 2026-10-17
 
 Docs drift found without a pull request, before a pull request, and in more languages.

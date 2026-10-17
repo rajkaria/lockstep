@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { repoLlmsTxt, toolsReference, TOOLS_END, TOOLS_START } from '../scripts/gen-docs.js';
+import { repoLlmsTxt, rulesReference, toolsReference, TOOLS_END, TOOLS_START } from '../scripts/gen-docs.js';
 import { MCP_TOOLS } from '../src/mcp/server.js';
 import { llmsFiles } from '../web/llms.js';
 import { DOCS, slugify } from '../web/src/docs/manifest.js';
@@ -97,6 +97,10 @@ describe('the documentation set', () => {
     const section = doc.slice(doc.indexOf(TOOLS_START), doc.indexOf(TOOLS_END) + TOOLS_END.length);
     expect(section).toBe(toolsReference());
     for (const t of MCP_TOOLS) expect(doc).toContain(`### \`${t.name}\``);
+  });
+
+  it('docs/rules.md lists every lint rule from the registry (run `npm run docs` if this fails)', async () => {
+    expect(await readFile(join(docsDir, 'rules.md'), 'utf8')).toBe(`${rulesReference()}\n`);
   });
 
   it('the repository llms.txt is generated from the manifest (run `npm run docs` if this fails)', async () => {

@@ -18,6 +18,7 @@ Quick facts for assistants:
 - [Install](docs/install.md): Every way to use Staleproof, from no install to one command: the website, the GitHub Action, hosted and local MCP, the CLI.
 - [Use cases](docs/use-cases.md): Who uses Staleproof and how: SDK teams with a separate docs site, DevRel after a release, maintainers reviewing PRs, checks before a push, AI coding agents, a weekly docs audit, multi-repo platforms.
 - [Docs audit](docs/audit.md): How true the docs are with no pull request: example lines that no longer fit the code, example runs, API coverage, a 0-100 health score, the README badge and a weekly audit in CI.
+- [Lint docs and agent files](docs/lint.md): staleproof lint: every path, link, anchor and code example in the docs, READMEs and AI agent instruction files (AGENTS.md, CLAUDE.md, Cursor and Copilot rules) checked against the repository, with no graph and no network; formats for terminals, CI annotations and SARIF.
 
 ## Integrate
 
@@ -37,6 +38,7 @@ Quick facts for assistants:
 
 ## Reference
 
+- [Lint rules](docs/rules.md): Every staleproof lint rule: default severity, where it looks, an example of the stale text and the message it gets.
 - [Tools reference](docs/tools.md): The fourteen tools the agent and MCP clients call: parameters, results, errors and the Cypher each one runs.
 - [Configuration](docs/configuration.md): Every environment variable and global CLI option, with defaults, and the per-repository .staleproof.toml.
 - [Graph model and Cypher](docs/GRAPH-MODEL.md): Every Cypher statement Staleproof sends to FalkorDB, named and explained, generated from the code.

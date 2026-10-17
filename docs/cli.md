@@ -29,13 +29,21 @@ npx -y staleproof docs-for Graph.query --repo FalkorDB/falkordb-py
 npx -y staleproof audit FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
+And with no graph at all, in about a second:
+
+```bash
+npx -y staleproof lint
+```
+
+It checks every path, link, anchor and code example in the docs, READMEs and AI agent files against the checkout ([`lint`](#lint), [Lint docs and agent files](lint.md)).
+
 The first checks the working tree of the checkout you are in (uncommitted and unpushed changes) and exits 1 when an example is predicted to break, which makes it a pre-push hook ([below](#check-without-a-pull-request)); the second lists the docs that depend on a symbol before you change it; the third audits the docs as they are ([Docs audit](audit.md)).
 
 ## Install or run with npx
 
 | How | Command | Notes |
 |---|---|---|
-| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.3.0 <command>`. |
+| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.4.0 <command>`. |
 | Global install | `npm install -g staleproof`, then `staleproof <command>` | Puts `staleproof` on your `PATH`. |
 | From a clone | `npm install && npm run build`, then `node dist/cli.js <command>` | Or `npm run dev -- <command>` to run the TypeScript source. |
 
@@ -364,6 +372,41 @@ miniclient.graph.Graph.query method · acme/mini-client
 ```
 
 No match prints `No live symbol in the "<graph>" graph is named <symbol>.`; a symbol no doc reaches, `No doc section or example reaches <qualname> within 3 call hops: changing it cannot make a doc false through the code.` Without `--repo` or an id, the graph is `STALEPROOF_ORG`, else `falkordb`: pass `--repo` or `--org` for other organisations.
+
+### `lint`
+
+Check every claim the docs, READMEs and AI agent instruction files (`AGENTS.md`, `CLAUDE.md`, Cursor, Copilot, Windsurf and Cline rules) make about the repository: the paths they name, the links and anchors they follow, and their code examples. Needs no FalkorDB and no network. [Lint docs and agent files](lint.md) explains what is read, each rule and the precision guards; [Lint rules](rules.md) lists every rule.
+
+```text
+staleproof lint [options] [dir]
+```
+
+**Arguments.** `[dir]`: the checkout to lint (default `.`). Git-tracked files are read when it is a git checkout, otherwise every non-hidden file.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--format <format>` | `text` | `text`, `json`, `sarif` (2.1.0, for code scanning), `github` (workflow annotations) or `markdown` |
+| `--out <file>` | stdout | Write the report to a file; logs `wrote <file>: <summary>` on stderr |
+| `--fail-on <level>` | `error` | Exit 1 when a finding is at or above `error`, `warning` or `info`; `never` always exits 0 |
+| `--rule <ids...>` | all | Only these rules |
+| `--disable <ids...>` | none | Skip these rules |
+| `--files <paths...>` | all | Report only findings in these files, or about them (a missing path or link target among them) |
+| `--with <dirs...>` | none | Other local checkouts whose code the docs examples call |
+| `--no-examples` | examples on | Skip the static checks of docs code examples (no code is parsed) |
+| `--repo <owner/name>` | origin remote | The GitHub repository the checkout is, for links in reports |
+
+**Examples.**
+
+```bash
+npx -y staleproof lint
+npx -y staleproof lint --format github
+npx -y staleproof lint ../acme-docs --with ../acme-client --format markdown --out lint.md
+npx -y staleproof lint --rule path-missing link-broken --fail-on warning
+```
+
+**Prints.** Findings grouped by section (AI agent instructions first, then READMEs, docs, code examples), each as `line:column  severity  message  [rule]`, then a summary: `<n> errors, <n> warnings in <files> files (<checked> files checked, <ms> ms)`, or `No stale references in <n> files`. Config warnings (unknown keys) are printed as `warning: …` and never stop the run. Unknown rule ids fail with `unknown rule <id>`; a bad `--format` or `--fail-on` with the allowed values.
+
+**Exit status.** 1 when a finding is at or above `--fail-on`; 2 on a usage or internal error; otherwise 0.
 
 ### `audit`
 

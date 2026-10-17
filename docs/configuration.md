@@ -230,7 +230,26 @@ skip-examples = ["docs/v1/**"]
 | `ignore` | list of globs | Matching files are not indexed at all: no symbols, sections or examples. |
 | `skip-examples` | list of globs | Examples on matching pages, and matching example scripts, are indexed and linked to the code as usual, so a pull request check still lists them, but they are never run, statically checked, predicted to break or counted as mismatched by the audit (as if each had a `skip` directive). |
 
-- **Which file**: `.staleproof.toml` when it exists, even if empty; otherwise `[tool.staleproof]` when it sets either key. Unknown keys are ignored.
+`staleproof lint` reads two more tables (in `pyproject.toml`, `[tool.staleproof.lint]` and `[tool.staleproof.rules]`):
+
+```toml
+[lint]
+include = ["guides/**/*.txt"]      # extra files to check
+exclude = ["docs/archive/**"]      # never checked (on top of `ignore`)
+agent-files = ["prompts/*.md"]     # extra AI agent instruction files
+
+[rules]
+"anchor-missing" = "error"         # off | info | warning | error
+```
+
+| Key | Type | Effect |
+|---|---|---|
+| `lint.include` | list of globs | Files checked by `staleproof lint` besides the docs, READMEs and agent files |
+| `lint.exclude` | list of globs | Files `staleproof lint` never checks |
+| `lint.agent-files` | list of globs | Files reported under "AI agent instructions" (listed first, and checked strictly: see [Lint](lint.md#precision-first)) |
+| `rules.<rule-id>` | `off`, `info`, `warning` or `error` | Turn a [rule](rules.md) off or change its severity |
+
+- **Which file**: `.staleproof.toml` when it exists, even if empty; otherwise `[tool.staleproof]` when it is present. Unknown keys and values of the wrong type are reported as warnings (`staleproof lint` prints them) and ignored.
 - **Globs** are matched against repository-relative paths, gitignore style: `**` matches any number of directories, `*` anything within one path segment, `?` one character; a leading `./` or `/` is dropped; a pattern also matches everything under it, so `docs/v1` covers `docs/v1/guide.md` (but not `docs/v10/`).
 - **When**: read at index time. After editing it, index the repository again.
 - **Errors** stop the index: a key that is not a list of strings fails with `<file>: ignore must be a list of glob strings` (or `skip-examples`), and a file that is not valid TOML with the parser's message.

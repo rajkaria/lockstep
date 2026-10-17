@@ -59,7 +59,7 @@ inputs:
     default: ${{ github.token }}
   version:
     description: The staleproof npm version to run, or `source` to build the CLI from this action's checkout.
-    default: '0.3.0'
+    default: '0.4.0'
 
 outputs:
   report:

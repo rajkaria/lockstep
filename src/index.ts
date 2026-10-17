@@ -35,3 +35,4 @@ export { analyzeChanges, checkChangesTool, localChanges, contentSource, worktree
 export { predictBreaks, type PredictedBreak } from './pr/predict.js';
 export { canonicalPrUrl, refreshIfMoved } from './pr/ingest.js';
 export { INDEX_VERSION } from './indexer/index.js';
+export * from './lint/index.js';

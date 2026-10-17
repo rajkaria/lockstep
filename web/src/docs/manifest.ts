@@ -68,6 +68,13 @@ export const DOCS: DocEntry[] = [
     group: 'Start here',
   },
   {
+    slug: 'lint',
+    file: 'lint.md',
+    title: 'Lint docs and agent files',
+    summary: 'staleproof lint: every path, link, anchor and code example in the docs, READMEs and AI agent instruction files (AGENTS.md, CLAUDE.md, Cursor and Copilot rules) checked against the repository, with no graph and no network; formats for terminals, CI annotations and SARIF.',
+    group: 'Start here',
+  },
+  {
     slug: 'cli',
     file: 'cli.md',
     title: 'CLI',
@@ -136,6 +143,14 @@ export const DOCS: DocEntry[] = [
     title: 'The agent',
     summary: 'The agent loop, its system prompt and stop condition, model providers (Claude or Anthropic-compatible), budgets, and graph mode.',
     group: 'How it works',
+  },
+  {
+    slug: 'rules',
+    file: 'rules.md',
+    title: 'Lint rules',
+    summary: 'Every staleproof lint rule: default severity, where it looks, an example of the stale text and the message it gets.',
+    group: 'Reference',
+    generated: true,
   },
   {
     slug: 'tools',

@@ -404,7 +404,7 @@ function dedupe(rows: Row[]): Row[] {
   return [...out.values()];
 }
 
-function pseudoModule(repo: string, path: string): string {
+export function pseudoModule(repo: string, path: string): string {
   return `__docs__.${createHash('sha1').update(`${repo}:${path}`).digest('hex').slice(0, 10)}`;
 }
 

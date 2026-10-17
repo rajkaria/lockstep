@@ -46,7 +46,7 @@ The steps of [action.yml](../action.yml), in order, on a pull request (`mode: ch
 
 1. **Set up Node.js and uv**: `actions/setup-node@v7` with Node 22, and `astral-sh/setup-uv@v10.3.0` (the example runner builds its virtualenvs with uv).
 2. **Start FalkorDB**, unless `falkordb-url` is set. With Docker on the runner (GitHub's Ubuntu runners have it), two containers from `falkordb/falkordb:latest`: `staleproof-graph` on port 6379 holds the graph, and `staleproof-scratch` on port 6390 is the disposable server the docs examples run against. The step waits up to 90 seconds for both ports, then sets `FALKORDB_URL=falkor://localhost:6379` and `STALEPROOF_SCRATCH_URL=falkor://localhost:6390` for the next steps. Without Docker it starts nothing, and the CLI starts both servers itself from falkordblite.
-3. **Install staleproof**: `npm install -g staleproof@<version>` (default `0.3.0`). With `version: source`, the CLI is built from the action's own checkout instead (`npm ci`, then `tsup`). When the version cannot be installed from npm, the step warns `staleproof@<version> is not on npm; building it from this action's source instead.` and builds it the same way.
+3. **Install staleproof**: `npm install -g staleproof@<version>` (default `0.4.0`). With `version: source`, the CLI is built from the action's own checkout instead (`npm ci`, then `tsup`). When the version cannot be installed from npm, the step warns `staleproof@<version> is not on npm; building it from this action's source instead.` and builds it the same way.
 4. **Choose check or audit**: with `mode: auto` (the default), `check` when there is a pull request (the `pull_request` event, or `pr-url`), else `audit`. Any other value than `auto`, `check` or `audit` fails with `mode must be auto, check or audit (got <mode>)`.
 5. **Re-index**, only with `reindex: 'true'` and `falkordb-url` set: `staleproof index <this repository> <also-index...>`. See [Keep the graph between runs](#keep-the-graph-between-runs).
 6. **Check the pull request**:
@@ -88,7 +88,7 @@ Every input is optional.
 | `org` | `''` | The graph name on `falkordb-url`; ignored without it. Empty: the CLI's default, the owner of the repository lowercased (the input's description in `action.yml` says `falkordb`, which is what that rule gives for FalkorDB's repositories). |
 | `reindex` | `'false'` | With `falkordb-url`: `'true'` re-indexes this repository and `also-index` at their default branch heads before the check. |
 | `github-token` | `${{ github.token }}` | Reads the repository (clones, the GitHub API, file contents) and posts the comment. Passed as `GITHUB_TOKEN` to Staleproof and as `GH_TOKEN` to the GitHub CLI. |
-| `version` | `'0.3.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
+| `version` | `'0.4.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
 
 ## Outputs
 
@@ -254,19 +254,19 @@ jobs:
         env:
           FALKORDB_URL: ${{ secrets.STALEPROOF_FALKORDB_URL }}
           STALEPROOF_ORG: falkordb
-        run: npx -y staleproof@0.3.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+        run: npx -y staleproof@0.4.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
 This workflow uses only the documented `index` command; unlike the action itself, it has not been run on GitHub. Re-indexing never deletes: what disappeared is marked `gone`, and verdicts and decisions keep pointing at it.
 
 ## Pin the version
 
-`@v1` follows the action's `v1` tag, and the `version` input pins the CLI it installs (default `0.3.0`). For runs that cannot change under you, pin the action to a commit and the CLI to a version:
+`@v1` follows the action's `v1` tag, and the `version` input pins the CLI it installs (default `0.4.0`). For runs that cannot change under you, pin the action to a commit and the CLI to a version:
 
 ```yaml
 - uses: rajkaria/staleproof@<commit-sha>
   with:
-    version: 0.3.0
+    version: 0.4.0
 ```
 
 ## The comment

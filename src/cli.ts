@@ -36,6 +36,10 @@ import { auditMarkdown, auditText } from './format/audit.js';
 import { docsForTool } from './tools/docs-for.js';
 import { analyzeChanges, localChanges } from './pr/local.js';
 import { checkMarkdown } from './format/markdown.js';
+import { lintRepo } from './lint/engine.js';
+import { formatLint, lintExitCode, lintSummaryLine, LINT_FORMATS, type LintFormat } from './lint/format.js';
+import { isRuleId } from './lint/rules.js';
+import type { RuleId } from './lint/types.js';
 
 const program = new Command();
 
@@ -348,6 +352,52 @@ program
       }
     });
   });
+
+program
+  .command('lint')
+  .description('Check every claim the docs, READMEs and AI agent files (AGENTS.md, CLAUDE.md, Cursor rules) make about the repository: paths, links, anchors and docs examples. No graph, no network.')
+  .argument('[dir]', 'the checkout to lint', '.')
+  .option('--format <format>', `${LINT_FORMATS.join(' | ')}`, 'text')
+  .option('--out <file>', 'write the report to a file instead of stdout')
+  .option('--fail-on <level>', 'exit 1 when a finding is at or above: error | warning | info | never', 'error')
+  .option('--rule <ids...>', 'only these rules')
+  .option('--disable <ids...>', 'skip these rules')
+  .option('--files <paths...>', 'report only findings in these files or about them')
+  .option('--with <dirs...>', 'other local checkouts whose code the docs examples call (an SDK next to a docs repo)', [])
+  .option('--no-examples', 'skip the static checks of docs code examples (no code parsing)')
+  .option('--repo <owner/name>', 'the GitHub repository the checkout is (default: from its origin remote)')
+  .action(
+    async (
+      dir: string,
+      opts: { format: string; out?: string; failOn: string; rule?: string[]; disable?: string[]; files?: string[]; with: string[]; examples: boolean; repo?: string },
+    ) => {
+      if (!LINT_FORMATS.includes(opts.format as LintFormat)) throw new Error(`unknown --format ${opts.format} (${LINT_FORMATS.join(', ')})`);
+      if (!['error', 'warning', 'info', 'never'].includes(opts.failOn)) throw new Error(`--fail-on must be error, warning, info or never (got ${opts.failOn})`);
+      const ids = (xs?: string[]): RuleId[] | undefined => {
+        if (!xs) return undefined;
+        const bad = xs.filter((x) => !isRuleId(x));
+        if (bad.length) throw new Error(`unknown rule ${bad.join(', ')} (see https://staleproof.dev/#/docs/rules)`);
+        return xs as RuleId[];
+      };
+      const r = await lintRepo({
+        dir,
+        rules: ids(opts.rule),
+        disable: ids(opts.disable),
+        files: opts.files,
+        with: opts.with,
+        examples: opts.examples,
+        ...(opts.repo ? { repo: parseRepoName(opts.repo) } : {}),
+      });
+      const body = formatLint(r, opts.format as LintFormat);
+      if (opts.out) {
+        await writeFile(opts.out, `${body}\n`);
+        log(`wrote ${opts.out}: ${lintSummaryLine(r)}`);
+      } else if (body) {
+        console.log(body);
+      }
+      process.exitCode = lintExitCode(r, opts.failOn as 'error' | 'warning' | 'info' | 'never');
+    },
+  );
 
 program
   .command('run')
