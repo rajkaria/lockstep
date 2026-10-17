@@ -1,0 +1,14 @@
+{
+  "name": "staleproof",
+  "displayName": "Staleproof",
+  "version": "0.5.0",
+  "description": "Keeps docs and AI agent files true to the code: after each edit Claude hears which docs it made wrong, and before it stops it is asked to fix them. Local, no account.",
+  "author": {
+    "name": "Raj Karia",
+    "url": "https://github.com/rajkaria"
+  },
+  "homepage": "https://staleproof.dev/#/docs/claude-code",
+  "repository": "https://github.com/rajkaria/staleproof",
+  "license": "MIT",
+  "keywords": ["docs", "documentation", "drift", "lint", "agents-md", "claude-md"]
+}

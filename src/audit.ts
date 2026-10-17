@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import * as Q from './graph/queries.js';
+import type { Finding, RuleId, Surface } from './lint/types.js';
 import type { MismatchKind } from './indexer/signature.js';
 import { lineUrl } from './pr/predict.js';
+import { JS_LANGS } from './indexer/docs.js';
 import { INDEX_VERSION } from './indexer/index.js';
 import { runExampleTool } from './tools/run-example.js';
 import { result, Tracer, type ToolContext, type ToolDef, type ToolResult } from './tools/types.js';
@@ -48,9 +50,23 @@ export interface Deduction {
   why: string;
 }
 
+/** A lint finding stored at index time, with the doc section it is in. */
+export interface AuditFinding extends Finding {
+  /** Heading path of the section (`Setup > Install`), when the finding is in one. */
+  heading?: string;
+}
+
+export interface FindingCounts {
+  errors: number;
+  warnings: number;
+  infos: number;
+  byRule: Partial<Record<RuleId, number>>;
+  bySurface: Partial<Record<Surface, number>>;
+}
+
 export interface AuditData {
   org: string;
-  repos: { name: string; sha: string; symbols: number; sections: number; indexVersion?: number }[];
+  repos: { name: string; sha: string; symbols: number; sections: number; indexVersion?: number; /** Docs references were linted at index time (index version 4, a full file list). */ findingsChecked?: boolean }[];
   /** A repository was indexed by an older Staleproof: no example checks or export flags until it is indexed again. */
   outdatedIndex?: boolean;
   score: number;
@@ -64,6 +80,13 @@ export interface AuditData {
   /** Latest recorded run of each example at the indexed commits. */
   runs: AuditRun[];
   runCounts: { pass: number; fail: number; skipped: number; error: number };
+  /**
+   * Docs references that no longer match the repository (paths, links, anchors, commands,
+   * CLI flags, env vars, docstrings), linted at index time; AI agent instruction files first.
+   * Examples stay in `mismatches`.
+   */
+  findings?: AuditFinding[];
+  findingCounts?: FindingCounts;
   generatedAt: number;
 }
 
@@ -134,11 +157,12 @@ function importance(r: SymRow): number {
 
 /**
  * 100 minus deductions: 8 per example that no longer fits the code (at most 50), 6 per
- * other example that fails when run (at most 30), 0.3 per missing percent of API coverage.
- * `failingOnly` counts failing runs of examples not already counted as mismatched.
+ * other example that fails when run (at most 30), 3 per error and 1 per warning in docs
+ * references (at most 25), 0.3 per missing percent of API coverage. `failingOnly` counts
+ * failing runs of examples not already counted as mismatched.
  */
 export function scoreAudit(
-  a: Pick<AuditData, 'examples' | 'coverage' | 'runCounts'> & { failingOnly?: number },
+  a: Pick<AuditData, 'examples' | 'coverage' | 'runCounts'> & { failingOnly?: number; findingCounts?: Pick<FindingCounts, 'errors' | 'warnings'> },
 ): { score: number; grade: AuditData['grade']; deductions: Deduction[] } {
   const failing = a.failingOnly ?? a.runCounts.fail;
   const deductions: Deduction[] = [];
@@ -152,6 +176,14 @@ export function scoreAudit(
     deductions.push({
       points: Math.min(30, failing * 6),
       why: `${failing} ${a.examples.mismatched ? 'more ' : ''}example${failing === 1 ? '' : 's'} fail${failing === 1 ? 's' : ''} when run (6 each, at most 30)`,
+    });
+  }
+  const refs = a.findingCounts;
+  if (refs && (refs.errors || refs.warnings)) {
+    const parts = [refs.errors && `${refs.errors} error${refs.errors === 1 ? '' : 's'}`, refs.warnings && `${refs.warnings} warning${refs.warnings === 1 ? '' : 's'}`].filter(Boolean).join(' and ');
+    deductions.push({
+      points: Math.min(25, refs.errors * 3 + refs.warnings),
+      why: `Docs references: ${parts} where the docs or AI agent files name a path, link, command or setting the repository does not have (3 per error, 1 per warning, at most 25)`,
     });
   }
   if (a.coverage.api > 0 && a.coverage.percent < 100) {
@@ -174,6 +206,16 @@ export function auditSummary(d: AuditData): string {
   ];
   const ran = d.runCounts.pass + d.runCounts.fail;
   if (ran) parts.push(`${d.runCounts.fail} of ${ran} examples run at the indexed commits fail.`);
+  if (d.findings?.length) {
+    const agent = d.findingCounts?.bySurface.agent;
+    const files = new Set(d.findings.map((f) => `${f.repo}:${f.path}`)).size;
+    parts.push(
+      `${d.findings.length} docs reference${d.findings.length === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'} no longer match${d.findings.length === 1 ? 'es' : ''} the repository` +
+        `${agent ? ` (${agent} in AI agent instructions)` : ''}.`,
+    );
+  } else if (d.findings && d.repos.some((r) => r.findingsChecked)) {
+    parts.push('Every docs reference lint checks (paths, links, commands, env vars) matches the repository.');
+  }
   if (d.outdatedIndex) parts.push('Indexed by an older Staleproof: examples are not checked against the code until the repositories are indexed again (staleproof index).');
   return parts.join(' ');
 }
@@ -182,19 +224,59 @@ export const auditTool: ToolDef<{ repos?: string[]; limit?: number }, AuditData>
   name: 'audit_docs',
   description:
     'Audit the docs of indexed repositories with no pull request: a 0-100 health score, every example line that no longer fits the code it calls ' +
-    '(unknown keywords, wrong argument counts, names that no longer exist, found statically across repositories), API coverage (public symbols no doc names or calls, most used first) ' +
+    '(unknown keywords, wrong argument counts, names that no longer exist, found statically across repositories), the references in the docs and AI agent files ' +
+    'that no longer match the repository (paths, links, commands, env vars; agent files first), API coverage (public symbols no doc names or calls, most used first) ' +
     'and the latest example runs at the indexed commits.',
   input: z.object({
     repos: z.array(z.string()).optional().describe('Repositories to audit as owner/name (default: every repository in the graph)'),
     limit: z.number().int().min(0).max(200).optional().describe('How many undocumented symbols to list (default 25)'),
   }),
-  queries: [Q.auditRepos, Q.auditExamples, Q.auditMismatches, Q.auditRuns, Q.auditSymbols],
+  queries: [Q.auditRepos, Q.auditExamples, Q.auditMismatches, Q.auditRuns, Q.auditSymbols, Q.auditFindings],
   run: (ctx, input) => auditDocs(ctx, { repos: input.repos, limit: input.limit }),
 };
 
+const SURFACE_ORDER: Record<Surface, number> = { agent: 0, readme: 1, docs: 2, example: 3, docstring: 4, config: 5 };
+
+type FindingRow = Omit<AuditFinding, 'evidence' | 'fix' | 'heading'> & { evidence: string | null; fix: string | null; heading: string | null };
+
+function parseJson<T>(s: string | null | undefined): T | undefined {
+  if (!s) return undefined;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Finding nodes as Findings, AI agent instruction files first, then by repository, path and line. */
+export function auditFindingsOf(rows: FindingRow[]): { findings: AuditFinding[]; counts: FindingCounts } {
+  const findings: AuditFinding[] = rows.map(({ evidence, fix, heading, ...f }) => {
+    const ev = parseJson<Finding['evidence']>(evidence);
+    const fx = parseJson<Finding['fix']>(fix);
+    return { ...f, ...(ev?.looked ? { evidence: ev } : {}), ...(fx ? { fix: fx } : {}), ...(heading ? { heading } : {}) };
+  });
+  findings.sort(
+    (a, b) =>
+      (SURFACE_ORDER[a.surface] ?? 9) - (SURFACE_ORDER[b.surface] ?? 9) ||
+      (a.repo ?? '').localeCompare(b.repo ?? '') ||
+      a.path.localeCompare(b.path) ||
+      a.line - b.line ||
+      a.column - b.column,
+  );
+  const counts: FindingCounts = { errors: 0, warnings: 0, infos: 0, byRule: {}, bySurface: {} };
+  for (const f of findings) {
+    if (f.severity === 'error') counts.errors++;
+    else if (f.severity === 'warning') counts.warnings++;
+    else counts.infos++;
+    counts.byRule[f.rule] = (counts.byRule[f.rule] ?? 0) + 1;
+    counts.bySurface[f.surface] = (counts.bySurface[f.surface] ?? 0) + 1;
+  }
+  return { findings, counts };
+}
+
 export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Promise<ToolResult<AuditData>> {
   const tracer = new Tracer(ctx.graph);
-  const repoRows = (await tracer.run<{ name: string; sha: string; symbols: number; sections: number; indexVersion: number }>(Q.auditRepos, { repos: opts.repos ?? [] })).rows;
+  const repoRows = (await tracer.run<{ name: string; sha: string; symbols: number; sections: number; indexVersion: number; findingsChecked: boolean }>(Q.auditRepos, { repos: opts.repos ?? [] })).rows;
   if (opts.repos?.length) {
     const have = new Set(repoRows.map((r) => r.name.toLowerCase()));
     const missing = opts.repos.filter((r) => !have.has(r.toLowerCase()));
@@ -214,7 +296,7 @@ export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Prom
   if (opts.run && opts.run > 0) {
     const mismatched = new Set(mismatches.map((m) => m.example));
     const candidates = examples
-      .filter((e) => e.lang === 'python' && e.uses > 0 && !e.directive)
+      .filter((e) => (e.lang === 'python' || JS_LANGS.has(e.lang)) && e.uses > 0 && !e.directive)
       .sort((a, b) => Number(mismatched.has(b.id)) - Number(mismatched.has(a.id)) || b.uses - a.uses)
       .slice(0, opts.run);
     for (const [i, e] of candidates.entries()) {
@@ -285,7 +367,9 @@ export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Prom
   };
   const mismatchedIds = new Set(mismatches.map((m) => m.example));
   const failingOnly = runs.filter((r) => (r.status === 'fail' || r.status === 'timeout') && !mismatchedIds.has(r.example)).length;
-  const { score, grade, deductions } = scoreAudit({ examples: examplesSummary, coverage, runCounts, failingOnly });
+  // Docs references linted at index time (Finding nodes, index version 4); examples are counted above.
+  const lint = auditFindingsOf((await tracer.run<FindingRow>(Q.auditFindings, { repos })).rows.filter((r) => !r.rule.startsWith('example-')));
+  const { score, grade, deductions } = scoreAudit({ examples: examplesSummary, coverage, runCounts, failingOnly, findingCounts: lint.counts });
   const data: AuditData = {
     org: ctx.graph.name,
     repos: repoRows,
@@ -299,6 +383,8 @@ export async function auditDocs(ctx: ToolContext, opts: AuditOptions = {}): Prom
     undocumented,
     runs,
     runCounts,
+    findings: lint.findings,
+    findingCounts: lint.counts,
     generatedAt: Date.now(),
   };
   return result('audit_docs', tracer, auditSummary(data), data);

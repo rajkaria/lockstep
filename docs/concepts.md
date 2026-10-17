@@ -210,7 +210,7 @@ For a pull request, the same check runs on the change itself. For every example 
 |---|---|
 | `removed`, `renamed` | The example calls the symbol (for a `late` link, a call of that name must appear in the example) |
 | `export-removed` | The example imports the name from the module that stopped exporting it |
-| `signature` | The call fit the old signature and does not fit the new one: an unknown keyword, too many positional arguments, a new required argument. Python only, exact links only, and only when the decorators keep the signature |
+| `signature` | The call fit the old signature and does not fit the new one: an unknown keyword, too many positional arguments, a new required argument. Python, TypeScript/JavaScript and Go; exact links only, and only when the decorators keep the signature |
 
 A call that never fit is not predicted to break: it was already broken, and shows as already out of date instead. Each prediction carries the doc line, the call, a reason such as `` `Graph.query` requires `timeout`, which the example does not pass `` and its confidence: `exact` when the example reached the symbol through imports and types, `by-name` for a removed symbol linked by name ([Resolution](#resolution)). Examples marked `skip` or `expect-error` are never predicted.
 

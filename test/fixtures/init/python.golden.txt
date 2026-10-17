@@ -1,0 +1,95 @@
+Staleproof init: acme/demo-py (Python; docs in docs/; agent files: AGENTS.md)
+
+  create     .staleproof.toml                  settings, with what init found
+  create     .github/workflows/staleproof.yml  the pull request check and a weekly audit
+  update     README.md                         the docs health badge, after the title
+  update     .pre-commit-config.yaml           the staleproof pre-commit hook
+  update     .gitignore                        .staleproof/ (the local parse cache)
+
+Dry run: nothing was written.
+
+--- .staleproof.toml (new)
+# Staleproof settings: https://staleproof.dev/#/docs/configuration
+# Written by `staleproof init` for acme/demo-py. It found:
+#   code: Python
+#   docs folders: docs/
+#   agent files: AGENTS.md
+
+# Paths never indexed or checked (generated or vendored docs, old versions):
+# ignore = ["docs/api/**"]
+# Docs whose examples are indexed but never run or checked:
+# skip-examples = ["docs/legacy/**"]
+
+[lint]
+# include = []                      # more files to check (globs)
+# exclude = ["docs/archive/**"]     # files never checked
+# agent-files = ["prompts/*.md"]    # more AI agent instruction files
+
+[rules]
+# Change a rule's severity or turn it off (off | info | warning | error); every rule: https://staleproof.dev/#/docs/rules
+# "anchor-missing" = "error"
+
+[hooks]
+# What the coding-agent stop hook does with docs a session made wrong: block (ask the agent to fix them) | warn | off
+stop = "block"
+
+--- .github/workflows/staleproof.yml (new)
+# Staleproof: on every pull request, a comment with the docs it makes wrong and annotations on those lines;
+# every Monday, an audit of all the docs, kept in one issue. No secrets, no database to set up.
+# https://staleproof.dev/#/docs/github-action
+name: Staleproof
+on:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rajkaria/staleproof@v1
+        # with:
+        #   also-index: acme/demo-py-docs   # docs in another repository
+
+--- README.md
++++ README.md
+@@ -1,4 +1,6 @@
+ # demo-py
+ 
++[![docs health](https://staleproof.dev/api/badge/acme/demo-py.svg)](https://staleproof.dev/#/audit?repo=acme%2Fdemo-py)
++
+ A small client for the demo service. The full guide is at
+ [acme/demo-py-docs](https://github.com/acme/demo-py-docs).
+
+--- .pre-commit-config.yaml
++++ .pre-commit-config.yaml
+@@ -6,4 +6,8 @@
+     -   id: ruff
+     -   id: ruff-format
++-   repo: https://github.com/rajkaria/staleproof
++    rev: v0.5.0
++    hooks:
++    -   id: staleproof
+ 
+ ci:
+
+--- .gitignore
++++ .gitignore
+@@ -1,2 +1,5 @@
+ __pycache__/
+ *.egg-info/
++
++# Staleproof parse cache and hook state
++.staleproof/
+
+Next:
+  1. Run it again without --dry-run to write these files.
+  2. Commit and push .github/workflows/staleproof.yml: the next pull request gets the Staleproof comment.
+  3. Run `pre-commit install` once in each clone, so the hook runs on commit.
+  4. See what is stale now: npx -y staleproof lint

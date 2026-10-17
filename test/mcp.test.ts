@@ -39,7 +39,7 @@ describe('MCP server (stdio, FalkorDB)', () => {
   it('lists every tool with a JSON schema and its Cypher in the description', async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
-      'check_pull_request', 'check_changes', 'docs_for_symbol', 'audit_docs', 'impact', 'clearance', 'read_section', 'run_example', 'decisions_for', 'rank_sections', 'propose_edit', 'record_verdict', 'write_decision', 'docs_patch',
+      'check_pull_request', 'check_changes', 'lint_docs', 'docs_for_symbol', 'audit_docs', 'impact', 'clearance', 'read_section', 'run_example', 'decisions_for', 'rank_sections', 'propose_edit', 'record_verdict', 'write_decision', 'docs_patch',
     ]);
     const impact = tools.find((t) => t.name === 'impact')!;
     expect(impact.description).toContain('Cypher (impact):');
@@ -61,6 +61,20 @@ describe('MCP server (stdio, FalkorDB)', () => {
     const r = await client.callTool({ name: 'impact', arguments: {} });
     expect(r.isError).toBe(true);
     expect((r.content as { text: string }[])[0]!.text).toMatch(/^invalid input: pr_url/);
+  });
+
+  it('lint_docs lints a local checkout with no graph, and refuses unknown rules', async () => {
+    const r = await client.callTool({ name: 'lint_docs', arguments: { dir: join(import.meta.dirname, 'fixtures', 'claims'), rules: ['link-broken'] } });
+    expect(r.isError).toBeFalsy();
+    const texts = (r.content as { text: string }[]).map((c) => c.text);
+    expect(texts[0]).toMatch(/^\d+ errors? in \d+ files? \(/);
+    const data = JSON.parse(texts[1]!) as { version: number; findings: { rule: string }[] };
+    expect(data.version).toBe(1);
+    expect(data.findings.length).toBeGreaterThan(0);
+    expect(new Set(data.findings.map((f) => f.rule))).toEqual(new Set(['link-broken']));
+    const bad = await client.callTool({ name: 'lint_docs', arguments: { dir: '.', rules: ['nope'] } });
+    expect(bad.isError).toBe(true);
+    expect((bad.content as { text: string }[])[0]!.text).toContain('unknown rule nope');
   });
 
   it('rejects parameters a tool does not have, like the agent loop does', async () => {

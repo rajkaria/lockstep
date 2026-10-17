@@ -267,3 +267,151 @@ describe('tarball extraction keeps the repository config', () => {
     expect(top.sort()).toEqual(['.staleproof.toml', 'README.md']);
   });
 });
+
+describe('hosted lint (FalkorDB)', () => {
+  let root: string;
+  let store: GraphStore;
+  let curated: OrgGraph;
+  let done: () => Promise<void>;
+  let ws: Workspaces;
+  let fetchImpl: typeof fetch;
+  const requested: string[] = [];
+  let home: string;
+  let mainSha: string;
+  let prSha: string;
+  const prefix = `wl${process.pid}-`;
+  const registry = `wl-registry-${process.pid}`;
+  const config = testConfig();
+
+  beforeAll(async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    root = await mkdtemp(join(tmpdir(), 'staleproof-hl-'));
+    // An application with agent files in a hidden folder and one stale reference in each kind of file.
+    const files: Record<string, string> = {
+      'AGENTS.md': '# Agents\n\n- Code lives in `src/app.ts`; settings in `src/settings.ts`.\n',
+      '.claude/skills/ship/SKILL.md': '# Ship\n\nBump `src/version.ts` first.\n',
+      'README.md': '# Lint app\n\nRead [setup](docs/setup.md).\n',
+      'docs/guide.md': '# Guide\n\n## Run\n\nSee [the FAQ](faq.md).\n',
+      'src/app.ts': 'export const x = 1;\n',
+      'logo.png': 'PNG',
+    };
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(root, ...path.split('/').slice(0, -1)), { recursive: true });
+      await writeFile(join(root, path), text);
+    }
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+    mainSha = git('rev-parse', 'HEAD');
+    // A pull request that moves the entry point AGENTS.md names.
+    git('checkout', '-q', '-b', 'move-app');
+    git('mv', 'src/app.ts', 'src/main.ts');
+    git('commit', '-q', '-m', 'move the entry point');
+    prSha = git('rev-parse', 'HEAD');
+    git('checkout', '-q', 'main');
+    const archive = (sha: string) => execFileSync('git', ['archive', '--format=tar.gz', `--prefix=lint-app-${sha}/`, sha], { cwd: root });
+    fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+      const ref = /codeload\.github\.com\/lintco\/lint-app\/tar\.gz\/(.+)$/.exec(url)?.[1];
+      const sha = ref === 'HEAD' ? mainSha : ref === mainSha || ref === prSha ? ref : undefined;
+      return sha ? new Response(new Uint8Array(archive(sha))) : new Response('Not Found', { status: 404 });
+    }) as typeof fetch;
+    const t = await testGraph('hl-curated');
+    ({ store, done } = t);
+    curated = t.graph;
+    home = await mkdtemp(join(tmpdir(), 'staleproof-hl-ws-'));
+    ws = new Workspaces(store, { ...config, home }, curated, { prefix, registry, fetchImpl });
+  });
+  afterAll(async () => {
+    for (const w of await ws.list()) if (!w.curated) await ws.evict(w.graph);
+    await store.org(registry).drop();
+    await done();
+    await rm(root, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  });
+
+  const expected = [
+    '.claude/skills/ship/SKILL.md:3 path-missing src/version.ts',
+    'AGENTS.md:3 path-missing src/settings.ts',
+    'README.md:3 link-broken docs/setup.md',
+    'docs/guide.md:5 link-broken docs/faq.md',
+  ];
+
+  it('GET /api/lint lints any public repository from its tarball, cached, in every format', async () => {
+    const app = createApp({ store, config: { ...config, org: curated.name }, workspaces: ws, webDir: '/nonexistent', rateLimit: 1000 });
+    const res = await app.request('/api/lint?repo=lintco/lint-app');
+    expect(res.status).toBe(200);
+    const r = (await res.json()) as { version: number; repo: string; findings: { path: string; line: number; rule: string; subject: string }[]; cached: boolean; tool: { name: string } };
+    expect(r).toMatchObject({ version: 1, repo: 'lintco/lint-app', cached: false, tool: { name: 'staleproof' } });
+    expect(r.findings.map((f) => `${f.path}:${f.line} ${f.rule} ${f.subject}`)).toEqual(expected);
+    const downloads = requested.length;
+    const again = (await (await app.request('/api/lint?repo=LintCo/Lint-App')).json()) as { cached: boolean };
+    expect(again.cached).toBe(true);
+    expect(requested.length).toBe(downloads);
+    const md = await app.request('/api/lint?repo=lintco/lint-app&format=markdown');
+    expect(md.headers.get('content-type')).toContain('text/markdown');
+    expect(await md.text()).toContain('**AI agent instructions**');
+    const sarif = (await (await app.request('/api/lint?repo=lintco/lint-app&format=sarif&rule=link-broken')).json()) as { runs: { results: unknown[] }[] };
+    expect(sarif.runs[0]!.results).toHaveLength(2);
+    expect((await app.request('/api/lint?repo=lintco/nope')).status).toBe(404);
+    expect((await app.request('/api/lint?repo=not-a-repo')).status).toBe(400);
+    expect((await app.request('/api/lint?repo=lintco/lint-app&rule=nope')).status).toBe(400);
+    expect((await app.request('/api/lint?repo=lintco/lint-app&ref=../x')).status).toBe(400);
+    expect((await app.request('/api/lint?repo=lintco/lint-app&format=pdf')).status).toBe(400);
+    // Only downloads count against the rate limit.
+    const strict = createApp({ store, config: { ...config, org: curated.name }, workspaces: ws, webDir: '/nonexistent', rateLimit: 1 });
+    expect((await strict.request('/api/lint?repo=lintco/lint-app')).status).toBe(200);
+    expect((await strict.request('/api/lint?repo=lintco/lint-app&fresh=1')).status).toBe(200);
+    expect((await strict.request('/api/lint?repo=lintco/lint-app&fresh=1')).status).toBe(200);
+    expect((await strict.request('/api/lint?repo=lintco/lint-app&fresh=1')).status).toBe(429);
+  });
+
+  it('indexes the whole tree listing, so the audit reads the findings with no checkout (agent files first)', async () => {
+    await ws.ensure('lintco/lint-app');
+    const graph = (await ws.locate('lintco/lint-app'))!.graph;
+    const rows = (await graph.run<{ path: string; rule: string }>(`MATCH (f:Finding {repo: 'lintco/lint-app'}) RETURN f.path AS path, f.rule AS rule ORDER BY path`)).rows;
+    expect(rows.map((r) => r.path)).toEqual(['.claude/skills/ship/SKILL.md', 'AGENTS.md', 'README.md', 'docs/guide.md']);
+    // The indexer saw what downloadRepo would extract: no hidden folders, no binaries.
+    const files = (await graph.run<{ path: string }>(`MATCH (f:File {repo: 'lintco/lint-app'}) RETURN f.path AS path ORDER BY path`)).rows.map((r) => r.path);
+    expect(files.some((p) => p.startsWith('.claude/'))).toBe(false);
+    const app = createApp({ store, config: { ...config, org: curated.name }, workspaces: ws, webDir: '/nonexistent', rateLimit: 1000 });
+    const audit = (await (await app.request('/api/audit?repo=lintco/lint-app&fresh=1')).json()) as { findings: { path: string; line: number; rule: string; subject: string; surface: string }[]; deductions: { points: number; why: string }[]; repos: { findingsChecked: boolean }[] };
+    expect(audit.findings.map((f) => `${f.path}:${f.line} ${f.rule} ${f.subject}`)).toEqual(expected);
+    expect(audit.findings.map((f) => f.surface)).toEqual(['agent', 'agent', 'readme', 'docs']);
+    expect(audit.deductions.find((d) => d.why.startsWith('Docs references'))?.points).toBe(12);
+    expect(audit.repos[0]!.findingsChecked).toBe(true);
+  });
+
+  it('a hosted check lists the docs references the pull request makes wrong, from the public tarballs of both commits', async () => {
+    const graph = (await ws.locate('lintco/lint-app'))!.graph;
+    // Merged, so the check does not ask GitHub whether it moved (no network in tests).
+    const pr = fakePr({ owner: 'lintco', repo: 'lint-app', fullName: 'lintco/lint-app', number: 3, url: 'https://github.com/lintco/lint-app/pull/3', mergeSha: prSha });
+    await recordPullRequest(graph, pr, { before: mainSha, after: prSha, files: [], docsTouched: [], symbols: [] });
+    const app = createApp({ store, config: { ...config, org: curated.name, githubToken: 'server-token' }, workspaces: ws, webDir: '/nonexistent', rateLimit: 1000 });
+    requested.length = 0;
+    const res = await app.request('/api/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pr_url: pr.url, mode: 'graph' }) });
+    const events = (await res.text()).split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6)) as { type: string; name?: string; data?: unknown; status?: string; summary?: string });
+    expect(events.filter((e) => e.type === 'tool_call').map((e) => e.name)).toEqual(['new_findings', 'impact', 'clearance']);
+    const impact = events.find((e) => e.type === 'tool_result' && e.name === 'impact')!.data as { newFindings: { total: number; findings: { path: string; rule: string; subject: string }[] } };
+    expect(impact.newFindings.findings.map((f) => `${f.path} ${f.rule} ${f.subject}`)).toEqual(['AGENTS.md path-missing src/app.ts']);
+    const finished = events.find((e) => e.type === 'check_finished')!;
+    expect(finished.status).toBe('done');
+    expect(finished.summary).toMatch(/^This pull request makes 1 docs reference wrong \(1 error, 1 in AI agent instructions\): AGENTS\.md:3 `src\/app\.ts`\./);
+    // Both commits from codeload, never the API with the server's token.
+    expect(requested.filter((u) => u.includes('/tar.gz/')).sort()).toEqual([mainSha, prSha].map((s) => `https://codeload.github.com/lintco/lint-app/tar.gz/${s}`).sort());
+    expect(requested.some((u) => u.includes('api.github.com'))).toBe(false);
+  });
+
+  it('serves lint_docs over MCP without indexing, and never reads the server disk', async () => {
+    const app = createApp({ store, config: { ...config, org: curated.name }, workspaces: ws, webDir: '/nonexistent', rateLimit: 1000 });
+    const client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL('http://local/api/mcp'), { fetch: async (url, init) => app.request(String(url), init as RequestInit) }));
+    expect((await client.listTools()).tools.map((t) => t.name)).toContain('lint_docs');
+    const r = await client.callTool({ name: 'lint_docs', arguments: { dir: '/' } });
+    expect(r.isError).toBe(true);
+    expect((r.content as { text: string }[])[0]!.text).toContain('cannot read your disk');
+    await client.close();
+  });
+});

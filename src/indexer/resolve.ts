@@ -1,6 +1,7 @@
 import type { Expr, PyBinding, PyCall, PyDef, PyModule } from './python.js';
 import { exprText } from './python.js';
-import { checkArgs, trustsSignature, type MismatchKind } from './signature.js';
+import { GO_PACKAGE_MODULES, goImportPath } from './go.js';
+import { checkArgs, trustsSignature, type MismatchKind, type SourceLang } from './signature.js';
 import { NPM_NAMES } from './typescript.js';
 
 export type Resolution = 'exact' | 'by-name';
@@ -78,6 +79,8 @@ export class SymbolTable {
   /** Top-level import package → repos that define it. */
   readonly packageRepos = new Map<string, Set<string>>();
   private readonly bindingsByScope = new Map<string, PyBinding[]>();
+  /** Modules registered by `addEphemeral` (a docs page's examples), not the organisation's code. */
+  private readonly ephemeral = new Set<string>();
 
   add(repo: string, mod: PyModule): void {
     this.modules.set(mod.module, { mod, repo });
@@ -99,11 +102,13 @@ export class SymbolTable {
    */
   addEphemeral(repo: string, mod: PyModule): () => void {
     this.modules.set(mod.module, { mod, repo });
+    this.ephemeral.add(mod.module);
     const infos: SymbolInfo[] = mod.defs.map((def) => ({ id: symbolId(repo, def.qualname), repo, module: mod.module, def }));
     for (const info of infos) push(this.byQualname, info.def.qualname, info);
     for (const b of mod.bindings) push(this.bindingsByScope, b.scope, b);
     return () => {
       this.modules.delete(mod.module);
+      this.ephemeral.delete(mod.module);
       for (const info of infos) {
         const arr = this.byQualname.get(info.def.qualname)?.filter((x) => x !== info);
         if (arr?.length) this.byQualname.set(info.def.qualname, arr);
@@ -199,7 +204,8 @@ export class SymbolTable {
     if (call.fn.k === 'attr' && (v === undefined || v.t === 'external')) {
       if (v?.t === 'external' || this.evalExpr(call.fn.obj, ctx)?.t === 'external') return [];
       const name = call.fn.attr;
-      if (GENERIC.has(name) || name.startsWith('__')) return [];
+      // Go's exported methods are capitalised (`Close`, `Get`): just as generic.
+      if (GENERIC.has(name) || name.startsWith('__') || (mod.lang === 'go' && GENERIC.has(name.charAt(0).toLowerCase() + name.slice(1)))) return [];
       const candidates = (this.byName.get(name) ?? []).filter(
         (s) => (s.def.kind === 'method' || s.def.kind === 'function') && reachable.has(s.repo),
       );
@@ -219,6 +225,7 @@ export class SymbolTable {
    */
   checkModule(repo: string, mod: PyModule, fromLine = 1): Mismatch[] {
     const out: Mismatch[] = [];
+    const listed = this.listingCalls(repo, mod, fromLine);
     for (const imp of mod.imports) {
       if (imp.lineno < fromLine || imp.alias === '*') continue;
       const m = this.missingImport(imp.target);
@@ -238,9 +245,37 @@ export class SymbolTable {
       if (!call.args) continue;
       const target = this.callTarget(call, ctx);
       if (!target) continue;
-      for (const a of checkArgs(call.args, target.def.arity!, { dropFirst: target.dropFirst, callee: target.label })) {
+      const found = checkArgs(call.args, target.def.arity!, { dropFirst: target.dropFirst, callee: target.label, lang: this.langOf(target.sym) });
+      // A constructor is called through its class by name: no subclass is involved.
+      const viaInstance = target.sym.def.kind === 'method' && target.sym.def.name !== '__init__' && target.sym.def.name !== 'constructor';
+      if (found.length && viaInstance && this.overrideAccepts(target.sym, call.args, target.dropFirst)) continue;
+      for (const a of found) {
+        if (a.kind === 'missing-argument' && call.args.positional === 0 && listed.has(call)) continue;
         out.push({ kind: a.kind, line: call.lineno, target: target.sym.id, name: target.sym.def.qualname, detail: a.detail, text: call.text });
       }
+    }
+    return out;
+  }
+
+  /**
+   * Calls in a block that lists a package's API rather than using it: three or more
+   * statements like `z.map();`, `z.set();` on one imported module (`z.refine()` among
+   * `z.regex(regex)`). An empty argument list there names the function; it does not call
+   * it with nothing. Calls on objects (`db.close();`) are never a listing.
+   */
+  private listingCalls(repo: string, mod: PyModule, fromLine: number): Set<PyCall> {
+    const byReceiver = new Map<string, PyCall[]>();
+    for (const c of mod.calls) {
+      if (!c.bare || c.lineno < fromLine || c.fn.k !== 'attr') continue;
+      const recv = exprText(c.fn.obj);
+      byReceiver.set(recv, [...(byReceiver.get(recv) ?? []), c]);
+    }
+    const out = new Set<PyCall>();
+    for (const calls of byReceiver.values()) {
+      if (new Set(calls.map((c) => c.lineno)).size < 3) continue;
+      const c = calls[0]!;
+      const recv = c.fn.k === 'attr' ? this.evalExpr(c.fn.obj, { repo, mod, scope: c.scope, depth: 0, seen: new Set() }) : undefined;
+      if (recv?.t === 'module') for (const x of calls) out.add(x);
     }
     return out;
   }
@@ -250,6 +285,8 @@ export class SymbolTable {
     const parts = target.split('.');
     if (parts.length < 2 || !this.packageRepos.has(parts[0]!)) return undefined;
     if (this.modules.has(target) || this.resolveDotted(target)) return undefined;
+    // Go imports name packages: a directory with Go files is one, even if nothing in it was indexed (tests, examples).
+    if (target.startsWith('go-') && GO_PACKAGE_MODULES.has(target)) return undefined;
     // The longest prefix that is a real module of the org.
     for (let i = parts.length - 1; i >= 1; i--) {
       const prefix = parts.slice(0, i).join('.');
@@ -263,7 +300,11 @@ export class SymbolTable {
         kind: 'missing-import',
         target: sym.id,
         name,
-        detail: i === parts.length - 1 ? `\`${shown(prefix)}\` has no \`${name}\`` : `\`${shown(prefix)}\` has no module \`${name}\``,
+        detail: target.startsWith('go-')
+          ? `\`${shown(target)}\` is not a package of \`${shown(prefix)}\``
+          : i === parts.length - 1
+            ? `\`${shown(prefix)}\` has no \`${name}\``
+            : `\`${shown(prefix)}\` has no module \`${name}\``,
       };
     }
     return undefined;
@@ -273,14 +314,29 @@ export class SymbolTable {
   private missingMember(base: Val, attr: string, ctx: Ctx): Omit<Mismatch, 'line' | 'text'> | undefined {
     if (base.t === 'module') {
       const entry = this.modules.get(base.name);
-      if (!entry || this.resolveDotted(`${base.name}.${attr}`, ctx.depth, ctx.repo)) return undefined;
+      if (entry?.mod.lang === 'go') {
+        const own = this.symbol(`${base.name}.${attr}`, entry.repo);
+        if (own && own.def.decorators.includes('private')) {
+          return { kind: 'missing-attribute', target: own.id, name: attr, detail: `\`${attr}\` is unexported in \`${shown(base.name)}\`` };
+        }
+      }
+      if (!entry || this.resolveDotted(`${base.name}.${attr}`, 0, ctx.repo)) return undefined;
       if (!this.moduleIsClosed(base.name) || this.moduleBinds(base.name, attr)) return undefined;
       const sym = this.symbol(base.name, entry.repo);
       return sym ? { kind: 'missing-attribute', target: sym.id, name: attr, detail: `\`${shown(base.name)}\` has no \`${attr}\`` } : undefined;
     }
     const cls = base.t === 'instance' ? base.cls : base.t === 'sym' && base.sym.def.kind === 'class' ? base.sym : undefined;
-    if (!cls || !this.classIsClosed(cls)) return undefined;
-    if (this.findMethod(cls, attr, 0) || this.classHas(cls, attr, 0)) return undefined;
+    if (!cls) return undefined;
+    // Go: an unexported method can't be called from another package (a docs example is one).
+    const method = this.findMethod(cls, attr, 0);
+    if (method && this.langOf(method) === 'go' && method.def.decorators.includes('private')) {
+      return { kind: 'missing-attribute', target: method.id, name: attr, detail: `\`${cls.def.name}.${attr}\` is unexported` };
+    }
+    if (!this.classIsClosed(cls)) return undefined;
+    if (method || this.classHas(cls, attr, 0)) return undefined;
+    // A subclass has it: the value may well be one (`isinstance`/type-guard narrowing, a factory's
+    // declared base type), so the declared class is not the whole story.
+    if (this.subclassHas(cls, attr)) return undefined;
     return {
       kind: 'missing-attribute',
       target: cls.id,
@@ -289,11 +345,51 @@ export class SymbolTable {
     };
   }
 
+  /**
+   * A prose reference `owner.member` (`Client.query_v2`, `falkordb.connect_async`) whose
+   * owner is an org class or module, by its dotted name, and whose member does not exist.
+   * Undefined when the member exists, when the owner is not the org's, or when the owner
+   * may supply names the source does not show (the same guards as `missing-attribute`).
+   * `members` are the names that do exist (fix candidates).
+   */
+  memberMissing(owner: string, member: string, preferRepo?: string): { owner: SymbolInfo; kind: 'class' | 'module'; members: string[] } | undefined {
+    const v = this.resolveDotted(owner, 0, preferRepo);
+    if (v?.t === 'module') {
+      const entry = this.modules.get(v.name);
+      if (!entry || this.resolveDotted(`${v.name}.${member}`, 0, entry.repo)) return undefined;
+      if (!this.moduleIsClosed(v.name) || this.moduleBinds(v.name, member)) return undefined;
+      const sym = this.symbol(v.name, entry.repo);
+      if (!sym) return undefined;
+      const members = new Set<string>();
+      for (const d of entry.mod.defs) if (d.parent === v.name) members.add(d.name);
+      for (const i of entry.mod.imports) if (i.alias !== '*' && !i.alias.includes('.')) members.add(i.alias);
+      for (const b of this.bindingsByScope.get(v.name) ?? []) members.add(b.target);
+      for (const m of this.modules.keys()) if (m.startsWith(`${v.name}.`) && !m.slice(v.name.length + 1).includes('.')) members.add(m.slice(v.name.length + 1));
+      return { owner: sym, kind: 'module', members: [...members].sort() };
+    }
+    if (v?.t !== 'sym' || v.sym.def.kind !== 'class') return undefined;
+    const cls = v.sym;
+    if (!this.classIsClosed(cls) || this.findMethod(cls, member, 0) || this.classHas(cls, member, 0)) return undefined;
+    const members = new Set<string>();
+    const collect = (c: SymbolInfo, depth: number) => {
+      if (depth > 8) return;
+      for (const [q, infos] of this.byQualname) {
+        if (q.startsWith(`${c.def.qualname}.`) && !q.slice(c.def.qualname.length + 1).includes('.') && infos.some((i) => i.repo === c.repo)) members.add(q.slice(c.def.qualname.length + 1));
+      }
+      for (const b of this.bindingsByScope.get(c.def.qualname) ?? []) members.add(b.target.replace(/^self\./, ''));
+      for (const b of this.basesOf(c)) collect(b, depth + 1);
+    };
+    collect(cls, 0);
+    return { owner: cls, kind: 'class', members: [...members].sort() };
+  }
+
   /** The function a call reaches, if its signature can be trusted to judge the call. */
   private callTarget(call: PyCall, ctx: Ctx): { sym: SymbolInfo; def: PyDef; dropFirst: boolean; label: string } | undefined {
     const v = this.evalExpr(call.fn, ctx);
     if (v?.t !== 'sym') return undefined;
     const sym = v.sym;
+    const lang = this.langOf(sym);
+    if (lang !== 'python') return this.callTargetTyped(call, ctx, sym, lang);
     if (sym.def.kind === 'class') {
       if (!this.classIsClosed(sym) || this.findMethod(sym, '__new__', 0)) return undefined;
       const init = this.findMethod(sym, '__init__', 0);
@@ -314,6 +410,36 @@ export class SymbolTable {
     if (recv?.t === 'instance') return { sym, def: sym.def, dropFirst: true, label };
     if (recv?.t === 'sym' && recv.sym.def.kind === 'class') return { sym, def: sym.def, dropFirst: false, label };
     return undefined;
+  }
+
+  /**
+   * TypeScript/JavaScript and Go have no bound first parameter: a method's parameters are
+   * what the call passes. `new X(...)` checks X's constructor (its own or an org base's);
+   * a Go type called is a conversion, and a method through its type is a method expression,
+   * neither judged.
+   */
+  private callTargetTyped(call: PyCall, ctx: Ctx, sym: SymbolInfo, lang: SourceLang): { sym: SymbolInfo; def: PyDef; dropFirst: boolean; label: string } | undefined {
+    if (sym.def.kind === 'class') {
+      if (lang !== 'ts') return undefined;
+      const ctor = this.findMethod(sym, 'constructor', 0);
+      if (!ctor || !this.trusted(ctor)) return undefined;
+      return { sym: ctor, def: ctor.def, dropFirst: false, label: sym.def.name };
+    }
+    if (sym.def.kind !== 'function' && sym.def.kind !== 'method') return undefined;
+    if (!this.trusted(sym)) return undefined;
+    if (sym.def.kind === 'function') return { sym, def: sym.def, dropFirst: false, label: sym.def.name };
+    const label = `${sym.def.parent?.split('.').pop()}.${sym.def.name}`;
+    if (call.fn.k !== 'attr') return undefined;
+    const recv = this.evalExpr(call.fn.obj, ctx);
+    if (recv?.t === 'instance') return sym.def.decorators.includes('staticmethod') ? undefined : { sym, def: sym.def, dropFirst: false, label };
+    if (recv?.t === 'sym' && recv.sym.def.kind === 'class' && lang === 'ts' && sym.def.decorators.includes('staticmethod')) return { sym, def: sym.def, dropFirst: false, label };
+    return undefined;
+  }
+
+  /** The language a symbol is written in (its module's). */
+  langOf(sym: SymbolInfo): SourceLang {
+    const lang = this.modules.get(sym.module)?.mod.lang;
+    return lang === 'ts' || lang === 'go' ? lang : 'python';
   }
 
   /** One definition, a signature-preserving decorator stack, and a parsed arity. */
@@ -356,6 +482,50 @@ export class SymbolTable {
     const external = cls.def.bases.filter((b) => !INERT_BASES.has(b.replace(/\[.*$/s, '').trim()));
     if (orgBases.length < external.length) return false;
     return orgBases.every((b) => this.classIsClosed(b, depth + 1));
+  }
+
+  private subclassIndex: Map<string, SymbolInfo[]> | undefined;
+
+  /** Whether an org class derived from `cls` (at any depth) defines `attr`. */
+  /** The organisation's classes derived from `cls`, at any depth (docs examples' own classes left out). */
+  private subclassesOf(cls: SymbolInfo): SymbolInfo[] {
+    if (!this.subclassIndex) {
+      // Built once, on the first candidate finding: base → direct subclasses.
+      this.subclassIndex = new Map();
+      for (const infos of this.byQualname.values()) {
+        for (const c of infos) {
+          if (c.def.kind !== 'class' || !c.def.bases.length || !this.modules.has(c.module) || this.ephemeral.has(c.module)) continue;
+          for (const b of this.basesOf(c)) push(this.subclassIndex, b.id, c);
+        }
+      }
+    }
+    const out = new Map<string, SymbolInfo>();
+    const queue = [...(this.subclassIndex.get(cls.id) ?? [])];
+    while (queue.length && out.size <= 200) {
+      const c = queue.shift()!;
+      if (out.has(c.id)) continue;
+      out.set(c.id, c);
+      queue.push(...(this.subclassIndex.get(c.id) ?? []));
+    }
+    return [...out.values()];
+  }
+
+  /** Whether an org class derived from `cls` (at any depth) defines `attr`. */
+  private subclassHas(cls: SymbolInfo, attr: string): boolean {
+    return this.subclassesOf(cls).some((c) => this.symbol(`${c.def.qualname}.${attr}`, c.repo) || this.classHas(c, attr, 0));
+  }
+
+  /**
+   * Whether a subclass's override of a method accepts the call its base rejects: the value
+   * may be that subclass (a factory typed with the base), so the call is not judged.
+   */
+  private overrideAccepts(method: SymbolInfo, args: NonNullable<PyCall['args']>, dropFirst: boolean): boolean {
+    const cls = method.def.parent ? this.symbol(method.def.parent, method.repo) : undefined;
+    if (cls?.def.kind !== 'class') return false;
+    return this.subclassesOf(cls).some((c) => {
+      const m = this.symbol(`${c.def.qualname}.${method.def.name}`, c.repo);
+      return !!m?.def.arity && checkArgs(args, m.def.arity, { dropFirst, callee: '' }).length === 0;
+    });
   }
 
   /** Class-level names: `X = 1`, `y: int`, `self.z = ...` in any method, through org bases. */
@@ -404,6 +574,17 @@ export class SymbolTable {
       return names;
     };
     for (const mod of modules) {
+      // Go exports what is capitalised, from packages other code can import (not `main`, not under `internal/`).
+      if (mod.lang === 'go') {
+        if (mod.defs[0]?.signature === 'package main' || mod.module.split('.').slice(1).includes('internal')) continue;
+        for (const d of mod.defs) {
+          if (d.parent !== mod.module || d.decorators.includes('private')) continue;
+          const info = this.symbol(d.qualname, repo);
+          if (info?.def.kind === 'class') addClass(info);
+          else if (info?.def.kind === 'function') out.add(info.id);
+        }
+        continue;
+      }
       const isInit = /(^|\/)__init__\.py$/.test(mod.path) || (mod.lang === 'ts' && !mod.module.includes('.'));
       if ((!isInit && mod.module.includes('.')) || isPrivate(mod.module)) continue;
       // PEP 562 lazy exports: what the package offers isn't visible in its source.
@@ -433,7 +614,15 @@ export class SymbolTable {
   resolveDotted(dotted: string, depth = 0, preferRepo?: string): Val | undefined {
     if (depth > 8) return undefined;
     const direct = this.symbol(dotted, preferRepo);
-    if (direct) return direct.def.kind === 'module' ? { t: 'module', name: dotted } : { t: 'sym', sym: direct };
+    if (direct?.def.kind === 'module') {
+      // `export { legacy } from './legacy'` (or `from .legacy import legacy`): the package's own
+      // binding of the name shadows the submodule of the same name.
+      const cut = dotted.lastIndexOf('.');
+      const rebound = cut > 0 ? this.modules.get(dotted.slice(0, cut))?.mod.imports.find((i) => i.alias === dotted.slice(cut + 1) && i.target !== dotted) : undefined;
+      if (rebound) return this.resolveDotted(rebound.target, depth + 1, preferRepo);
+      return { t: 'module', name: dotted };
+    }
+    if (direct) return { t: 'sym', sym: direct };
     const parts = dotted.split('.');
     for (let i = parts.length - 1; i >= 1; i--) {
       const prefix = parts.slice(0, i).join('.');
@@ -517,13 +706,14 @@ export class SymbolTable {
     if (local) return local.def.kind === 'module' ? { t: 'module', name: local.def.qualname } : { t: 'sym', sym: local };
     const imp = [...mod.imports].reverse().find((x) => x.alias === name);
     if (imp) {
-      const resolved = this.resolveDotted(imp.target, ctx.depth, ctx.repo);
+      // resolveDotted counts its own recursion: an example's long chain of bindings must not use it up.
+      const resolved = this.resolveDotted(imp.target, 0, ctx.repo);
       if (resolved) return resolved;
       const top = imp.target.split('.')[0]!;
       return this.packageRepos.has(top) ? { t: 'module', name: imp.target } : { t: 'external', name: imp.target };
     }
     for (const star of mod.imports.filter((x) => x.alias === '*')) {
-      const v = this.resolveDotted(`${star.target}.${name}`, ctx.depth, ctx.repo);
+      const v = this.resolveDotted(`${star.target}.${name}`, 0, ctx.repo);
       if (v) return v;
     }
     return undefined;
@@ -567,7 +757,7 @@ export class SymbolTable {
 
   private member(base: Val, attr: string, ctx: Ctx): Val | undefined {
     if (base.t === 'external') return { t: 'external', name: `${base.name}.${attr}` };
-    if (base.t === 'module') return this.resolveDotted(`${base.name}.${attr}`, ctx.depth, ctx.repo);
+    if (base.t === 'module') return this.resolveDotted(`${base.name}.${attr}`, 0, ctx.repo);
     if (base.t === 'sym') {
       if (base.sym.def.kind === 'class') {
         const m = this.findMethod(base.sym, attr, 0);
@@ -687,6 +877,7 @@ interface Ctx {
 
 /** A module as its users write it: npm packages without the `js-` namespace (`js-falkordb.graph` → `falkordb/graph`). */
 export function shown(module: string): string {
+  if (module.startsWith('go-')) return goImportPath(module) ?? module.slice(3).replace(/\./g, '/');
   if (!module.startsWith('js-')) return module;
   const [token, ...rest] = module.split('.');
   return [NPM_NAMES.get(token!) ?? token!.slice(3), ...rest].join('/');

@@ -6,7 +6,9 @@ import * as Q from '../graph/queries.js';
 import { scanDoc } from '../indexer/markdown.js';
 import { checkoutRepo, git, gitAvailable } from '../indexer/repo.js';
 import { githubSource } from '../pr/github-diff.js';
-import { errorLine, extractTraceback, isFragmentFailure, prepareExample, type ExampleSource } from './prepare.js';
+import { JS_LANGS } from '../indexer/docs.js';
+import { BuildSkipped, ensureNodeEnv, importedPackages, isJsFragmentFailure, jsErrorLine, jsSandboxAvailable, jsTraceback, prepareJsExample, runJsInSandbox } from './js.js';
+import { errorLine, extractTraceback, isFragmentFailure, prepareExample, type ExampleSource, type PreparedExample } from './prepare.js';
 import { ensureVenv, runInSandbox, sandboxAvailable, type InstallTarget } from './sandbox.js';
 import { ensureScratchDb, flushScratchDb } from './scratch.js';
 
@@ -79,7 +81,9 @@ export interface RunOptions {
  * Run node. Identical runs (same program, same commits) are answered from the graph.
  */
 export async function runExample(graph: OrgGraph, config: Config, example: ExampleForRun, repos: { repo: string; sha: string }[], opts: RunOptions = {}): Promise<RunRecord> {
-  const prepared = prepareExample(example, example.earlier);
+  // JavaScript/TypeScript examples run in a Node sandbox (src/runner/js.ts); everything else is Python's.
+  const js = JS_LANGS.has(example.lang);
+  const prepared = js ? prepareJsExample(example, example.earlier) : prepareExample(example, example.earlier);
   const targets = repos.map((r) => ({ repo: r.repo, sha: opts.shas?.[r.repo] ?? r.sha }));
   const installed = targets.map((t) => `${t.repo}@${t.sha}`).sort();
   const key = createHash('sha1').update(JSON.stringify({ code: prepared.code, installed, skip: prepared.skip ?? '' })).digest('hex').slice(0, 20);
@@ -98,13 +102,13 @@ export async function runExample(graph: OrgGraph, config: Config, example: Examp
   let record: RunRecord;
   if (prepared.skip) {
     record = { id: `run-${key}`, ...base, status: 'skipped', reason: prepared.skip, stdout: '', durationMs: 0 };
-  } else if (!(await sandboxAvailable())) {
+  } else if (!(await (js ? jsSandboxAvailable() : sandboxAvailable()))) {
     // Not recorded: another host with a sandbox can still run it.
     return {
       id: `run-${key}-unavailable`,
       ...base,
       status: 'skipped',
-      reason: 'this deployment cannot execute examples (no git/uv sandbox runtime); runs recorded by other Staleproof hosts are answered from the graph',
+      reason: `this deployment cannot execute examples (no git/${js ? 'npm' : 'uv'} sandbox runtime); runs recorded by other Staleproof hosts are answered from the graph`,
       stdout: '',
       durationMs: 0,
     };
@@ -117,6 +121,7 @@ export async function runExample(graph: OrgGraph, config: Config, example: Examp
         for (const t of targets) {
           install.push({ ...t, dir: opts.checkouts?.[t.repo] ?? (await checkoutRepo(config.home, t.repo)).dir });
         }
+        if (js) return await runJs(config, example, prepared, install, { id: `run-${key}`, ...base }, opts.log);
         const python = await ensureVenv(config.home, install, opts.log);
         await ensureScratchDb(config);
         await flushScratchDb(config);
@@ -157,7 +162,8 @@ export async function runExample(graph: OrgGraph, config: Config, example: Examp
     example: example.id,
     props: {
       id: record.id,
-      key,
+      // A build that failed is recorded, never answered from: the lookup by key does not find it.
+      key: record.id.includes('-build-') ? `build:${key}` : key,
       example: example.id,
       status: record.status,
       reason: record.reason ?? '',
@@ -173,6 +179,46 @@ export async function runExample(graph: OrgGraph, config: Config, example: Examp
   });
   await linkRunToPr(graph, record.id, opts.prUrl);
   return record;
+}
+
+/**
+ * One JS/TS run: build (or reuse) the Node sandbox, run, and read Node's verdict. A package
+ * that does not build is `skipped` with the reason; a ReferenceError on a name the page
+ * never defines is a fragment, also skipped.
+ */
+async function runJs(
+  config: Config,
+  example: ExampleForRun,
+  prepared: PreparedExample,
+  install: InstallTarget[],
+  base: Omit<RunRecord, 'status' | 'stdout' | 'durationMs'>,
+  log?: (m: string) => void,
+): Promise<RunRecord> {
+  let env;
+  try {
+    env = await ensureNodeEnv(config.home, install, importedPackages(prepared.code), log);
+  } catch (err) {
+    // A unique id: the next request builds again (a registry outage must not be remembered as the docs' state).
+    if (err instanceof BuildSkipped) return { ...base, id: `${base.id}-build-${Date.now()}`, status: 'skipped', reason: err.message.slice(0, 2000), stdout: '', durationMs: 0 };
+    throw err;
+  }
+  await ensureScratchDb(config);
+  await flushScratchDb(config);
+  log?.(`running ${example.id} against ${base.installed.join(', ')}`);
+  let r;
+  try {
+    r = await runJsInSandbox(env, prepared.code, prepared.lang ?? example.lang, { scratchPort: config.scratch.port, scratchHost: config.scratch.host, timeoutMs: config.runTimeoutMs });
+  } catch (err) {
+    if (err instanceof BuildSkipped) return { ...base, status: 'skipped', reason: err.message, stdout: '', durationMs: 0 };
+    throw err;
+  }
+  if (r.timedOut) return { ...base, status: 'timeout', reason: `no exit after ${config.runTimeoutMs / 1000}s`, stdout: tail(r.stdout), durationMs: r.durationMs };
+  if (r.code === 0) return { ...base, status: 'pass', stdout: tail(r.stdout), durationMs: r.durationMs };
+  const traceback = jsTraceback(r.stderr);
+  if (isJsFragmentFailure(prepared.code, r.stderr)) {
+    return { ...base, status: 'skipped', reason: `fragment: ${jsErrorLine(r.stderr)} (the page never defines it)`, traceback, stdout: tail(r.stdout), durationMs: r.durationMs };
+  }
+  return { ...base, status: 'fail', error: jsErrorLine(r.stderr), traceback: traceback ? tail(traceback) : undefined, stdout: tail(r.stdout), durationMs: r.durationMs };
 }
 
 async function linkRunToPr(graph: OrgGraph, id: string, prUrl: string | undefined): Promise<void> {

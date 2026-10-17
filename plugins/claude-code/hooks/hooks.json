@@ -1,0 +1,40 @@
+{
+  "description": "Staleproof: the docs each edit makes wrong, and a check before Claude stops. Silent when the docs are fine.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/staleproof.mjs\" hook session-start",
+            "async": true,
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/staleproof.mjs\" hook post-edit",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/staleproof.mjs\" hook stop",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

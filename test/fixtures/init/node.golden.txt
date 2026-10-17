@@ -1,0 +1,143 @@
+Staleproof init: acme/demo-node (TypeScript; docs in docs/; agent files: CLAUDE.md)
+
+  create     .staleproof.toml                  settings, with what init found
+  create     .github/workflows/staleproof.yml  the pull request check and a weekly audit
+  update     README.md                         the docs health badge, after the title
+  update     .husky/pre-commit                 staleproof lint on the staged docs
+  create     .gitignore                        .staleproof/ (the local parse cache)
+  update     .claude/settings.json             Claude Code hooks: after each edit, and before stopping
+
+Dry run: nothing was written.
+
+--- .staleproof.toml (new)
+# Staleproof settings: https://staleproof.dev/#/docs/configuration
+# Written by `staleproof init` for acme/demo-node. It found:
+#   code: TypeScript
+#   docs folders: docs/
+#   agent files: CLAUDE.md
+
+# Paths never indexed or checked (generated or vendored docs, old versions):
+# ignore = ["docs/api/**"]
+# Docs whose examples are indexed but never run or checked:
+# skip-examples = ["docs/legacy/**"]
+
+[lint]
+# include = []                      # more files to check (globs)
+# exclude = ["docs/archive/**"]     # files never checked
+# agent-files = ["prompts/*.md"]    # more AI agent instruction files
+
+[rules]
+# Change a rule's severity or turn it off (off | info | warning | error); every rule: https://staleproof.dev/#/docs/rules
+# "anchor-missing" = "error"
+
+[hooks]
+# What the coding-agent stop hook does with docs a session made wrong: block (ask the agent to fix them) | warn | off
+stop = "block"
+
+--- .github/workflows/staleproof.yml (new)
+# Staleproof: on every pull request, a comment with the docs it makes wrong and annotations on those lines;
+# every Monday, an audit of all the docs, kept in one issue. No secrets, no database to set up.
+# https://staleproof.dev/#/docs/github-action
+name: Staleproof
+on:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rajkaria/staleproof@v1
+        # with:
+        #   also-index: your-org/docs   # docs in another repository
+
+--- README.md
++++ README.md
+@@ -1,5 +1,5 @@
+ # demo-node
+ 
+-[![npm](https://img.shields.io/npm/v/demo-node.svg)](https://www.npmjs.com/package/demo-node) [![CI](https://github.com/acme/demo-node/actions/workflows/ci.yml/badge.svg)](https://github.com/acme/demo-node/actions/workflows/ci.yml)
++[![npm](https://img.shields.io/npm/v/demo-node.svg)](https://www.npmjs.com/package/demo-node) [![CI](https://github.com/acme/demo-node/actions/workflows/ci.yml/badge.svg)](https://github.com/acme/demo-node/actions/workflows/ci.yml) [![docs health](https://staleproof.dev/api/badge/acme/demo-node.svg)](https://staleproof.dev/#/audit?repo=acme%2Fdemo-node)
+ 
+ A small client for the demo service.
+
+--- .husky/pre-commit
++++ .husky/pre-commit
+@@ -1,1 +1,2 @@
+ npx lint-staged
++npx -y staleproof@0.5.0 lint --new --staged
+
+--- .gitignore (new)
+# Staleproof parse cache and hook state
+.staleproof/
+
+--- .claude/settings.json
++++ .claude/settings.json
+@@ -1,5 +1,7 @@
+ {
+   "permissions": {
+-    "allow": ["Bash(npm test)"]
++    "allow": [
++      "Bash(npm test)"
++    ]
+   },
+   "hooks": {
+@@ -7,6 +9,44 @@
+       {
+         "matcher": "Edit|Write",
+-        "hooks": [{ "type": "command", "command": "npx prettier --write \"$CLAUDE_FILE_PATHS\"" }]
++        "hooks": [
++          {
++            "type": "command",
++            "command": "npx prettier --write \"$CLAUDE_FILE_PATHS\""
++          }
++        ]
++      },
++      {
++        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "npx -y staleproof@0.5.0 hook post-edit",
++            "timeout": 15
++          }
++        ]
+       }
++    ],
++    "SessionStart": [
++      {
++        "hooks": [
++          {
++            "type": "command",
++            "command": "npx -y staleproof@0.5.0 hook session-start",
++            "async": true,
++            "timeout": 120
++          }
++        ]
++      }
++    ],
++    "Stop": [
++      {
++        "hooks": [
++          {
++            "type": "command",
++            "command": "npx -y staleproof@0.5.0 hook stop",
++            "timeout": 60
++          }
++        ]
++      }
+     ]
+   }
+
+Next:
+  1. Run it again without --dry-run to write these files.
+  2. Commit and push .github/workflows/staleproof.yml: the next pull request gets the Staleproof comment.
+  3. Claude Code reads .claude/settings.json at its next start. (Or use the plugin instead: /plugin marketplace add rajkaria/staleproof, then /plugin install staleproof@staleproof.)
+  4. See what is stale now: npx -y staleproof lint

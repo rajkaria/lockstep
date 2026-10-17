@@ -1,5 +1,6 @@
 import type { Node } from 'web-tree-sitter';
 import type { Expr, PyBinding, PyCall, PyDef, PyImport, PyModule, PyParam } from './python.js';
+import type { Arity, ArityParam, CallArgs } from './signature.js';
 import { tsParser } from './treesitter.js';
 
 /**
@@ -7,8 +8,11 @@ import { tsParser } from './treesitter.js';
  * and one graph serve both: classes, functions (declarations and `const f = () => …`),
  * methods (the constructor included), ES imports/exports and `require`, call sites with
  * structural callees (`this.graph.query`, `new Client()`), typed bindings and return
- * types. Arguments are not recorded: JavaScript accepts any argument count, so only
- * names that do not exist are checked, never arity.
+ * types. Calls record their argument count, and functions their arity as TypeScript
+ * checks it (`?`, defaults and `...rest`; a destructured parameter is one argument), so
+ * a docs example that passes too many or too few arguments is caught. Signatures the
+ * source can't settle are not judged: overloads, decorators, a body reading `arguments`.
+ * JavaScript files declare no optional parameters, so there only too many arguments count.
  */
 
 /** npm package names by module token, for messages (`js-acme-minigraph` → `@acme/minigraph`). */
@@ -122,6 +126,11 @@ export async function extractTs(source: string, opts: TsExtractOptions): Promise
 
   const typeText = (node: Node | null): string | undefined => (node ? normalizeType(node.text) : undefined);
 
+  /** What each function accepts, by qualname (read with its parameters, attached to the defs after the walk). */
+  const arities = new Map<string, Arity | undefined>();
+  const overloaded = new Set<string>();
+  const jsFile = /\.(js|jsx|mjs|cjs)$/.test(opts.path);
+
   const params = (node: Node | null, scope: string, cls?: string): PyParam[] => {
     const outParams: PyParam[] = [];
     for (const c of node?.namedChildren ?? []) {
@@ -135,6 +144,11 @@ export async function extractTs(source: string, opts: TsExtractOptions): Promise
       if (cls && c.namedChildren.some((x) => x?.type === 'accessibility_modifier' || x?.type === 'override_modifier')) {
         out.bindings.push({ scope: cls, at: scope, target: `self.${pattern.text}`, annotation, lineno: c.startPosition.row + 1 });
       }
+    }
+    // `x => x` has no parameter list: its arity stays unknown, so its calls are not judged.
+    if (node?.parent) {
+      arities.set(scope, tsArity(node, node.parent, jsFile));
+      if (hasOverloads(node.parent)) overloaded.add(scope);
     }
     return outParams;
   };
@@ -165,6 +179,7 @@ export async function extractTs(source: string, opts: TsExtractOptions): Promise
     };
     def.params = params(node.childForFieldName('parameters'), qualname, kind === 'method' && name === 'constructor' ? scope.qualname : undefined);
     out.defs.push(def);
+    Object.assign(def, jsdocOf(node));
     idents.add(name);
     const body = node.childForFieldName('body');
     if (body) {
@@ -382,7 +397,14 @@ export async function extractTs(source: string, opts: TsExtractOptions): Promise
       case 'new_expression': {
         const fn = node.type === 'call_expression' ? node.childForFieldName('function') : node.childForFieldName('constructor');
         if (fn && fn.type !== 'super' && fn.type !== 'import' && fn.text !== 'require') {
-          out.calls.push({ scope: scope.qualname, fn: toExpr(fn), text: fn.text.replace(/\s+/g, ''), lineno: node.startPosition.row + 1 } satisfies PyCall);
+          out.calls.push({
+            scope: scope.qualname,
+            fn: toExpr(fn),
+            text: fn.text.replace(/\s+/g, ''),
+            lineno: node.startPosition.row + 1,
+            args: tsCallArgs(node),
+            ...(node.parent?.type === 'expression_statement' ? { bare: true } : {}),
+          } satisfies PyCall);
         }
         visitChildren(node, scope);
         return;
@@ -411,9 +433,116 @@ export async function extractTs(source: string, opts: TsExtractOptions): Promise
   for (const d of out.defs) {
     if (d.parent === opts.module && exportedLocal.has(d.name)) d.decorators = d.decorators.filter((x) => x !== 'internal');
   }
+  // Arity, for functions whose parameter list was read; overloaded ones say so (and are never judged by one signature).
+  for (const d of out.defs) {
+    if (!arities.has(d.qualname)) continue;
+    d.arity = arities.get(d.qualname);
+    if (overloaded.has(d.qualname) && !d.decorators.includes('overload')) d.decorators.push('overload');
+  }
   out.idents = [...idents].sort();
   tree.delete();
   return out;
+}
+
+/**
+ * The arguments a call passes: their count, and whether a spread hides it. A tagged
+ * template (`sql\`...\``) or a call that does not parse cleanly records none.
+ */
+export function tsCallArgs(node: Node): CallArgs | undefined {
+  const args = node.childForFieldName('arguments');
+  const out: CallArgs = { positional: 0, keywords: [], starArgs: false, starKwargs: false };
+  // `new Client` without parentheses passes nothing.
+  if (!args) return node.type === 'new_expression' ? out : undefined;
+  if (args.type !== 'arguments' || args.hasError) return undefined;
+  for (const c of args.namedChildren) {
+    if (!c || c.type === 'comment') continue;
+    if (c.type === 'spread_element') out.starArgs = true;
+    else out.positional++;
+  }
+  return out;
+}
+
+/** `undefined` or `void` in a parameter's type: TypeScript lets the caller leave it out. */
+const OMITTABLE = /\b(undefined|void)\b/;
+
+/**
+ * A function's arity from its parameter list, or undefined when the source can't settle
+ * what it accepts: a decorator may rewrap it, and a body reading `arguments` takes any count.
+ */
+export function tsArity(paramsNode: Node, fn: Node, jsFile: boolean): Arity | undefined {
+  let prev = fn.previousNamedSibling;
+  while (prev?.type === 'comment') prev = prev.previousNamedSibling;
+  if (prev?.type === 'decorator' || fn.namedChildren.some((c) => c?.type === 'decorator')) return undefined;
+  const body = fn.childForFieldName('body');
+  if (body && /\barguments\b/.test(body.text) && readsArguments(body)) return undefined;
+  const params: ArityParam[] = [];
+  let varArgs = false;
+  for (const c of paramsNode.namedChildren) {
+    if (!c || c.type === 'comment') continue;
+    const pattern = c.type === 'required_parameter' || c.type === 'optional_parameter' ? c.childForFieldName('pattern') : c;
+    if (!pattern || pattern.type === 'this') continue;
+    if (pattern.type === 'rest_pattern') {
+      varArgs = true;
+      continue;
+    }
+    const type = c.childForFieldName('type');
+    const optional =
+      jsFile || c.type === 'optional_parameter' || !!c.childForFieldName('value') || c.type === 'assignment_pattern' || (!!type && OMITTABLE.test(type.text));
+    const name = pattern.type === 'identifier' ? pattern.text : pattern.text.replace(/\s+/g, ' ').slice(0, 40);
+    params.push({ name, kind: 'pos', required: !optional });
+  }
+  return { params, varArgs, varKw: false };
+}
+
+/** Whether a function body reads its own `arguments` (not a nested function's). */
+function readsArguments(body: Node): boolean {
+  const walk = (n: Node): boolean => {
+    if (n.type === 'identifier' && n.text === 'arguments') return true;
+    // A nested non-arrow function has its own `arguments`.
+    if (n !== body && (n.type === 'function_declaration' || n.type === 'function_expression' || n.type === 'function' || n.type === 'method_definition' || n.type === 'generator_function_declaration')) return false;
+    return n.namedChildren.some((c) => !!c && walk(c));
+  };
+  return walk(body);
+}
+
+/** Names with overload signatures, per container (a class body, a module), read once per container. */
+const overloadNames = new WeakMap<object, Map<number, Set<string>>>();
+
+/** TypeScript overloads: `function f(a: string): void;` signatures (or class `method_signature`s) next to the implementation. */
+function hasOverloads(fn: Node): boolean {
+  if (fn.type !== 'method_definition' && fn.type !== 'function_declaration') return false;
+  const name = fn.childForFieldName('name')?.text;
+  const container = fn.parent?.type === 'export_statement' ? fn.parent.parent : fn.parent;
+  if (!name || !container) return false;
+  let byTree = overloadNames.get(container.tree);
+  if (!byTree) overloadNames.set(container.tree, (byTree = new Map()));
+  let names = byTree.get(container.id);
+  if (!names) {
+    names = new Set();
+    for (const c of container.namedChildren) {
+      const decl = c?.type === 'export_statement' ? c.childForFieldName('declaration') : c;
+      if (decl?.type === 'function_signature' || decl?.type === 'method_signature') {
+        const n = decl.childForFieldName('name')?.text;
+        if (n) names.add(n);
+      }
+    }
+    byTree.set(container.id, names);
+  }
+  return names.has(name);
+}
+
+/**
+ * The JSDoc/TSDoc block comment right before a function, method or `const f = () => …`
+ * (the statement it heads, past `export` and decorators), for the docstring checks.
+ */
+function jsdocOf(fn: Node): { docText: string; docLine: number } | undefined {
+  let anchor = fn;
+  const heads = new Set(['variable_declarator', 'lexical_declaration', 'variable_declaration', 'export_statement', 'public_field_definition', 'field_definition']);
+  while (anchor.parent && heads.has(anchor.parent.type)) anchor = anchor.parent;
+  let prev = anchor.previousNamedSibling;
+  while (prev?.type === 'decorator') prev = prev.previousNamedSibling;
+  if (prev?.type !== 'comment' || !prev.text.startsWith('/**')) return undefined;
+  return { docText: prev.text, docLine: prev.startPosition.row + 1 };
 }
 
 export type { PyBinding, PyImport };

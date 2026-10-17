@@ -104,7 +104,7 @@ const TEST_FILE = /(^|\/)(tests?|testing)\/|(^|\/)test_[^/]*\.py$|_test\.py$|(^|
 /** Repository housekeeping files are not product documentation. */
 const NON_DOCS_MD = /(^|\/)(CHANGELOG|CHANGES|HISTORY|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT|AGENTS|CLAUDE|GEMINI|LICENSE|NOTICE|PULL_REQUEST_TEMPLATE|ISSUE_TEMPLATE)[^/]*\.(mdx?|rst)$/i;
 
-export type FileKind = 'python' | 'markdown' | 'python-example' | 'typescript' | 'js-example';
+export type FileKind = 'python' | 'markdown' | 'python-example' | 'typescript' | 'js-example' | 'go' | 'go-example';
 
 const TS_TEST = /(^|\/)(__tests__|__mocks__|tests?|test-utils|e2e|cypress|playwright|fixtures|coverage|out|\.next|\.docusaurus|\.vitepress)\/|\.(test|spec|stories|bench)\.[cm]?[jt]sx?$|\.d\.[cm]?ts$|\.min\.js$|(^|\/)[\w.-]+\.config\.[cm]?[jt]s$/;
 
@@ -121,6 +121,12 @@ export function classifyFile(path: string): FileKind | undefined {
     if (/(^|\/)(scripts?|benchmarks?|docs|site|website)\//.test(path)) return undefined;
     return 'typescript';
   }
+  // Go: what the go tool builds into a package (no tests, vendored code, testdata, or `_`/`.` directories).
+  if (path.endsWith('.go')) {
+    if (/_test\.go$/.test(path) || /(^|\/)(vendor|testdata)\//.test(path) || /(^|\/)[._][^/]*\//.test(path)) return undefined;
+    if (/(^|\/)(examples?|samples?)\//.test(path)) return 'go-example';
+    return 'go';
+  }
   if (!path.endsWith('.py')) return undefined;
   if (TEST_FILE.test(path)) return undefined;
   if (/(^|\/)(setup|noxfile|fabfile)\.py$/.test(path)) return undefined;
@@ -133,16 +139,29 @@ export function classifyFile(path: string): FileKind | undefined {
  * Dotted module names for Python files. A package root is a directory with an
  * `__init__.py` whose parent has none; the module path starts at that root, so
  * `graphrag_sdk/src/graphrag_sdk/core/connection.py` → `graphrag_sdk.core.connection`.
+ * Inside a project's source root (`pythonSourceRoots`), a package's module path is its
+ * path from the root, so a namespace package (`src/acme/graph/` with no
+ * `src/acme/__init__.py`, as uv workspaces split one namespace across members) imports
+ * as `acme.graph`.
  */
-export function moduleNames(pyFiles: string[]): Map<string, { module: string; isPackage: boolean }> {
+export function moduleNames(pyFiles: string[], roots: string[] = []): Map<string, { module: string; isPackage: boolean }> {
   const inits = new Set(pyFiles.filter((f) => posix.basename(f) === '__init__.py').map((f) => posix.dirname(f)));
   const out = new Map<string, { module: string; isPackage: boolean }>();
+  const byLength = [...roots].sort((a, b) => b.length - a.length);
   for (const file of pyFiles) {
     let dir = posix.dirname(file);
     if (!inits.has(dir)) {
       // A loose module (no package): name it after its path so qualnames stay unique.
       const loose = file.replace(/\.py$/, '').split('/').map(sanitize).join('.');
       out.set(file, { module: loose, isPackage: false });
+      continue;
+    }
+    const sourceRoot = byLength.find((r) => file.startsWith(`${r}/`) && !inits.has(r));
+    if (sourceRoot !== undefined) {
+      const isPackage = posix.basename(file) === '__init__.py';
+      const parts = file.slice(sourceRoot.length + 1).replace(/\.py$/, '').split('/');
+      if (isPackage) parts.pop();
+      out.set(file, { module: parts.join('.'), isPackage });
       continue;
     }
     while (inits.has(posix.dirname(dir)) && posix.dirname(dir) !== '.') dir = posix.dirname(dir);
@@ -158,4 +177,93 @@ export function moduleNames(pyFiles: string[]): Map<string, { module: string; is
 
 function sanitize(part: string): string {
   return part.replace(/[^A-Za-z0-9_]/g, '_');
+}
+
+const NOT_A_PROJECT = /(^|\/)(tests?|testing|docs|examples?|samples?|node_modules|testdata|fixtures|benchmarks?)\//;
+
+/**
+ * Source roots of a repository's Python projects (each `pyproject.toml`, `setup.py` or
+ * `setup.cfg`: a monorepo's uv workspace members, several packages side by side):
+ * `<project>/src` for the src layout, else the project directory itself (not the
+ * repository root, where the `__init__.py` rule already holds).
+ */
+export function pythonSourceRoots(paths: string[]): string[] {
+  const projects = new Set(
+    paths.filter((p) => /(^|\/)(pyproject\.toml|setup\.py|setup\.cfg)$/.test(p) && !NOT_A_PROJECT.test(p)).map((p) => (posix.dirname(p) === '.' ? '' : posix.dirname(p))),
+  );
+  const roots: string[] = [];
+  for (const d of projects) {
+    const src = d ? `${d}/src` : 'src';
+    if (paths.some((p) => p.startsWith(`${src}/`) && p.endsWith('.py'))) roots.push(src);
+    else if (d) roots.push(d);
+  }
+  return roots.sort();
+}
+
+const TRANSLATED_README = /(^|\/)(README|CONTRIBUTING|index)[._-](ar|bn|cs|de|es|fa|fr|he|hi|id|it|ja|jp|ko|kr|nl|pl|pt|pt[-_]br|ru|th|tr|uk|ua|vi|zh|zh[-_](cn|tw|hans|hant))\.(md|mdx|rst)$/i;
+const VERSIONED = /^(.+?)[-_.](v\d+(\.\d+)*|\d+\.x)$/i;
+
+/** Every directory of a file list (each file's folder and its ancestors). */
+export function directoriesOf(paths: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const p of paths) for (let d = posix.dirname(p); d !== '.' && !out.has(d); d = posix.dirname(d)) out.add(d);
+  return out;
+}
+
+/**
+ * Docs pages whose examples are not judged against today's code: a versioned copy kept
+ * next to the current docs (`docs-v3/` beside `docs/`, Docusaurus `versioned_docs/`)
+ * documents an older API on purpose, and a translated README (`README_KO.md`,
+ * `README.zh-CN.md`) is maintained apart from its source.
+ */
+export function olderOrTranslatedDocs(path: string, dirs: Set<string>): boolean {
+  if (TRANSLATED_README.test(path)) return true;
+  const parts = path.split('/');
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parts[i] === 'versioned_docs') return true;
+    const m = VERSIONED.exec(parts[i]!);
+    if (m && dirs.has([...parts.slice(0, i), m[1]!].join('/'))) return true;
+  }
+  return false;
+}
+
+/** A package of a repository: an npm `package.json`, a Python project, a Go module. */
+export interface WorkspacePackage {
+  kind: 'npm' | 'python' | 'go';
+  /** Directory inside the repository ('' for the root). */
+  dir: string;
+  /** The manifest the package is declared in (`packages/core/package.json`). */
+  manifest: string;
+}
+
+/**
+ * Every package a repository declares, monorepo or not: `package.json` files (npm, yarn
+ * and pnpm workspaces), Python projects (uv workspace members, several `pyproject.toml`
+ * packages) and Go modules (`go.mod`, `go.work` members). Generated, vendored and test
+ * folders are left out.
+ */
+export function workspacePackages(paths: string[]): WorkspacePackage[] {
+  const out: WorkspacePackage[] = [];
+  for (const p of paths) {
+    if (/(^|\/)(node_modules|vendor|testdata|fixtures)\//.test(p)) continue;
+    const base = posix.basename(p);
+    const kind = base === 'package.json' ? 'npm' : base === 'pyproject.toml' || base === 'setup.py' ? 'python' : base === 'go.mod' ? 'go' : undefined;
+    if (kind) out.push({ kind, dir: posix.dirname(p) === '.' ? '' : posix.dirname(p), manifest: p });
+  }
+  return out.sort((a, b) => a.manifest.localeCompare(b.manifest));
+}
+
+/**
+ * The package a file belongs to: the one whose directory is its closest ancestor (a
+ * monorepo's `packages/core/README.md` → `packages/core/package.json`). Commands a page
+ * names resolve against this package's scripts.
+ */
+export function nearestPackage(path: string, packages: WorkspacePackage[], kind?: WorkspacePackage['kind']): WorkspacePackage | undefined {
+  let best: WorkspacePackage | undefined;
+  for (const p of packages) {
+    if (kind && p.kind !== kind) continue;
+    if (p.dir && path !== p.dir && !path.startsWith(`${p.dir}/`)) continue;
+    if (!best || p.dir.length > best.dir.length) best = p;
+  }
+  return best;
 }

@@ -24,6 +24,8 @@ Quick facts for assistants:
 
 - [CLI](docs/cli.md): Every staleproof command and option, with examples and what each prints.
 - [GitHub Action](docs/github-action.md): Zero-config Action: a comment on every pull request with the docs it can make false, the examples predicted to break and the examples run before and after; a scheduled docs audit with one issue; inputs, outputs, permissions, the comment format.
+- [Claude Code plugin](docs/claude-code.md): The Staleproof plugin for Claude Code: after each edit Claude hears which docs and agent files it made wrong, and before it stops it is asked to fix them; the skill and slash commands, configuration, the same hooks without the plugin and for Cursor, how it works locally.
+- [Pre-commit hooks](docs/pre-commit.md): Stop a commit that makes the docs wrong: the staleproof hook for pre-commit, lefthook, husky or a plain git hook, linting the staged changes against HEAD, and an optional pre-push hook for examples predicted to break.
 - [MCP server](docs/mcp.md): Give Claude Code, Claude Desktop, claude.ai, Cursor, VS Code or any MCP client the Staleproof tools: hosted over HTTP, or local over stdio.
 - [HTTP API](docs/http-api.md): Every endpoint of staleproof serve: health, stats, streaming checks over SSE, indexing on demand, docs audits and badges, docs for a symbol, MCP over HTTP, traces, patches, decisions, verdict review.
 - [Node.js library](docs/library.md): Use Staleproof from TypeScript: index, check with or without a model, build patches, embed the API or the MCP server.

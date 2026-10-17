@@ -39,6 +39,7 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 | `GET /api/repos` | Which graph holds a repository, and whether it is indexed | no |
 | `GET /api/workspaces` | Hosted mode: every workspace and its repositories | no |
 | `GET /api/audit` | The docs audit of an indexed repository, as JSON | no |
+| `GET /api/lint` | Graph-free lint of any public repository (its tarball): the stale paths, links, commands and env vars its docs and AI agent files name | yes, `lint` bucket, cache misses only |
 | `POST /api/audit` | Audit a repository and stream the progress (SSE); hosted, index it first | yes, `audit` bucket |
 | `GET /api/badge/:owner/:name.svg` | The README badge: the repository's docs health score | no |
 | `GET /api/docs-for` | Which docs depend on a symbol, with the evidence path for each | no |
@@ -62,7 +63,7 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 
 ## Rate limits
 
-`POST` routes are limited to 30 requests per client per hour, and `POST /api/mcp` to 300 (a client sends a few requests per question). GET routes are not limited.
+`POST` routes are limited to 30 requests per client per hour, and `POST /api/mcp` to 300 (a client sends a few requests per question). GET routes are not limited, except `GET /api/lint` when it has to download a repository (60 per hour).
 
 | Bucket | Routes | Limit |
 |---|---|---|
@@ -71,6 +72,7 @@ Without hosted mode, the server answers from one graph: `STALEPROOF_ORG`, else `
 | `audit:<client>` | `POST /api/audit` | 30 per sliding hour |
 | `mcp:<client>` | `POST /api/mcp` | 300 per sliding hour; over it, a JSON-RPC error `rate limited: try again later` with status 429 |
 | `write:<client>` | `POST /api/decisions` and `POST /api/verdicts/:id/review`, together | 30 per sliding hour |
+| `lint:<client>` | `GET /api/lint` answers that are not cached (and every `fresh=1`) | 60 per sliding hour (twice the others) |
 
 - **The client key** is the `X-Real-IP` header if present (Vercel sets it), else `Fly-Client-IP`, else the last entry of `X-Forwarded-For` (the one the nearest proxy appended), else the constant `local`. Behind no proxy, every caller shares the `local` bucket.
 - **Counting**: a request counts before it is validated, so a request rejected with 400 still uses one slot.
@@ -200,7 +202,7 @@ Run a check of one pull request and stream its trace as Server-Sent Events.
 What each mode does (definitions in [Agent mode and graph mode](concepts.md#agent-mode-and-graph-mode)):
 
 - **Agent mode**: the model chooses every tool call and records a verdict or an edit for each impacted section. The server gives it at most 40 model turns and, if `STALEPROOF_CHECK_BUDGET_MS` is set, a wall-clock budget (240 s by default on Vercel, none elsewhere). Neither can be changed per request.
-- **Graph mode**: no model. The tools run in a fixed order: `impact` (3 hops), `clearance`, `rank_sections` on the first impact page, then `run_example` before and after the PR for at most 3 exactly-linked examples on that page. In a hosted workspace it runs no examples (the summary says `Example runs not requested.`). It writes no verdicts.
+- **Graph mode**: no model. The tools run in a fixed order: `new_findings` (the docs references the pull request makes wrong: its docs and AI agent files linted at both commits; only when the graph recorded real commits for it), `impact` (3 hops), `clearance`, `rank_sections` on the first impact page, then `run_example` before and after the PR for at most 3 exactly-linked examples on that page. In hosted mode `new_findings` reads the two commits' public tarballs (never with the server's token) and gives up after 90 seconds; its result also rides on the `impact` step's data as `newFindings`, which the web page shows. In a hosted workspace it runs no examples (the summary says `Example runs not requested.`). It writes no verdicts.
 
 The first check of a pull request ingests it (GitHub metadata and the symbol-level diff); later checks reuse what the graph stored, except that an open pull request whose head moved since (new pushes, or merged since) is read again first. A merged pull request is never re-read. In hosted mode, a repository that no graph holds (or whose workspace is more than 7 days old, or that lacks a `with` repository) is indexed first, inside the same stream: `index_started`, `index_progress` and `index_finished` events come before `check_started`. Without hosted mode nothing is indexed, and a repository missing from the graph ends the stream with an `error` event. Indexing comes out of the server's time budget (`STALEPROOF_CHECK_BUDGET_MS`, when set): the agent gets what remains, but at least 45 seconds.
 
@@ -250,10 +252,11 @@ The `data` of every message is one of these objects, discriminated by `type`: th
 | `check_finished` | last event of every check | `checkId`, `status`, `summary`, `steps`, `toolCalls`, `toolOrder` (tool names in call order), `verdicts`, `missing`, `usage` (`{input, output, cacheRead}` tokens), `at` |
 | `error` | when the check could not start or crashed outside the tool loop | `message` |
 | `index_started` | hosted mode, when a workspace starts indexing | `repos` (every repository of the workspace, indexed together), `graph`, `reason` (`new`, `stale`, `added` or `refresh`), `at` |
-| `index_progress` | hosted mode, during indexing | `repo?`, `phase` (`download`, `evict`, or an index phase: `checkout`, `parse`, `write`, `resolve`, `docs`, `done`), `message`, `at` |
+| `index_progress` | hosted mode, during indexing | `repo?`, `phase` (`download`, `evict`, or an index phase: `checkout`, `parse`, `write`, `resolve`, `docs`, `lint`, `done`), `message`, `at` |
 | `index_finished` | hosted mode, when the workspace is written | `graph`, `repos[]` (`{repo, sha, files, symbols, sections, examples}`), `mb?` (the workspace's graph size), `ms`, `at` |
 
 - `step` is the model turn in agent mode and the tool call number in graph mode.
+- The `new_findings` result is `{repo, base, head, findings, total, fixed, summary, files, ms}`: `findings` (at most 50 in the trace; `total` counts all) have the [lint JSON shape](lint.md#json-output), AI agent instruction files first; `fixed` counts the references the pull request repaired.
 - `data` on a `tool_result` is the tool's full result (the shapes are in [Tools reference](tools.md)); only the stored trace trims it.
 - In graph mode `usage` is all zeros, `verdicts` is `0` and `missing` is empty.
 - In agent mode, `missing` lists the impacted sections with no verdict or edit from this check. After any `impact` call the loop collects the section ids of every impact page, including pages the model has not requested, so `done` means every impacted section was closed.
@@ -331,13 +334,43 @@ The [docs audit](audit.md) of one indexed repository: health score, the example 
 curl -s 'http://127.0.0.1:8080/api/audit?repo=FalkorDB/falkordb-py'
 ```
 
-`200 {summary, org, repos, outdatedIndex, score, grade, deductions, examples, mismatches, coverage, undocumented, runs, runCounts, generatedAt}`: the summary sentence, then the audit's data ([the JSON shape](audit.md#the-cli)). Audits are cached per graph and repository for 10 minutes, shared with the badge. It runs no examples.
+`200 {summary, org, repos, outdatedIndex, score, grade, deductions, examples, mismatches, coverage, undocumented, runs, runCounts, findings, findingCounts, generatedAt}`: the summary sentence, then the audit's data ([the JSON shape](audit.md#the-cli)). `findings` are the docs references stored at index time (index version 4), AI agent instruction files first; `repos[].findingsChecked` says whether each repository's were checked. Audits are cached per graph and repository for 10 minutes, shared with the badge. It runs no examples.
 
 | Status | Body | When |
 |---|---|---|
 | 400 | `{"error": "not a GitHub repository: ..."}` | `repo` missing or malformed |
 | 404 | `{"error": "<owner/repo> is not indexed yet: POST /api/audit {\"repo\": \"owner/name\"} indexes and audits it", "indexed": false}` | hosted mode, no graph holds the repository |
 | 404 | `{"error": "<owner/repo> is not indexed yet: staleproof index <owner/repo>", "indexed": false}` | without hosted mode, the graph does not hold it |
+
+## GET /api/lint
+
+[`staleproof lint`](lint.md) of any public GitHub repository, with nothing indexed: every path, link, anchor, command, CLI flag, env var and docstring parameter its docs, READMEs and AI agent files name that the repository does not have. The repository is downloaded as a tarball (codeload; the hosted service never sends its own token), every path is listed, the files lint reads are extracted (agent files in hidden folders included), and the result is cached per repository, ref and options for 10 minutes.
+
+| Query parameter | Required | Meaning |
+|---|---|---|
+| `repo` | yes | `owner/name` or a GitHub URL |
+| `ref` | no | A branch, tag or commit (default: the default branch) |
+| `format` | no | `json` (default), `markdown`, `text`, `sarif` or `github`, as `lint --format` |
+| `rule` | no | Comma-separated rule ids: only these rules |
+| `examples` | no | `0` skips the static checks of docs code examples |
+| `fresh` | no | `1` lints again instead of answering from the cache |
+
+```bash
+curl -s 'https://staleproof.dev/api/lint?repo=acme/app'
+curl -s 'https://staleproof.dev/api/lint?repo=acme/app&format=markdown&rule=path-missing,link-broken'
+```
+
+`200` with the [lint JSON](lint.md#json-output): `{version: 1, repo, sha, findings, summary, warnings, cached, tool}`, findings AI agent instruction files first; `cached` says whether the answer came from the cache. Other formats are sent as `text/markdown`, `text/plain` or `application/sarif+json`. Responses carry `Cache-Control: public, max-age=60, s-maxage=600`.
+
+| Status | Body | When |
+|---|---|---|
+| 400 | `{"error": "not a GitHub repository: ..."}` | `repo` missing or malformed |
+| 400 | `{"error": "ref must be a branch, tag or commit"}`, `{"error": "format must be one of json, ..."}`, `{"error": "unknown rule <id> ..."}` | a bad `ref`, `format` or `rule` |
+| 400 | `{"error": "<owner/repo> is too large to read from an archive here ..."}` | over the archive limits (150 MB compressed; in hosted mode the workspace limits of [Deploy](DEPLOY.md#hosted-mode)) |
+| 404 | `{"error": "GitHub: <owner/repo>@<ref> not found (is it public? ...)"}` | no such public repository or ref |
+| 429 | `{"error": "rate limited: try again later"}` | over the `lint` limit (cache misses only) |
+
+The same lint is the MCP tool [`lint_docs`](mcp.md#lint_docs-and-the-references-a-change-makes-wrong) with `repo`.
 
 ## POST /api/audit
 

@@ -1,0 +1,8 @@
+alias c := check
+
+# Run every check.
+check:
+    npm test
+
+fmt *args:
+    npx prettier --write {{args}}

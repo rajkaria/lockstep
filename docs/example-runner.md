@@ -1,6 +1,6 @@
 # Example runner
 
-This page explains how a docs code example is executed before and after a pull request: which repositories are installed and at which commits, how fragments are stitched together, how async examples run, which examples are skipped and why, how runs are cached, the virtualenvs, the scratch FalkorDB and the sandbox, and how to read the result. It is for anyone who wants to trust (or question) a "passes before, fails after".
+This page explains how a docs code example is executed before and after a pull request: which repositories are installed and at which commits, how fragments are stitched together, how async examples run, which examples are skipped and why, how runs are cached, the virtualenvs, the scratch FalkorDB and the sandbox, how JavaScript and TypeScript examples run, and how to read the result. It is for anyone who wants to trust (or question) a "passes before, fails after".
 
 ## Run an example before and after a pull request
 
@@ -41,7 +41,7 @@ The repositories installed for a run are:
 
 - the repositories that define the symbols the example `USES`, plus the pull request's repository;
 - their in-organisation dependencies, following `DEPENDS_ON` up to 3 steps;
-- keeping only repositories with Python packages (a docs-only repository is never installed).
+- keeping only repositories with code packages (a docs-only repository is never installed).
 
 Each is installed at its indexed commit, except the pull request's repository, which is installed at the pull request's before or after commit. For #276, the GraphRAG-SDK examples on the docs site install GraphRAG-SDK at its indexed commit and falkordb-py at the pull request's commits. An example with nothing to install is recorded as skipped: `uses no symbol from an indexed repository`.
 
@@ -86,7 +86,7 @@ An example the docs mark not to run is never prepared: one with a `skip` or `exp
 
 Otherwise an example is recorded as skipped, with the reason, when it cannot be run honestly. The rules are checked in this order on the prepared code:
 
-1. **Not Python**: the block's language is not Python: `not Python (bash)`, or `not Python (no language tag)`.
+1. **Not Python**: the block's language is not Python: `not Python (bash)`, or `not Python (no language tag)`. JavaScript and TypeScript blocks run in Node instead, with their own rules ([JavaScript and TypeScript](#javascript-and-typescript)).
 2. **Empty**: `empty example`.
 3. **Needs an LLM provider**: it mentions a provider key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI`, `GROQ_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`), sets `model = "…"` to an OpenAI, Anthropic, GPT, Claude, Gemini, Azure, Groq, Ollama, Bedrock, Vertex, Mistral or Cohere model, or constructs `LiteLLM(`, `LiteLLMEmbedder(`, `OpenAI(`, `AsyncOpenAI(`, `Anthropic(`, `ChatOpenAI(` or `OpenAIEmbeddings(`. Reason: `needs an LLM provider (<what matched>); Staleproof does not hold provider keys`.
 4. **Reads a local file**: a quoted file name ending in `.pdf`, `.csv`, `.txt`, `.json`, `.jsonl`, `.doc`, `.docx`, `.htm`, `.html`, `.xls`, `.xlsx`, `.parquet` or `.md`, unless the code also writes one (`.write`, `.dump`, `.to_csv`, `.to_json`). Reason: `reads a local file the docs do not provide (employees.csv)`.
@@ -128,7 +128,9 @@ Everything lives under `STALEPROOF_HOME` (default `~/.staleproof`, `/tmp/stalepr
   repos/<owner>/<name>/               blob-less clones, shared with indexing and pull request ingestion
   cache/github/<owner>/<repo>/pulls/  pull request metadata from the GitHub API
   venvs/<key>/                        one virtualenv per (Python 3.12, sorted repo@sha list)
+  node-envs/<key>/                    one Node project per (Node major, sorted repo@sha list, packages imported)
   src/<key>/<owner>__<name>/          sources extracted while a venv builds; removed afterwards
+  src/node-<key>/<owner>__<name>/     sources a Node project's packages are built from; removed afterwards
   falkordb/                           falkordblite binaries and data for `db start` and the managed scratch server
 ```
 
@@ -170,6 +172,40 @@ Two processes touch code from the pull request, and neither gets the server's en
 - **DNS**: local names resolve to `127.0.0.1`; any other lookup fails with `Staleproof sandbox: DNS is disabled (<host>)`.
 - **Timeout**: `STALEPROOF_RUN_TIMEOUT_MS` (default 30000). On timeout the whole process group is killed and the run is recorded as `timeout` (`no exit after 30s`).
 - **Output**: up to 64 KiB per stream is captured; the stored stdout and traceback keep the last 4000 characters.
+
+## JavaScript and TypeScript
+
+Blocks tagged `js`, `javascript`, `ts`, `typescript`, `mjs`, `cjs` or `node` run in Node, the same way: before and after a pull request, with fragments stitched, in a sandbox with the scratch FalkorDB on `localhost:6379` and nothing else ([src/runner/js.ts](../src/runner/js.ts)).
+
+### Preparing a JS/TS program
+
+- **Skip rules**, in this order: not JavaScript or TypeScript (`not JavaScript or TypeScript (bash)`); empty; JSX (`tsx`/`jsx` blocks, or code that returns markup: `renders JSX (needs a UI framework to run)`); an LLM provider (a provider key variable such as `OPENAI_API_KEY`, an import from `openai`, `@anthropic-ai/sdk`, `@ai-sdk/*`, `@google/generative-ai`, `@google/genai`, `cohere-ai`, `groq-sdk`, `@mistralai/*` or LangChain, or `new OpenAI(`); browser code (`document.`, `window.`, `localStorage.`, `navigator.`); a local file it reads (`readFileSync('data.csv')`) unless it also writes one; placeholders (`'<your-api-key>'`, `'your-api-key'`, `'sk-...'`); user input (`readline`, `process.stdin`, `prompt(`); an external service (`fetch`, `axios`, `got`, `ky` or `request` with an `http(s)://` URL that is not `localhost`); a server or timer that never exits (`.listen(`, `serve({`, `setInterval(`).
+- **Stitching**: a block with no `import`, `require(` or `import(` is a fragment, and every earlier runnable JS/TS block on the page is prepended, marked `// --- stitched from <id>`. An `import` line repeated across blocks is kept once (an ES module rejects a second binding of the name). One TypeScript block among them makes the program TypeScript.
+- **Module format**: an ES module (`example.mjs`, or `example.mts` for TypeScript) unless the code is CommonJS (`require(` and no `import`/`export`): then `example.cjs`/`example.cts`, wrapped in an `async` function when it uses top-level `await`, as a reader pasting it into Node would.
+- **Fragments**: a run that fails with `ReferenceError: x is not defined` where nothing on the page declares `x` (`const`, `let`, `var`, `function`, `class`, an import) is skipped as a fragment, not a failure.
+
+### Building the packages from source
+
+The packages the example imports (bare specifiers in `import … from`, `import()` and `require()`; `node:` built-ins left out) are found among the published `package.json` files of the installed repositories at their commits, with the organisation packages they depend on (`dependencies`, `peerDependencies`). Each is built from its repository at that commit:
+
+1. `git archive <sha> | tar -x`, as for Python.
+2. Dependencies installed with the repository's package manager, from its lockfile: `pnpm install --frozen-lockfile` (`pnpm-lock.yaml`), `yarn install --frozen-lockfile` (`yarn.lock`), `npm ci` (`package-lock.json` or `npm-shrinkwrap.json`), else `npm install`. A package inside a workspace (a root `package.json` with `workspaces`, or `pnpm-workspace.yaml`) installs at the workspace root.
+3. The package's own `build` script, if it has one (`pnpm --filter <name>... run build` in pnpm workspaces, which builds its workspace dependencies first).
+4. `npm pack` (`pnpm pack` in pnpm repositories, which rewrites `workspace:` ranges).
+5. The tarballs installed into a scratch project, `<STALEPROOF_HOME>/node-envs/<key>/` (`package.json` with `"type": "module"`), with `npm install`, together with any other package the example imports that the built ones do not already depend on (from the registry, as a reader would install it); tsx is added when Staleproof's own is not installed.
+
+The project is cached by (Node major version, sorted `repo@sha` list, packages imported) and reused; a marker file, `.staleproof-ok`, records a finished build. Each step gets the same allow-listed environment as a Python install ([Virtualenvs](#virtualenvs)) plus npm's own `npm_config_*` settings, may take up to 600 s, and has network access.
+
+**A package that does not build is a skipped run, never a failure**: the docs are not what broke. Like an `error` run, it is recorded but never answered from, so the next request builds again (a registry outage is not remembered as the state of the docs). The reason names the step and ends with its output, for example `the build script of @acme/broken failed:` followed by the last lines it printed, or `pnpm install for <name>: pnpm is not available here`. An example that imports no package from an indexed repository is skipped with `the example imports no package built from an indexed repository (<imports>)`.
+
+### Running
+
+The program runs as `node --require ./_shim.cjs [--import <tsx loader>] example.<ext>` in a fresh working directory inside the scratch project (so the installed packages resolve), deleted afterwards, in its own process group, with the same timeout as Python.
+
+- **Environment**: nothing inherited. Exactly `PATH` (Node's directory, `/usr/bin`, `/bin`), `HOME` and `TMPDIR` set to the working directory, `LANG=C.UTF-8`, `NODE_NO_WARNINGS=1`, and `STALEPROOF_SCRATCH_HOST` / `STALEPROOF_SCRATCH_PORT`.
+- **Network shim** (`NODE_SHIM`, preloaded with `--require`): `net.Socket.prototype.connect` sends a connection to a local name on port 6379 to the scratch server, allows the scratch server itself, and refuses anything else with `Staleproof sandbox: outbound network is disabled (tried <host>:<port>); only FalkorDB on localhost:6379 is available`. TLS, `http` and the global `fetch` all connect through it. `dns.lookup` resolves local names to `127.0.0.1` and refuses others (`Staleproof sandbox: DNS is disabled (<host>)`), as do the `dns.resolve*` functions.
+- **TypeScript**: through tsx's ESM loader, which strips the types without checking them, so a type error in an example does not fail a run (the [static checks](indexing.md#static-checks-of-examples) catch argument counts).
+- **Result**: exit code 0 is `pass`. Otherwise `error` is the first `<Name>Error: …` line Node printed for the uncaught error (`TypeError: g.roQuery is not a function`, `SyntaxError: The requested module '@acme/hello' does not provide an export named 'greet'`), and `traceback` is the rest of its output, with the working directory written as `./`.
 
 ## Statuses and outcomes
 
@@ -226,12 +262,13 @@ Runs are serialised by a process-wide queue: the scratch server is shared and fl
 
 ## Limits
 
-- **The sandbox is a guard, not a security boundary.** It refuses connections and DNS at the Python socket level, runs with no inherited secrets and a temporary `HOME`, and kills on timeout. Native code that opens its own sockets bypasses the shim, and the program can read the file system. Run it inside a container for untrusted code.
+- **The sandbox is a guard, not a security boundary.** It refuses connections and DNS at the Python socket level (in Node, at `net.Socket` and `dns`), runs with no inherited secrets and a temporary `HOME`, and kills on timeout. Native code that opens its own sockets bypasses the shim, a child process (`child_process`, `subprocess`) is not covered, and the program can read the file system. Run it inside a container for untrusted code.
 - **Runs use today's third-party dependencies.** The organisation's repositories are installed at exact commits, but their dependencies resolve at install time, so an old run may not reproduce today. A recorded run is reused until you pass `--fresh`.
 - **Installs have network access** (they download dependencies); only the example itself runs without it. Their environment is the allow-list above, without the server's credentials, but with any credentials you put in `UV_*` or `PIP_*` variables (an index URL) or a proxy URL.
 - **Python is pinned to 3.12 only with uv.** The `python3 -m venv` fallback uses the host's Python.
 - **Re-indexing moves commits.** The run key includes the indexed commit of every installed repository, so after a re-index the earlier runs no longer match and examples run again.
-- **Stitching prepends every earlier runnable Python block on the page**, related or not; a failing earlier block fails the fragment.
+- **Stitching prepends every earlier runnable block of the same language family on the page**, related or not; a failing earlier block fails the fragment.
+- **JS/TS packages are built the way their repositories build them.** A monorepo whose `build` needs a task runner's ordering (turbo, nx) beyond pnpm's `--filter <name>...` may not build: the run is skipped with the reason. Go examples are not run.
 - **Serverless hosts do not execute examples.** On Vercel, run results come only from runs recorded by a host with a sandbox (a local machine, a container or the GitHub Action), and a hosted workspace has none.
 
 ## Related

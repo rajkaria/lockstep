@@ -1,6 +1,6 @@
 {
   "name": "staleproof",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "An agent that keeps your docs true to your code: it walks a FalkorDB graph of code, docs and decisions across repositories, runs the examples, and proposes the docs fix with the path behind each paragraph.",
   "license": "MIT",
   "author": "Raj Karia",

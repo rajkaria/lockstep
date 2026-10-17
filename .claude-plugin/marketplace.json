@@ -1,0 +1,17 @@
+{
+  "name": "staleproof",
+  "owner": {
+    "name": "Raj Karia",
+    "url": "https://github.com/rajkaria"
+  },
+  "description": "Staleproof keeps docs and AI agent files true to the code. After each edit Claude hears which docs it made wrong; before it stops, it is asked to fix them.",
+  "plugins": [
+    {
+      "name": "staleproof",
+      "source": "./plugins/claude-code",
+      "description": "Docs and agent files (README, docs, AGENTS.md, CLAUDE.md) checked against Claude's edits: hooks after each edit and before stopping, a skill, /staleproof:check, fix, audit and docs-for. Local; nothing leaves the machine.",
+      "category": "documentation",
+      "tags": ["docs", "documentation", "drift", "lint", "agents-md", "claude-md"]
+    }
+  ]
+}

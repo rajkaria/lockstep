@@ -1,0 +1,9 @@
+version: '3'
+
+includes:
+  site: ./docs/site
+
+tasks:
+  serve:
+    cmds:
+      - npm run dev -w @claims/web

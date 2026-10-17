@@ -39,6 +39,9 @@ Staleproof was first published as Lockstep (npm `lockstep-docs`). Every `STALEPR
 | `STALEPROOF_RUN_TIMEOUT_MS` | `30000` | Time limit of one example run, in milliseconds | same |
 | `STALEPROOF_CHECK_BUDGET_MS` | `240000` when `VERCEL` is set, else none | Wall-clock budget of one agent check in the server | `serve`, Vercel function (not `check`) |
 | `STALEPROOF_PRELOADED` | falkordb-py #262, #267, #276 | Comma-separated pull request URLs listed on the home page | `serve` (`--preload` overrides), Vercel function, `npm run snapshot`, `scripts/seed.sh` |
+| `STALEPROOF_HOOK` | — | `off`, `warn` or `block`: what the coding-agent hooks do, over `[hooks] stop` in the repository ([Hooks](#hooks)); `off` silences the edit hook too | `hook` |
+| `STALEPROOF_CACHE` | on | `off`: parse every file on every run instead of reading the local parse cache (`.staleproof/cache/`) | `lint`, `hook` |
+| `STALEPROOF_CACHE_DIR` | — | Keep the parse cache in this folder instead of the checkout's `.staleproof/cache/`; indexing uses the cache only when it is set (the GitHub Action sets it, and keeps the folder between runs) | `lint`, `hook`, `index`, `check`, `audit` |
 | `PORT` | `8080` | Port `serve` listens on | `serve` (`--port` overrides) |
 | `HOST` | `127.0.0.1` | Interface `serve` binds | `serve` (`--host` overrides) |
 | `VERCEL` | — | Set by Vercel; changes the defaults of `STALEPROOF_HOME` and `STALEPROOF_CHECK_BUDGET_MS` | all |
@@ -124,7 +127,7 @@ The runner installs the repositories at the commits before and after a pull requ
 |---|---|
 | `STALEPROOF_SCRATCH_URL` | Use this server as the scratch database. Only the host and port are read (`[scheme://]host[:port]`, default port 6379); the scheme is ignored and TLS is not used. A URL with credentials is refused: `STALEPROOF_SCRATCH_URL must not carry credentials: docs examples connect to the scratch server without a password`. Staleproof does not start or stop this server |
 | `STALEPROOF_SCRATCH_PORT` | Without `STALEPROOF_SCRATCH_URL`, Staleproof starts its own scratch server on `127.0.0.1:<port>` (default 6390) with `scripts/falkordb-local.sh`, the same falkordblite binaries as `staleproof db start` |
-| `STALEPROOF_RUN_TIMEOUT_MS` | Each run (before and after are separate runs) is killed after this many milliseconds and recorded as `timeout` with the reason `no exit after <s>s`. Default 30000. Creating a virtualenv (300 s) and installing into it (600 s) have fixed limits |
+| `STALEPROOF_RUN_TIMEOUT_MS` | Each run (before and after are separate runs) is killed after this many milliseconds and recorded as `timeout` with the reason `no exit after <s>s`. Default 30000. Creating a virtualenv (300 s) and installing into it (600 s), and each step that builds a JavaScript/TypeScript package (600 s), have fixed limits |
 
 The scratch server is flushed before every run (`FLUSHALL`, then `GRAPH.UDF FLUSH`). Staleproof refuses to flush the server that holds the org graph: when the scratch host and port equal those of `FALKORDB_URL` (`localhost` and `127.0.0.1` count as the same host), each run ends with status `error` and the reason `refusing to flush <host>:<port>: it is the server holding the org graph (FALKORDB_URL). Point STALEPROOF_SCRATCH_URL / STALEPROOF_SCRATCH_PORT at a separate server.`
 
@@ -142,6 +145,8 @@ The install step (`uv venv` and `uv pip install`, or `python3 -m venv` and `pip 
 | Windows | `SYSTEMROOT`, `COMSPEC`, `PATHEXT` |
 
 Everything else, including `FALKORDB_URL`, `ANTHROPIC_API_KEY` and `GITHUB_TOKEN`, is withheld. uv and pip settings such as `UV_INDEX_URL` or `PIP_INDEX_URL` (a package mirror) still apply, and the Docker image's `UV_PYTHON_INSTALL_DIR=/data/python` and `UV_CACHE_DIR=/data/uv-cache` reach uv the same way. Any other variable a repository's build reads is not set.
+
+JavaScript and TypeScript examples build their packages with npm, pnpm or yarn under the same allow-list ([Example runner](example-runner.md#building-the-packages-from-source)), plus every `npm_config_*` variable (either case, so `npm_config_registry` points at a mirror, as `UV_*` and `PIP_*` do for Python), with `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` set to `false`. `HOME` is passed, so `~/.npmrc` applies too.
 
 ### Server
 
@@ -196,13 +201,15 @@ The other limits are flags only: `check --max-steps` (40), `check --no-agent --m
                                               deletes them once the repository is indexed
   cache/github/<owner>/<repo>/pulls/<n>.json  pull request metadata (read back only for merged PRs)
   venvs/<key>/                                one virtualenv per set of repo@sha, marked done by .staleproof-ok
+  node-envs/<key>/                            one Node project per set of repo@sha and imported packages (JS/TS runs)
   src/<key>/<owner>__<name>/                  sources extracted while a virtualenv builds; removed after a successful build
+  src/node-<key>/<owner>__<name>/             sources JS/TS packages are built and packed from; removed afterwards
   falkordb/venv/                              falkordblite, installed on first `db start` or scratch start
   falkordb/data-<port>/                       data (RDB snapshots), redis.log and redis.pid of each local server
 ```
 
 - **`falkordb/data-6379`** holds the org graph when you run `staleproof db start`, including every verdict, decision and run. Deleting it deletes the graph. `data-6390` is the scratch server, which is flushed before every run anyway.
-- **`venvs/` and `src/`** can be deleted at any time; virtualenvs are rebuilt on the next run that needs them.
+- **`venvs/`, `node-envs/` and `src/`** can be deleted at any time; virtualenvs and Node projects are rebuilt on the next run that needs them.
 - **`repos/`** can be deleted; clones come back on the next index or check. Until then, `clearance` reports 0 raw text matches and the docs patch reads files from GitHub instead.
 - **`tarballs/`** can be deleted; it is only read while indexing.
 - **`cache/`** can be deleted; metadata is fetched again.
@@ -228,7 +235,7 @@ skip-examples = ["docs/v1/**"]
 | Key | Type | Effect |
 |---|---|---|
 | `ignore` | list of globs | Matching files are not indexed at all: no symbols, sections or examples. |
-| `skip-examples` | list of globs | Examples on matching pages, and matching example scripts, are indexed and linked to the code as usual, so a pull request check still lists them, but they are never run, statically checked, predicted to break or counted as mismatched by the audit (as if each had a `skip` directive). |
+| `skip-examples` | list of globs | Examples on matching pages, and matching example scripts, are indexed and linked to the code as usual, so a pull request check still lists them, but they are never run, statically checked, predicted to break or counted as mismatched by the audit (as if each had a `skip` directive). Versioned copies of older docs kept next to the current ones (`docs-v3/` beside `docs/`, `versioned_docs/`) and translated READMEs (`README_KO.md`) are treated this way without being listed ([Indexing](indexing.md#static-checks-of-examples)). |
 
 `staleproof lint` reads two more tables (in `pyproject.toml`, `[tool.staleproof.lint]` and `[tool.staleproof.rules]`):
 
@@ -254,6 +261,21 @@ agent-files = ["prompts/*.md"]     # extra AI agent instruction files
 - **When**: read at index time. After editing it, index the repository again.
 - **Errors** stop the index: a key that is not a list of strings fails with `<file>: ignore must be a list of glob strings` (or `skip-examples`), and a file that is not valid TOML with the parser's message.
 - **On hosts without git** (tarball downloads: the hosted service, Vercel, `STALEPROOF_INGEST=github`), hidden paths are not extracted except a root `.staleproof.toml`, so both files are read there too.
+
+### Hooks
+
+The coding-agent hooks (the [Claude Code plugin](claude-code.md), and the hooks `staleproof init --claude` or `--cursor` writes) read one more table, `[hooks]` (in `pyproject.toml`, `[tool.staleproof.hooks]`):
+
+```toml
+[hooks]
+stop = "block"   # block | warn | off
+```
+
+| Key | Values | Effect |
+|---|---|---|
+| `hooks.stop` | `block` (default), `warn` or `off` | What the hook before an agent stops does with the docs references the session made wrong: ask the agent to fix them (once), only show them to you, or nothing. `STALEPROOF_HOOK` overrides it |
+
+The hooks keep a parse cache and their state in `.staleproof/cache/` at the top of the checkout ([Claude Code plugin: how it works](claude-code.md#how-it-works)); the folder ignores itself in git and is safe to delete.
 
 ### Example directives
 

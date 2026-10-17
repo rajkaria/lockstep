@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -15,18 +15,20 @@ import { FIXTURE_REPOS, FIXTURES, gitIn, STALE_DOCS } from './helpers.js';
 /** The claims fixture as a git repository with history: one file renamed, one deleted. */
 async function claimsRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'staleproof-claims-'));
-  await cp(join(FIXTURES, 'claims'), dir, { recursive: true });
+  // findings.json is the expected output, not part of the repository being linted.
+  await cp(join(FIXTURES, 'claims'), dir, { recursive: true, filter: (src) => !src.endsWith('findings.json') });
   await rename(join(dir, 'gitignore.txt'), join(dir, '.gitignore'));
   gitIn(dir, 'init', '-q', '-b', 'main');
   gitIn(dir, 'add', '-A');
   gitIn(dir, 'commit', '-q', '-m', 'init');
+  // git keeps no empty folders: the rename target is made here, not in the fixture.
+  await mkdir(join(dir, 'src', 'helpers'), { recursive: true });
   gitIn(dir, 'mv', 'src/util/old.ts', 'src/helpers/old.ts');
   gitIn(dir, 'rm', '-q', 'lib/removed.ts');
   gitIn(dir, 'commit', '-q', '-m', 'move helpers, drop lib');
   return dir;
 }
 
-const brief = (r: LintResult) => r.findings.map((f) => `${f.path}:${f.line}:${f.column} ${f.rule} ${f.subject} | ${f.message}`);
 
 describe('staleproof lint (claims engine)', () => {
   let dir: string;
@@ -37,22 +39,17 @@ describe('staleproof lint (claims engine)', () => {
     result = await lintRepo({ dir, repo: 'acme/claims-demo' });
   });
 
-  it('reports every stale claim, agent instruction files first, and nothing else', () => {
+  it('reports every stale claim, agent instruction files first, and nothing else (golden findings.json)', async () => {
     const deletedIn = gitIn(dir, 'rev-parse', '--short=7', 'HEAD');
-    expect(brief(result).map((l) => l.replace(new RegExp(`deleted in ${deletedIn}\\w*`), 'deleted in <sha>'))).toEqual([
-      '.cursor/rules/style.mdc:5:22 path-missing src/missing-style.ts | `src/missing-style.ts` does not exist in the repository.',
-      'AGENTS.md:4:21 path-missing src/settings.ts | `src/settings.ts` does not exist in the repository.',
-      'AGENTS.md:5:26 path-missing src/util/old.ts | `src/util/old.ts` does not exist; it moved to `src/helpers/old.ts`.',
-      'AGENTS.md:6:29 line-out-of-range src/app.ts:999 | `src/app.ts` has 4 lines; line 999 does not exist.',
-      'AGENTS.md:7:85 link-broken docs/old-guide.md | The link target `docs/old-guide.md` does not exist.',
-      'README.md:3:62 link-broken docs/roadmap.md | The link target `docs/roadmap.md` does not exist.',
-      'README.md:7:1 example-unknown-keyword claims_demo.connect | `connect` has no parameter `timeout`.',
-      'docs/guide.md:5:52 anchor-missing #configuration | This page has no heading `#configuration`.',
-      'docs/guide.md:7:70 path-missing lib/removed.ts | `lib/removed.ts` does not exist; it was deleted in <sha>.',
-      'docs/guide.md:9:56 anchor-missing docs/setup.md#legacy-usage | `docs/setup.md` has no heading `#legacy-usage`.',
+    const golden = JSON.parse(await readFile(join(FIXTURES, 'claims', 'findings.json'), 'utf8')) as Record<string, unknown>[];
+    const shown = (f: Record<string, unknown>) => ({ ...f, message: String(f.message).replace(new RegExp(`deleted in ${deletedIn}\\w*`), 'deleted in <sha>') });
+    expect(result.findings.map(({ evidence: _e, repo: _r, fix: _f, ...f }) => shown(f))).toEqual(golden);
+    expect(result.findings.map((f) => f.surface)).toEqual([
+      ...['agent', 'agent', 'agent', 'agent', 'agent', 'readme', 'example'],
+      ...Array(17).fill('docs'),
+      ...['docstring', 'docstring', 'config', 'config', 'config'],
     ]);
-    expect(result.findings.map((f) => f.surface)).toEqual(['agent', 'agent', 'agent', 'agent', 'agent', 'readme', 'example', 'docs', 'docs', 'docs']);
-    expect(result.summary).toMatchObject({ errors: 7, warnings: 3, infos: 0, files: 6 });
+    expect(result.summary).toMatchObject({ errors: 20, warnings: 6, infos: 3, files: 9 });
     expect(result.version).toBe(1);
   });
 
@@ -110,18 +107,32 @@ describe('staleproof lint (claims engine)', () => {
   it('formats findings as text, JSON, SARIF, GitHub annotations and Markdown, with exit codes', () => {
     const text = formatLint(result, 'text');
     expect(text.indexOf('AI agent instructions')).toBeLessThan(text.indexOf('README and contributing guides'));
-    expect(text).toContain('7 errors, 3 warnings in 4 files (6 files checked');
+    expect(text).toContain('20 errors, 6 warnings, 3 info in 11 files (9 files checked');
     const json = JSON.parse(formatLint(result, 'json'));
     expect(json).toMatchObject({ version: 1, tool: { name: 'staleproof' }, repo: 'acme/claims-demo' });
     const sarif = JSON.parse(formatSarif(result));
     expect(sarif.version).toBe('2.1.0');
-    expect(sarif.runs[0].results).toHaveLength(10);
+    expect(sarif.runs[0].results).toHaveLength(29);
     expect(sarif.runs[0].results[0]).toMatchObject({
       ruleId: 'path-missing',
       level: 'error',
       locations: [{ physicalLocation: { artifactLocation: { uri: '.cursor/rules/style.mdc' }, region: { startLine: 5, startColumn: 22 } } }],
     });
-    expect(sarif.runs[0].tool.driver.rules.map((r: { id: string }) => r.id)).toEqual(['path-missing', 'line-out-of-range', 'link-broken', 'anchor-missing', 'example-unknown-keyword']);
+    expect(sarif.runs[0].tool.driver.rules.map((r: { id: string }) => r.id)).toEqual([
+      'path-missing',
+      'line-out-of-range',
+      'link-broken',
+      'anchor-missing',
+      'command-missing',
+      'cli-command-unknown',
+      'cli-flag-unknown',
+      'env-unused',
+      'env-undocumented',
+      'symbol-missing',
+      'docstring-param-unknown',
+      'docstring-param-undocumented',
+      'example-unknown-keyword',
+    ]);
     const gh = formatGithub(result).split('\n');
     expect(gh[0]).toBe('::error file=.cursor/rules/style.mdc,line=5,col=22,endLine=5,endColumn=42,title=Staleproof path-missing::`src/missing-style.ts` does not exist in the repository.');
     expect(gh.some((l) => l.startsWith('::warning file=docs/guide.md,line=5'))).toBe(true);

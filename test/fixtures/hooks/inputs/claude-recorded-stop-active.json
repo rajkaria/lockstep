@@ -1,0 +1,16 @@
+{
+  "session_id": "835aa976-88d4-47c4-8f5d-8b74bc6a0164",
+  "transcript_path": "/home/dev/.claude/projects/-home-dev-demo/835aa976-88d4-47c4-8f5d-8b74bc6a0164.jsonl",
+  "cwd": "{{root}}",
+  "scratchpad_dir": "/tmp/claude/demo/835aa976-88d4-47c4-8f5d-8b74bc6a0164/scratchpad",
+  "prompt_id": "476e7ced-15e2-4ff8-b7e6-ec33fd0a7119",
+  "permission_mode": "acceptEdits",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": true,
+  "last_assistant_message": "I updated `README.md` line 8 so the example call uses the new parameter name: `connect(\"localhost\", deadline=5)`. This is the fix the Staleproof hook asked for.\n\nI left `docs/usage.md` alone. The hook flagged it in my earlier edit, but it isn't in this latest report. It still names the old `timeout` signature, so it probably needs the same change. Tell me and I'll update it.",
+  "background_tasks": [],
+  "session_crons": []
+}

@@ -4,7 +4,47 @@ import { PACKAGE } from './docs/manifest';
 import { ClearedList, SectionCard, TraceList, type PackageRepo } from './components';
 import { Icon } from './layout';
 import { replay, type CheckView, type IndexingView } from './state';
-import type { KnownMismatch, PredictedBreak } from './types';
+import type { ImpactData, KnownMismatch, PredictedBreak } from './types';
+
+/** A lint finding (src/lint/types.ts): a reference in the docs or an AI agent file the repository does not have. */
+export interface WebFinding {
+  rule: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  path: string;
+  line: number;
+  surface: 'agent' | 'readme' | 'docs' | 'docstring' | 'example' | 'config';
+  subject: string;
+  fingerprint: string;
+  evidence?: { looked: string; url?: string };
+  fix?: { description: string; verified: boolean };
+}
+
+/** "Docs this pull request makes wrong" (src/agent/graph-check.ts `PrFindings`), carried on the impact step. */
+interface PrFindingsView {
+  base: string;
+  head: string;
+  findings: WebFinding[];
+  total: number;
+  fixed: number;
+  files: number;
+}
+
+export const SURFACE_TITLE: Record<WebFinding['surface'], string> = {
+  agent: 'AI agent instructions',
+  readme: 'README and contributing guides',
+  docs: 'Docs',
+  example: 'Code examples',
+  docstring: 'Docstrings',
+  config: 'Configuration',
+};
+
+/** Findings under their surface title, in the order given (AI agent instructions first). */
+export function findingGroups<F extends WebFinding>(findings: F[]): [string, F[]][] {
+  const out = new Map<string, F[]>();
+  for (const f of findings) out.set(SURFACE_TITLE[f.surface] ?? f.surface, [...(out.get(SURFACE_TITLE[f.surface] ?? f.surface) ?? []), f]);
+  return [...out];
+}
 
 export function CheckResults({ view, packageRepo }: { view: CheckView; packageRepo: PackageRepo }) {
   const sections = useMemo(() => {
@@ -49,6 +89,7 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
             </div>
           )}
           {view.finished?.status === 'done' && view.impact && <InstallNudge repo={view.impact.pr.repo} />}
+          {newFindingsOf(view.impact) && <NewFindingsList nf={newFindingsOf(view.impact)!} />}
           {view.impact?.predicted && view.impact.predicted.length > 0 && <PredictedList predicted={view.impact.predicted} />}
           {view.impact && (
             <>
@@ -78,6 +119,59 @@ export function CheckResults({ view, packageRepo }: { view: CheckView; packageRe
 }
 
 const shortExample = (id: string) => id.split(':').slice(1).join(':');
+
+const newFindingsOf = (impact?: ImpactData): PrFindingsView | undefined => (impact as (ImpactData & { newFindings?: PrFindingsView }) | undefined)?.newFindings;
+
+/** Lint findings the pull request's head has and its base did not: certain, so they come first. */
+function NewFindingsList({ nf }: { nf: PrFindingsView }) {
+  if (!nf.total) {
+    return (
+      <p className="muted small">
+        Docs references: none made wrong ({nf.files} docs and agent files checked at <code>{nf.base.slice(0, 7)}</code> and <code>{nf.head.slice(0, 7)}</code>
+        {nf.fixed ? `; ${nf.fixed} fixed` : ''}).
+      </p>
+    );
+  }
+  return (
+    <div className="predicted" role="region" aria-label="Docs this pull request makes wrong">
+      <h3>
+        Docs this pull request makes wrong <span className="chip sev breaking">{nf.total}</span>
+      </h3>
+      <p className="muted small">
+        Paths, links, commands and settings the docs, READMEs and AI agent instructions name that were true at <code>{nf.base.slice(0, 7)}</code> and are not after
+        this pull request. Read from the repository at both commits; no graph needed.
+      </p>
+      {findingGroups(nf.findings).map(([title, list]) => (
+        <div key={title}>
+          <strong className="small">{title}</strong>
+          <ul>
+            {list.map((f) => (
+              <li key={f.fingerprint}>
+                {f.evidence?.url ? (
+                  <a href={f.evidence.url} target="_blank" rel="noreferrer">
+                    <code>
+                      {f.path}:{f.line}
+                    </code>
+                  </a>
+                ) : (
+                  <code>
+                    {f.path}:{f.line}
+                  </code>
+                )}
+                <span className="predicted-why">
+                  {f.message} <span className="muted">({f.rule})</span>
+                  {f.fix?.verified && <span> Fix: {f.fix.description}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {nf.total > nf.findings.length && <p className="muted small">{nf.total - nf.findings.length} more in the pull request comment.</p>}
+      {nf.fixed > 0 && <p className="muted small">It also fixes {nf.fixed} that were wrong before.</p>}
+    </div>
+  );
+}
 
 /** Examples whose call no longer fits the changed code: known before anything runs. */
 function PredictedList({ predicted }: { predicted: PredictedBreak[] }) {

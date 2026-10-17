@@ -89,6 +89,20 @@ export const DOCS: DocEntry[] = [
     group: 'Integrate',
   },
   {
+    slug: 'claude-code',
+    file: 'claude-code.md',
+    title: 'Claude Code plugin',
+    summary: 'The Staleproof plugin for Claude Code: after each edit Claude hears which docs and agent files it made wrong, and before it stops it is asked to fix them; the skill and slash commands, configuration, the same hooks without the plugin and for Cursor, how it works locally.',
+    group: 'Integrate',
+  },
+  {
+    slug: 'pre-commit',
+    file: 'pre-commit.md',
+    title: 'Pre-commit hooks',
+    summary: 'Stop a commit that makes the docs wrong: the staleproof hook for pre-commit, lefthook, husky or a plain git hook, linting the staged changes against HEAD, and an optional pre-push hook for examples predicted to break.',
+    group: 'Integrate',
+  },
+  {
     slug: 'mcp',
     file: 'mcp.md',
     title: 'MCP server',

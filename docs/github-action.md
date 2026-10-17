@@ -1,6 +1,6 @@
 # GitHub Action
 
-The composite action in [action.yml](../action.yml), `uses: rajkaria/staleproof@v1`, comments on every pull request with the docs it can make false, the evidence path for each, the examples whose calls no longer fit the changed code, and the result of running the affected docs examples before and after the change. On a schedule it audits the whole docs instead and keeps one issue up to date. It needs no inputs, no secrets and no database: it starts a FalkorDB inside the job and indexes the repository itself. This page is for maintainers adding it to a repository: installing it, what a run does, the inputs and outputs, permissions, agent mode and the docs fix pull request, the scheduled audit, keeping a graph between runs, and the comment format. Status: it has run end to end on a private test repository, from the one-click workflow with no inputs: the comment named a README example the pull request broke, and updated in place when the same pull request fixed the README.
+The composite action in [action.yml](../action.yml), `uses: rajkaria/staleproof@v1`, comments on every pull request with the docs it can make false: the references in its docs, READMEs and AI agent files it makes wrong (also as annotations), the doc sections its code changes reach with the evidence path for each, the examples whose calls no longer fit the changed code, and the result of running the affected docs examples before and after the change. On a schedule it audits the whole docs instead and keeps one issue up to date. It needs no inputs, no secrets and no database: it starts a FalkorDB inside the job and indexes the repository itself. This page is for maintainers adding it to a repository: installing it, what a run does, the inputs and outputs, permissions, agent mode and the docs fix pull request, the scheduled audit, keeping a graph between runs, and the comment format. Status: it has run end to end on a private test repository, from the one-click workflow with no inputs: the comment named a README example the pull request broke, and updated in place when the same pull request fixed the README.
 
 ## Install it
 
@@ -46,7 +46,7 @@ The steps of [action.yml](../action.yml), in order, on a pull request (`mode: ch
 
 1. **Set up Node.js and uv**: `actions/setup-node@v7` with Node 22, and `astral-sh/setup-uv@v10.3.0` (the example runner builds its virtualenvs with uv).
 2. **Start FalkorDB**, unless `falkordb-url` is set. With Docker on the runner (GitHub's Ubuntu runners have it), two containers from `falkordb/falkordb:latest`: `staleproof-graph` on port 6379 holds the graph, and `staleproof-scratch` on port 6390 is the disposable server the docs examples run against. The step waits up to 90 seconds for both ports, then sets `FALKORDB_URL=falkor://localhost:6379` and `STALEPROOF_SCRATCH_URL=falkor://localhost:6390` for the next steps. Without Docker it starts nothing, and the CLI starts both servers itself from falkordblite.
-3. **Install staleproof**: `npm install -g staleproof@<version>` (default `0.4.0`). With `version: source`, the CLI is built from the action's own checkout instead (`npm ci`, then `tsup`). When the version cannot be installed from npm, the step warns `staleproof@<version> is not on npm; building it from this action's source instead.` and builds it the same way.
+3. **Install staleproof**: `npm install -g staleproof@<version>` (default `0.5.0`). With `version: source`, the CLI is built from the action's own checkout instead (`npm ci`, then `tsup`). When the version cannot be installed from npm, the step warns `staleproof@<version> is not on npm; building it from this action's source instead.` and builds it the same way.
 4. **Choose check or audit**: with `mode: auto` (the default), `check` when there is a pull request (the `pull_request` event, or `pr-url`), else `audit`. Any other value than `auto`, `check` or `audit` fails with `mode must be auto, check or audit (got <mode>)`.
 5. **Re-index**, only with `reindex: 'true'` and `falkordb-url` set: `staleproof index <this repository> <also-index...>`. See [Keep the graph between runs](#keep-the-graph-between-runs).
 6. **Check the pull request**:
@@ -55,15 +55,47 @@ The steps of [action.yml](../action.yml), in order, on a pull request (`mode: ch
    staleproof check "$PR_URL" --no-agent --runs "$RUNS" --format markdown --out "$RUNNER_TEMP/staleproof-report.md" [--with <also-index...>]
    ```
 
-   `--no-agent` is left out when `anthropic-api-key` is set. When the graph does not have the pull request's repository yet, the CLI first indexes it together with the `also-index` repositories, at their default branch heads; with the default throwaway FalkorDB that happens on every run. Then it runs the check (graph mode: impact, clearance, ranking, then up to `runs` examples before and after the pull request, those predicted to break first), writes the report, and the step appends the report to the job summary and reads the examples that break and the examples predicted to break from the report's last line (`<!-- staleproof:counts breaks=<n> predicted=<n> … -->`).
+   `--no-agent` is left out when `anthropic-api-key` is set, and `--annotations` is added when the installed CLI has it (0.5 and later). When the graph does not have the pull request's repository yet, the CLI first indexes it together with the `also-index` repositories, at their default branch heads; with the default throwaway FalkorDB that happens on every run. Then it runs the check (graph mode: the docs references the pull request makes wrong, impact, clearance, ranking, then up to `runs` examples before and after the pull request, those predicted to break first), prints one workflow command per new finding (the annotations), writes the report, and the step appends the report to the job summary and reads the examples that break and the examples predicted to break from the report's last line (`<!-- staleproof:counts breaks=<n> predicted=<n> … -->`) and the new findings from the line before it (`<!-- staleproof:findings new=<n> errors=<n> warnings=<n> -->`).
 7. **Post or update the comment**, when `comment` is `'true'`: the GitHub CLI lists the pull request's comments (all pages), takes the first whose body starts with `<!-- staleproof -->` (or `<!-- lockstep-docs -->`, the marker from before the rename) and replaces its body with the report. If there is none, it posts a new comment. This step runs even when an earlier step failed, as long as a report was written.
 8. **Open the docs fix as a pull request**, only with `open-docs-pr: 'true'`, an `anthropic-api-key`, and a pull request from this repository (not a fork), when the agent proposed edits: see [Open the docs fix as a pull request](#open-the-docs-fix-as-a-pull-request).
 9. **Fail on broken examples**, with `fail-on: breaks` or `predicted`: the step fails with `This pull request breaks <n> docs example(s): they pass before it and fail after. See the report in the job summary.` when the report has any.
 10. **Fail on predicted breaks**, with `fail-on: predicted`: the step fails with `A static check predicts this pull request breaks <n> docs example(s): their calls no longer fit the changed code. See the report in the job summary.` when any example is predicted to break.
+11. **Fail on docs references the pull request makes wrong**, with `fail-on: findings`: the step fails with `This pull request makes <n> docs reference(s) wrong (paths, links, commands or settings the docs and agent files still name). See the annotations and the report in the job summary.` when the pull request adds any error-level finding.
 
 Because the comment is found by its first-line marker, each run edits the same comment instead of adding a new one.
 
 When the check command fails without writing a report (for example a pull request URL it cannot read), the check step fails with `staleproof check failed (exit <status>); see the log above.` When it fails after writing one (an agent check that ends `error` or `refused`), the step warns `staleproof check ended with exit <status>; the report may be incomplete.`, passes, and the comment is posted. Run outside a pull request event without `pr-url`, the step fails with `No pull request to check: run this on pull_request events, or set pr-url.`
+
+## Docs this pull request makes wrong
+
+A pull request can make a doc wrong without touching it: rename a script in `package.json` and the README's `npm run` of it fails; move a file and `AGENTS.md` sends every coding agent to a path that is gone. Each check lints the repository's docs, READMEs and AI agent instruction files ([Lint docs and agent files](lint.md)) at the two commits the pull request is compared between, from the clone the check already made, and reports the findings only the head has. Fingerprints ignore line numbers, so text added above an old finding never makes it new.
+
+They show up three ways:
+
+- **In the comment**, as the first section after the summary, AI agent instructions first:
+
+  ```markdown
+  #### Docs this pull request makes wrong
+
+  References that were true at `1a2b3c4` and are not after this pull request, in the docs, READMEs and AI agent instructions (read from the repository at both commits; no graph needed):
+
+  **AI agent instructions**
+
+  - [`AGENTS.md:5`](https://github.com/acme/app/blob/<head>/AGENTS.md#L5) `lint:docs` is not a script in package.json. <sub>command-missing</sub>
+  - [`AGENTS.md:6`](https://github.com/acme/app/blob/<head>/AGENTS.md#L6) `docs/setup.md` does not exist; it moved to `docs/guides/setup.md`. <sub>path-missing</sub>
+
+  **README and contributing guides**
+
+  - [`README.md:10`](https://github.com/acme/app/blob/<head>/README.md#L10) `lint:docs` is not a script in package.json. <sub>command-missing</sub>
+
+  <sub>3 errors in 2 files (12 files checked, 840 ms).</sub>
+  ```
+
+  The title says `this pull request makes <n> docs reference(s) wrong` when nothing broke or is predicted to break. A pull request that makes nothing wrong gets no section, only `docs references: none made wrong (<n> files checked)` in the footer.
+- **As annotations**: one `::error`/`::warning`/`::notice` workflow command per new finding, with the file, line and column range, titled `Staleproof <rule>`. GitHub lists them on the run's summary, and on the pull request's Files tab next to the lines the pull request changed.
+- **As the `findings` output**, and `fail-on: findings` fails the job when any new finding is an error.
+
+Examples are left to the graph part of the check (predicted breaks and runs), so lint's own example rules are not repeated here. The lint needs no graph and does not depend on `runs`.
 
 ## Inputs
 
@@ -77,9 +109,9 @@ Every input is optional.
 | `model` | `''` | Agent mode's model, passed as `STALEPROOF_MODEL`. Empty: `claude-sonnet-5-5`. Set it whenever you set `base-url`. |
 | `base-url` | `''` | An Anthropic-compatible API for agent mode, passed as `ANTHROPIC_BASE_URL`, for example `https://api.deepseek.com/anthropic`. |
 | `runs` | `'3'` | Graph mode runs up to this many affected examples before and after the pull request; `'0'` runs none. Passed as `--runs`. |
-| `fail-on` | `never` | Check mode: `breaks` fails the job when an example passes before the pull request and fails after it; `predicted` also fails it when a static check predicts an example's call no longer fits the changed code. Audit mode: `mismatches` fails the job when any example no longer fits the code. |
+| `fail-on` | `never` | Check mode: `breaks` fails the job when an example passes before the pull request and fails after it; `predicted` also fails it when a static check predicts an example's call no longer fits the changed code; `findings` fails it when the pull request makes a docs reference wrong (a new error-level lint finding). Audit mode: `mismatches` fails the job when any example no longer fits the code. |
 | `fail-under` | `''` | Audit mode: fail the job when the docs health score is below this (0-100). |
-| `audit-runs` | `'20'` | Audit mode: run up to this many Python examples at the default branch before scoring; `'0'` for static checks only. Passed as `audit --run`. |
+| `audit-runs` | `'20'` | Audit mode: run up to this many Python, JavaScript and TypeScript examples at the default branch before scoring; `'0'` for static checks only. Passed as `audit --run`. |
 | `issue` | `'true'` | Audit mode: keep one issue up to date with the audit (opened when something needs fixing, updated on each run, closed when all clear). Needs `issues: write`. |
 | `open-docs-pr` | `'false'` | Agent mode, on a pull request from this repository: `'true'` opens the proposed docs edits as a pull request into the checked pull request's branch. Needs `contents: write` and `pull-requests: write`. |
 | `comment` | `'true'` | Post one pull request comment and keep updating it. Any other value: the report goes to the job summary only. |
@@ -87,8 +119,9 @@ Every input is optional.
 | `falkordb-url` | `''` | A FalkorDB that keeps the graph between runs (decisions, verdicts, run history). Empty: the throwaway FalkorDB the job starts. |
 | `org` | `''` | The graph name on `falkordb-url`; ignored without it. Empty: the CLI's default, the owner of the repository lowercased (the input's description in `action.yml` says `falkordb`, which is what that rule gives for FalkorDB's repositories). |
 | `reindex` | `'false'` | With `falkordb-url`: `'true'` re-indexes this repository and `also-index` at their default branch heads before the check. |
+| `cache` | `'true'` | Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the Staleproof version, the repository, `also-index` and the base commit: a later run on the same base skips indexing, and an older dump is re-indexed with only the changed files parsed. Ignored with `falkordb-url`. |
 | `github-token` | `${{ github.token }}` | Reads the repository (clones, the GitHub API, file contents) and posts the comment. Passed as `GITHUB_TOKEN` to Staleproof and as `GH_TOKEN` to the GitHub CLI. |
-| `version` | `'0.4.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
+| `version` | `'0.5.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
 
 ## Outputs
 
@@ -97,10 +130,11 @@ Every input is optional.
 | `report` | Check mode: path of the Markdown report, the comment's body: `$RUNNER_TEMP/staleproof-report.md` |
 | `breaks` | Check mode: how many docs examples pass before the pull request and fail after it |
 | `predicted` | Check mode: how many docs examples a static check predicts the pull request breaks (their call no longer fits the changed code) |
+| `findings` | Check mode: how many docs references the pull request makes wrong (new lint findings of every severity; `0` when they were not checked) |
 | `score` | Audit mode: the docs health score, 0-100 |
 | `mismatched` | Audit mode: how many examples no longer fit the code |
 
-`breaks` and `predicted` are read from the report's counts line (`<!-- staleproof:counts breaks=<n> predicted=<n> sections=<n> mismatched=<n> -->`); a report from a CLI older than 0.3.0 has none, and `breaks` then counts the rows marked `**breaks**`. `score` and `mismatched` come from the audit report's last line (`<!-- staleproof:audit score=<n> mismatched=<n> failing=<n> coverage=<n> -->`).
+`breaks` and `predicted` are read from the report's counts line (`<!-- staleproof:counts breaks=<n> predicted=<n> sections=<n> mismatched=<n> -->`); a report from a CLI older than 0.3.0 has none, and `breaks` then counts the rows marked `**breaks**`. `findings` is read from `<!-- staleproof:findings new=<n> errors=<n> warnings=<n> -->`, which a report has when the docs references were checked (CLI 0.5 and later). `score` and `mismatched` come from the audit report's last line (`<!-- staleproof:audit score=<n> mismatched=<n> failing=<n> coverage=<n> -->`).
 
 ```yaml
       - uses: rajkaria/staleproof@v1
@@ -254,19 +288,19 @@ jobs:
         env:
           FALKORDB_URL: ${{ secrets.STALEPROOF_FALKORDB_URL }}
           STALEPROOF_ORG: falkordb
-        run: npx -y staleproof@0.4.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
+        run: npx -y staleproof@0.5.0 index FalkorDB/falkordb-py FalkorDB/GraphRAG-SDK FalkorDB/docs
 ```
 
 This workflow uses only the documented `index` command; unlike the action itself, it has not been run on GitHub. Re-indexing never deletes: what disappeared is marked `gone`, and verdicts and decisions keep pointing at it.
 
 ## Pin the version
 
-`@v1` follows the action's `v1` tag, and the `version` input pins the CLI it installs (default `0.4.0`). For runs that cannot change under you, pin the action to a commit and the CLI to a version:
+`@v1` follows the action's `v1` tag, and the `version` input pins the CLI it installs (default `0.5.0`). For runs that cannot change under you, pin the action to a commit and the CLI to a version:
 
 ```yaml
 - uses: rajkaria/staleproof@<commit-sha>
   with:
-    version: 0.4.0
+    version: 0.5.0
 ```
 
 ## The comment
@@ -278,6 +312,16 @@ The comment is the report that `check --format markdown` renders ([src/format/re
 ### Staleproof: <title>
 
 <n> changed symbols (and <m> added) reach <total> doc sections (<b> breaking, <a> signature, <c> behavior; <x> in other repositories). <p> examples are predicted to break, the call no longer fitting the changed code (<path>:<index>, …).
+
+#### Docs this pull request makes wrong
+
+References that were true at `<before>` and are not after this pull request, in the docs, READMEs and AI agent instructions (read from the repository at both commits; no graph needed):
+
+**AI agent instructions**
+
+- [`<path>:<line>`](<url of the line>) <message> <sub><rule></sub>
+
+<sub><e> errors, <w> warnings in <f> files (<checked> files checked, <ms> ms).</sub>
 
 **Predicted to break** — the call as written no longer fits the code after this pull request (a static check, before anything runs):
 
@@ -320,14 +364,16 @@ This pull request also edits `<path>`, …: examples on those pages are run afte
 <the agent's summary, in agent mode>
 
 <sub>[Staleproof](https://github.com/rajkaria/staleproof) · FalkorDB graph `<org>` · <before>..<after></sub>
+<!-- staleproof:findings new=<n> errors=<n> warnings=<n> -->
 <!-- staleproof:counts breaks=<n> predicted=<n> sections=<n> mismatched=<n> -->
 ```
 
 | Part | Content |
 |---|---|
 | Marker | `<!-- staleproof -->` on the first line, invisible on GitHub. The post step finds the comment by it. |
-| Title | `this pull request breaks <n> docs example(s)` when any example breaks; otherwise `this pull request is predicted to break <n> docs example(s)` when a static check predicts any; otherwise, when every impacted section is on a page the pull request edits itself, `the <n> doc sections this pull request reaches are on pages it edits`; otherwise `<total> doc section(s) this pull request can make false`; or `no docs reach the code this pull request changed`. |
+| Title | `this pull request breaks <n> docs example(s)` when any example breaks; otherwise `this pull request is predicted to break <n> docs example(s)` when a static check predicts any; otherwise `this pull request makes <n> docs reference(s) wrong` (followed by `and can make <k> doc section(s) false` when its code reaches any) when it makes any; otherwise, when every impacted section is on a page the pull request edits itself, `the <n> doc sections this pull request reaches are on pages it edits`; otherwise `<total> doc section(s) this pull request can make false`; or `no docs reach the code this pull request changed`. |
 | Summary | The impact summary: changed symbols, sections reached, the count per severity, how many sections are in other repositories, how many examples are predicted to break and how many impacted examples already did not fit the code. When the pull request changed no symbol of the indexed code, it says so and the sections table is omitted. |
+| Docs this pull request makes wrong | The new lint findings, grouped AI agent instructions first, then READMEs and contributing guides, then docs; each links to its line at the pull request's head, with the rule and, when Staleproof has a verified fix, `Fix: <what to change>`. Followed by `It also fixes <n> reference(s) that were wrong before.` when the pull request removes findings. Omitted when there are none, or when the docs references could not be checked (the footer then says `docs references not checked: <why>`). See [Docs this pull request makes wrong](#docs-this-pull-request-makes-wrong). |
 | Predicted to break | One row per example line whose call no longer fits the code after the pull request, linked to the line: a call to a removed or renamed symbol, an import of a name the package stops exporting, or a call the new signature rejects that the old one accepted (an unknown keyword, too many positional arguments, a new required argument). `(matched by name)` marks a removed symbol linked by name only. Found without running anything, so it works with `runs: '0'` and on the hosted service. Omitted when there are none. [Predicted breaks](concepts.md#predicted-breaks) has the rules. |
 | Examples table | One row per example with a run recorded against this pull request, by this check or an earlier one, using the latest attempt on each side. **Before** and **After** are `passes`, the error's last line, `skipped (<reason>)`, `not installed (<reason>)`, or `—` when that side did not run. **Result** is `**breaks**: passes before this PR, fails after`, `fixed by this PR`, `passes before and after`, `already broken (fails before and after)`, `fails before and after, with a different error`, `fails`, `not run` (skipped) or `could not be installed`, followed by `(after: the page as this PR edits it)` for an example on a page the pull request edits. Omitted when no example ran. |
 | Sections table | One row per impacted section; a section on a page the pull request edits is marked `(page edited in this PR)`. **Change** is `**breaking**` (removed, renamed, or a removed export), `**signature**` or `behavior` (body changed). **Evidence path** lists the nodes from the changed symbol to the doc. **Hops** is the path length and its confidence: `exact` when every edge was resolved through imports and types, `by-name` or `late` otherwise. Rows are in PageRank order of their page. Only the first 40 sections are rendered; the rest are counted below the table. |
@@ -336,14 +382,15 @@ This pull request also edits `<path>`, …: examples on those pages are run afte
 | Verdicts | The latest verdict per section for this pull request, from any source. Followed by the `patch` command when any verdict is `stale`. Omitted when there are none. |
 | Edited pages | When the pull request edits Markdown pages of its own repository, a line naming them: their examples are run after the change as the pull request leaves them ([Example runner](example-runner.md#pull-requests-that-edit-the-page)), and the section links point at the default branch. |
 | Agent summary | The model's closing summary, in agent mode only. |
-| Footer | A link to Staleproof, the graph name and the two commits compared, then the counts line the action's outputs are read from (invisible on GitHub; `mismatched` counts lines). |
+| Footer | A link to Staleproof, the graph name and the two commits compared (and, when the docs references were checked and none is new, `docs references: none made wrong (<n> files checked)`), then the findings line and the counts line the action's outputs are read from (invisible on GitHub; `mismatched` counts lines). |
 
 ## Known limits
 
 - The pull request check has run end to end on a private test repository (top of this page), and audit mode has run on GitHub too. For the rest, the tests in the repository check that the action's commands and flags exist in the CLI, that no input is required, that the default `version` is the package's own, that the comment marker matches, that the counts and audit lines parse into the outputs, and that the audit workflow in `examples/` runs on a schedule with `issues: write` and no secrets.
-- Code is read as Python, or TypeScript and JavaScript in published npm packages; docs as Markdown, MDX or reStructuredText. Only Python examples are run, and only Python calls get argument checks.
+- Code is read as Python, or TypeScript and JavaScript in published npm packages; docs as Markdown, MDX or reStructuredText. Go is read too. Python, JavaScript and TypeScript examples are run; Python, TypeScript/JavaScript and Go calls get argument checks.
 - Predicted breaks are static: they follow calls resolved through imports and types, and stay silent where the source cannot settle the call (a decorator that may change the signature, a splat, a dynamic class). A pull request with no predicted break can still break an example; the runs are the proof.
 - The audit issue is looked up among the first 100 open issues.
+- "Docs this pull request makes wrong" lints the pull request's own repository only, at the two commits the check compares; a doc in an `also-index` repository that names a path of this one is covered by the graph part, not by lint. Annotations for lines the pull request did not change (an untouched README) are listed on the run's summary rather than inline on the Files tab. It is skipped (with a footer note) when linting both commits takes longer than 120 seconds.
 - With the default FalkorDB, every run indexes the repository again and starts without decisions, verdict history or recorded runs.
 - Graph mode samples: it runs at most `runs` examples (predicted breaks first, then exactly linked sections on the first impact page) and writes no verdicts.
 - The sections table shows the first 40 impacted sections; the rest are counted, not listed.

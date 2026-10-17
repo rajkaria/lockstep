@@ -1,6 +1,6 @@
 # Indexing
 
-This page explains what `staleproof index` reads from your repositories and how it turns them into the graph: which files count, how Python, TypeScript and JavaScript are parsed, how calls are resolved across repositories, how Markdown, MDX and reStructuredText sections, inline code and code examples are linked to the code, how each example is checked against the code it calls, how docs mark examples not to run, how repository dependencies are found, and what a re-index keeps and replaces. Read it if you maintain the repositories being indexed, or want to know why an edge exists (or does not).
+This page explains what `staleproof index` reads from your repositories and how it turns them into the graph: which files count, how Python, TypeScript, JavaScript and Go are parsed, how monorepos are split into packages, how calls are resolved across repositories, how Markdown, MDX and reStructuredText sections, inline code and code examples are linked to the code, how each example is checked against the code it calls, how docs mark examples not to run, how repository dependencies are found, and what a re-index keeps and replaces. Read it if you maintain the repositories being indexed, or want to know why an edge exists (or does not).
 
 ## Index your organisation
 
@@ -19,7 +19,7 @@ Progress goes to stderr, one line per phase: `checkout`, `parse`, `write`, `reso
 ## The pipeline
 
 1. **Checkout**: each repository is cloned or fetched, or downloaded as a tarball where there is no git (see [Checkouts](#checkouts)).
-2. **Parse**: every Python library file, and every TypeScript and JavaScript file of a published npm package, of every repository is parsed. The repository's [configuration](configuration.md#repository-configuration) is read first, and its `ignore` paths are left out.
+2. **Parse**: every Python library file, every TypeScript and JavaScript file of a published npm package, and every Go package of every repository is parsed. The repository's [configuration](configuration.md#repository-configuration) is read first, and its `ignore` paths are left out.
 3. **Symbol table**: one table is built over all the parsed repositories, so a call in one repository can resolve into another.
 4. **Write and resolve**: `Repo`, `File` and `Symbol` nodes are written, then each repository's `CALLS` edges are resolved against the whole table.
 5. **Docs**: for each repository with Markdown, MDX or reStructuredText pages or example scripts, `DocSection` and `CodeExample` nodes are written and linked to the code with `MENTIONS`, `USES` and `LINKS_TO`, and every example line that no longer fits the code it calls becomes a `MISMATCH` edge ([Static checks of examples](#static-checks-of-examples)).
@@ -48,7 +48,7 @@ When `git` is not installed (a serverless host), or with `STALEPROOF_INGEST=gith
 
 - **Where from**: `https://codeload.github.com/<owner>/<name>/tar.gz/<ref>` without a token, which costs no GitHub API request. With `GITHUB_TOKEN` (or `GH_TOKEN`), the API's `repos/<owner>/<name>/tarball/<ref>` endpoint, one API request, which also reads private repositories the token can see.
 - **Which commit**: `<ref>` defaults to `HEAD`, the default branch head. The commit SHA comes from the archive's pax header (the `comment=<sha>` record `git archive` writes), so learning it costs no API call. `--ref` must be a branch, tag or SHA GitHub knows; `origin/<branch>` exists only in a clone.
-- **What is extracted**: only the files the indexer reads, by the rules in the next section, plus every `pyproject.toml`, `requirements*.txt` and `package.json`; paths with a component starting with `.` are skipped, except a root `.staleproof.toml`. They go to `<STALEPROOF_HOME>/tarballs/<owner>/<name>/<sha>`, and a directory walk replaces `git ls-files`.
+- **What is extracted**: only the files the indexer reads, by the rules in the next section, plus every `pyproject.toml`, `requirements*.txt`, `package.json` and `go.mod`; paths with a component starting with `.` are skipped, except a root `.staleproof.toml`. They go to `<STALEPROOF_HOME>/tarballs/<owner>/<name>/<sha>`, and a directory walk replaces `git ls-files`.
 - **Limits**: a compressed archive over 150 MB, or more than 4000 extracted files (3000 on a hosted server), is refused with `<repo> is too large to index from an archive here (...)` and the command to run it locally.
 
 Example runs and the text-match counts of `clearance` still need a git clone, so a host without git indexes and checks but runs no examples.
@@ -62,16 +62,17 @@ Each tracked path is classified by these rules, in order:
 | 1 | Anywhere under `.github/`, `node_modules/`, `venv/`, `.venv/`, `build/`, `dist/`, `site-packages/`, `__pycache__/`, `.tox/`, `.mypy_cache/` | Skipped |
 | 2 | `.md`, `.mdx` and `.rst` files | Doc pages, except housekeeping files (names starting with `CHANGELOG`, `CHANGES`, `HISTORY`, `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`, `SUPPORT`, `AGENTS`, `CLAUDE`, `GEMINI`, `LICENSE`, `NOTICE`, `PULL_REQUEST_TEMPLATE`, `ISSUE_TEMPLATE`, any case) and pages under `test/`, `tests/`, `testing/` or `fixtures/`, which are skipped |
 | 3 | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` files | Tests and tooling are skipped: under `__tests__/`, `__mocks__/`, `test/`, `tests/`, `test-utils/`, `e2e/`, `cypress/`, `playwright/`, `fixtures/`, `coverage/`, `out/`, `.next/`, `.docusaurus/` or `.vitepress/`; named `*.test.*`, `*.spec.*`, `*.stories.*`, `*.bench.*`, `*.d.ts`, `*.min.js` or `*.config.*`. Under `example/`, `examples/`, `sample/` or `samples/`: example scripts. Under `script/`, `scripts/`, `benchmark/`, `benchmarks/`, `docs/`, `site/` or `website/`: skipped. Everything else is library code, kept only when it belongs to a published npm package ([TypeScript and JavaScript](#typescript-and-javascript)) |
-| 4 | Anything else that is not `.py` | Skipped (notebooks, for example) |
-| 5 | Tests: under `test/`, `tests/` or `testing/`, or named `test_*.py`, `*_test.py`, `conftest.py` | Skipped |
-| 6 | `setup.py`, `noxfile.py`, `fabfile.py` | Skipped |
-| 7 | Under `example/`, `examples/`, `sample/`, `samples/`, `tutorial/`, `tutorials/`, `notebook/`, `notebooks/` | Example scripts (indexed as code examples, not library code) |
-| 8 | Under `script/`, `scripts/`, `benchmark/`, `benchmarks/`, `docs/` | Skipped |
-| 9 | Everything else ending in `.py` | Python library code |
+| 4 | `.go` files | Tests (`*_test.go`) and what the go tool ignores (under `vendor/`, `testdata/`, or a directory starting with `_` or `.`) are skipped. Under `example/`, `examples/`, `sample/` or `samples/`: example programs. Everything else is Go library code ([Go](#go)) |
+| 5 | Anything else that is not `.py` | Skipped (notebooks, for example) |
+| 6 | Tests: under `test/`, `tests/` or `testing/`, or named `test_*.py`, `*_test.py`, `conftest.py` | Skipped |
+| 7 | `setup.py`, `noxfile.py`, `fabfile.py` | Skipped |
+| 8 | Under `example/`, `examples/`, `sample/`, `samples/`, `tutorial/`, `tutorials/`, `notebook/`, `notebooks/` | Example scripts (indexed as code examples, not library code) |
+| 9 | Under `script/`, `scripts/`, `benchmark/`, `benchmarks/`, `docs/` | Skipped |
+| 10 | Everything else ending in `.py` | Python library code |
 
 Then the repository's `ignore` globs ([Repository configuration](configuration.md#repository-configuration)) drop any file they match.
 
-Rule 7 runs before rule 8, so `docs/examples/quickstart.py` is an example script. Example scripts are how examples shipped inside a code repository (such as GraphRAG-SDK's `graphrag_sdk/examples/*.py`, or a package's `examples/quickstart.js`) become docs.
+Rule 8 runs before rule 9, so `docs/examples/quickstart.py` is an example script. Example scripts are how examples shipped inside a code repository (such as GraphRAG-SDK's `graphrag_sdk/examples/*.py`, a package's `examples/quickstart.js`, or a Go module's `examples/basic/main.go`) become docs.
 
 A hosted server ([hosted mode](DEPLOY.md#hosted-mode)) also skips translated docs: paths under `docs/`, `doc/`, `documentation/`, `i18n/`, `locale/`, `locales/`, `translation/`, `translations/` or `content/` followed by a language directory, such as `docs/zh/`, `docs/pt-BR/` or `i18n/ja/` (`TRANSLATION_DIR` in [src/hosted/workspaces.ts](../src/hosted/workspaces.ts)). The CLI indexes them.
 
@@ -81,7 +82,9 @@ Python is parsed with tree-sitter compiled to WebAssembly (`web-tree-sitter` and
 
 ### Module names
 
-A package root is the topmost directory of a chain of directories that each contain an `__init__.py`; module names start at its parent. `graphrag_sdk/src/graphrag_sdk/core/connection.py` becomes `graphrag_sdk.core.connection`, so `src/` layouts work. A file whose directory has no `__init__.py` is a loose module named after its full path (`src/util.py` becomes `src.util`). `Repo.packages` lists the first component of every module name; it is how the indexer knows which repository defines `falkordb` or `graphrag_sdk`.
+A package root is the topmost directory of a chain of directories that each contain an `__init__.py`; module names start at its parent. `graphrag_sdk/src/graphrag_sdk/core/connection.py` becomes `graphrag_sdk.core.connection`, so `src/` layouts work. A file whose directory has no `__init__.py` is a loose module named after its full path (`src/util.py` becomes `src.util`).
+
+Inside a Python project's source root, a package's module name is its path from that root instead ([Monorepos](#monorepos)): a project is a directory with a `pyproject.toml`, `setup.py` or `setup.cfg` (not under tests, docs or examples), and its source root is its `src/` directory when that holds Python files, else the project directory itself (except the repository root, where the rule above holds). That is how a namespace package works: `python/graph/src/acme/graph/__init__.py` with no `src/acme/__init__.py` is `acme.graph`, as Python imports it. `Repo.packages` lists the first component of every module name; it is how the indexer knows which repository defines `falkordb` or `graphrag_sdk`.
 
 ### Symbols
 
@@ -101,12 +104,25 @@ TypeScript and JavaScript are parsed with the vendored tree-sitter grammars `gra
 
 - **Packages.** Every `package.json` outside `node_modules/` that has a `name` and is not `private` is a published package. A file belongs to the nearest enclosing package directory, so monorepos with several packages work. Files in no published package (a docs site, an app, build tooling) are not library code and are not indexed.
 - **Module names.** `js-<package>` plus the path inside the package, with a leading `src/` dropped and `index` files naming their directory: `packages/core/src/graph/client.ts` of `@acme/core` is `js-acme-core.graph.client`. The `js-` prefix keeps an npm `falkordb` apart from the Python `falkordb`; messages show the npm name (`@acme/minigraph`). The package's own name resolves to its entry file (from `source`, `types`, `module`, `exports["."]` or `main`, mapped from `dist/`, `lib/` or `build/` back to `src/`, with `src/index.ts` and `index.js` as fallbacks), which it re-exports.
-- **Symbols.** Classes, functions (declarations and `const f = () => …`), methods (the constructor is `constructor`, visibility `special`; getters are recorded as properties), with their signatures and return types. Methods marked `private`, `protected` or `#name` and top-level declarations that are not exported are `private`.
+- **Symbols.** Classes, functions (declarations and `const f = () => …`), methods (the constructor is `constructor`, visibility `special`; getters are recorded as properties), with their signatures and return types. Methods marked `private`, `protected` or `#name` and top-level declarations that are not exported are `private`. A function with TypeScript overload signatures (`function f(a: string): void;` before the implementation, or `method_signature`s in a class) gets the decorator `overload`.
+- **Arity.** Each function's parameters as TypeScript checks a call against them: a parameter with `?`, a default value, or a type that includes `undefined` or `void` is optional; `...rest` takes any number; a destructured parameter (`{ a, b }: Options`) is one argument; `this:` is not a parameter. In a JavaScript file (`.js`, `.jsx`, `.mjs`, `.cjs`) every parameter is optional, as TypeScript's `checkJs` treats it, so only too many arguments count there. A function whose signature the source can't settle has no arity, and its calls are never judged: overloads, a decorator on the method, a body that reads `arguments`, and an arrow function without a parameter list (`x => x`).
 - **Imports and calls.** ES `import` and `export` (named, default, `* as ns`, re-exports and `export *`), `require(...)` with destructuring, relative imports resolved to the files they name (`./graph`, `./graph.js`, `../util/index`), typed bindings and `this.x` fields, `new Client()`, and structural callees such as `this.graph.query()`. `Promise<…>`, arrays and `| null` are unwrapped from types.
 - **Exports.** Only what a module says it exports counts; the package's API is what its entry file exports, through re-exports.
 - **Dependencies.** `dependencies`, `peerDependencies` and `devDependencies` that name another indexed package become `DEPENDS_ON` edges.
 
-Arguments are not recorded: JavaScript accepts any argument count, so JavaScript and TypeScript calls are checked only for names that do not exist, never for arity ([Static checks of examples](#static-checks-of-examples)).
+Calls record how many arguments they pass; a spread (`f(...xs)`) makes the count unknown, and a tagged template (`` sql`...` ``) or an argument list that does not parse records none ([Static checks of examples](#static-checks-of-examples)).
+
+## Go
+
+Go is parsed with `grammars/tree-sitter-go.wasm` (from the `tree-sitter-go` npm package), into the same shape as Python and TypeScript.
+
+- **Modules and packages.** Each `.go` file belongs to the nearest enclosing `go.mod` (several per repository are fine: a multi-module repository, or a `go.work` workspace), whose `module` line gives the module path; without one, the module path is `github.com/<owner>/<name>`. A package is a directory: all its files make one module, named `go-<module path>` plus the directory inside the module (`go-github-com-acme-minigo.graph` for `github.com/acme/minigo/graph`). The `go-` prefix keeps Go names apart from Python and npm ones; messages show the import path. Files with a `//go:build ignore` constraint are not part of their package.
+- **Symbols.** Functions, methods (attached to their receiver's type, whichever file declares them: `func (g *Graph) Query` is `<package>.Graph.Query`), struct and interface types (as classes), with their signatures and first result type. Each symbol keeps its own file, so moving a function to another file of its package changes nothing. `init` functions are not symbols.
+- **Exported-ness.** Go's own rule: a name that starts with a capital letter is exported. Unexported names are `private`. A package's API is the exported functions and types (with their exported methods, and those of embedded types) of every package other code can import: not `main`, not under `internal/`.
+- **Types.** Struct fields are attributes with their types; embedded fields (`*Client`, `base`) and embedded interfaces are bases, so promoted methods resolve. `&Graph{...}`, `Graph{...}` and `x.(Path)` produce instances; pointers are unwrapped from types; slices, maps, channels and function types are not instances.
+- **Imports and calls.** `import "path"`, aliases, `.` imports (everything) and `_` imports (nothing). An unaliased import binds the package's declared name (`github.com/FalkorDB/falkordb-go/v2` binds `falkordb`), or, for a package outside the organisation, the name by convention (`/v5` is dropped, `gopkg.in/yaml.v3` binds `yaml`, `go-redis` binds `redis`). Bindings follow `:=`, `=`, `var` and `const`, with `a, err := f()` giving `a` the call's first result; receivers and typed parameters are typed bindings. Go's block scopes are kept: a name declared in a nested block, a `for`, `if` or `switch`, or a function literal (its parameters too) shadows the enclosing function's, so a handler's `r *http.Request` is never the router `r` outside it.
+- **Arguments.** Every parameter is required; a variadic `...T` takes the rest. A call passing `xs...`, or a single call (`f(g())`, which may pass all of `g`'s results), has an unknown count.
+- **Not followed**: generics' type arguments, cgo, build tags other than `ignore`, and calls through function values.
 
 ## Call resolution
 
@@ -187,9 +203,11 @@ Python examples are resolved like code, cumulatively per page. The page's Python
 
 When a mention or call has several candidates and not all are exact, the page's own exact uses decide: by-name candidates are kept only if they (or their class) are among the symbols the page's examples reach exactly. If that keeps nothing, all candidates stay.
 
-JavaScript and TypeScript examples (fences tagged `js`, `javascript`, `ts`, `typescript`, `jsx`, `tsx`, `mjs`, `cjs` or `node`) resolve the same way, cumulatively per page in their own throwaway module, against the organisation's npm packages: `import { Client } from 'falkordb'` and `require('falkordb')` reach the package `js-falkordb`. They get `USES` edges and static checks, but are never run.
+JavaScript and TypeScript examples (fences tagged `js`, `javascript`, `ts`, `typescript`, `jsx`, `tsx`, `mjs`, `cjs` or `node`) resolve the same way, cumulatively per page in their own throwaway module, against the organisation's npm packages: `import { Client } from 'falkordb'` and `require('falkordb')` reach the package `js-falkordb`. They get `USES` edges and static checks, and run in a Node sandbox ([Example runner](example-runner.md#javascript-and-typescript)).
 
-Example scripts (`examples/*.py`, `examples/*.js`, `examples/*.ts` and the like) are one `CodeExample` each, id `<repo>:<path>:0`, `kind: 'script'`, with no section; they are resolved on their own, not cumulatively.
+Go examples (fences tagged `go`) are each their own program, since every complete Go example declares its own `package main` and `func main`. A block is filled in the way a reader would: one without a `package` clause gets `package main`, statements outside a function are read as `main`'s body, and a block without imports gets the imports of the page's earlier Go blocks. Lines stay the block's own. They get `USES` edges and static checks, and are not run.
+
+Example scripts (`examples/*.py`, `examples/*.js`, `examples/*.ts`, `examples/*/main.go` and the like) are one `CodeExample` each, id `<repo>:<path>:0`, `kind: 'script'`, with no section; they are resolved on their own, not cumulatively.
 
 Examples in other languages (shell, Cypher, …) are indexed (code, identifiers) but get no `USES` edges, so they are never reached by an impact walk through calls and never run.
 
@@ -223,19 +241,23 @@ While linking each example, the indexer checks its calls and imports against the
 | Kind | What the line does | Detail, from the test fixtures | Checked in |
 |---|---|---|---|
 | `unknown-keyword` | Passes a keyword the signature does not have | `` `Client` has no parameter `hostname` `` | Python |
-| `too-many-arguments` | Passes more positional arguments than the signature takes | `` `Graph.query` takes at most 2 positional arguments; the example passes 3 `` | Python |
-| `missing-argument` | Leaves out a required argument | `` `Graph.query` requires `timeout`, which the example does not pass `` | Python |
-| `missing-import` | Imports from an organisation package a name no module there defines or binds | `` `miniclient` has no `connect` ``, `` `@acme/minigraph` has no `Gone` `` | Python, JavaScript, TypeScript |
-| `missing-attribute` | Calls a method or function a module or class does not have | `` `Graph` has no attribute `read_only` ``, `` `Graph` has no attribute `readOnly` `` | Python, JavaScript, TypeScript |
+| `too-many-arguments` | Passes more positional arguments than the signature takes | `` `Graph.query` takes at most 2 positional arguments; the example passes 3 ``, `` `connect` takes at most 2 arguments; the example passes 3 ``, `` `Client.Close` takes no arguments; the example passes 1 `` | Python, JavaScript, TypeScript, Go |
+| `missing-argument` | Leaves out a required argument | `` `Graph.query` requires `timeout`, which the example does not pass ``, `` `Graph.ROQuery` requires `params`, which the example does not pass `` | Python, JavaScript, TypeScript, Go |
+| `missing-import` | Imports from an organisation package a name no module there defines or binds (Go: a package that does not exist) | `` `miniclient` has no `connect` ``, `` `@acme/minigraph` has no `Gone` ``, `` `github.com/acme/minigo/gone` is not a package of `github.com/acme/minigo` `` | Python, JavaScript, TypeScript, Go |
+| `missing-attribute` | Calls a method or function a module or class does not have (Go: or does not export) | `` `Graph` has no attribute `read_only` ``, `` `Graph` has no attribute `readOnly` ``, `` `newConn` is unexported in `github.com/acme/minigo` `` | Python, JavaScript, TypeScript, Go |
 
 The checks only report what the source settles, so that a reported line fails the same way when run:
 
 - **Exact resolutions only.** A call is judged only when its callee resolved exactly, through imports, types and re-exports. A by-name or unresolved call is never judged.
 - **Signatures that can be trusted.** Argument checks need one definition under the name in its repository (no `@overload` stubs or conditional definitions), a readable signature, no `@property`, and only decorators known to keep the signature: `staticmethod`, `classmethod`, `abstractmethod`, `override`, `final`, `cache`, `lru_cache`, `deprecated` and `wraps`, also with their `functools.`, `typing.`, `typing_extensions.`, `abc.` or `warnings.` prefixes. Any other decorator (a click command, a retry wrapper) may change what the function accepts, so its calls are left alone.
 - **Constructors.** A call to a class checks its `__init__` (searched through base classes), without `self`, unless the class has a `__new__` (its own or a base's) or is not closed (next rule). A method called on an instance or a `classmethod` drops its first parameter; a method called through the class, or a `staticmethod`, does not.
-- **Closed classes and modules.** A missing attribute is reported only on a class whose members are all visible: no class decorators, no metaclass, no `__getattr__` or `__getattribute__`, and every base class in the organisation (or one of `object`, `ABC`, `Generic`, `Protocol`), recursively. A name counts as present when it is a method, a class-level assignment or annotation, or a `self.<name> = …` in any method, here or in a base class. A module must have no module-level `__getattr__` and no star import from outside the organisation, and a name it imports, assigns or star-imports from the organisation counts as present. Names starting with `__` are never judged.
+- **JavaScript, TypeScript and Go.** Arguments are positional only, and methods have no bound first parameter. `new X(...)` checks X's `constructor` (its own or an organisation base's; a class with neither is not judged). A `static` method is judged through its class, any other method through an instance. A Go type called (`pkg.Duration(5)`) is a conversion and a method through its type is a method expression: neither is judged. The [arity](#typescript-and-javascript) rules above decide what is optional, and a signature without one (overloads, decorators, `arguments`) is never judged.
+- **Go exported-ness.** Calling a function or method whose name starts with a lowercase letter from a docs example (another package, by definition) is `missing-attribute`: it is unexported.
+- **Closed classes and modules.** A missing attribute is reported only on a class whose members are all visible: no class decorators, no metaclass, no `__getattr__` or `__getattribute__`, and every base class in the organisation (or one of `object`, `ABC`, `Generic`, `Protocol`), recursively. A name counts as present when it is a method, a class-level assignment or annotation, or a `self.<name> = …` in any method, here or in a base class, or in any of the organisation's subclasses of it (the value may be one: an `isinstance` or type-guard check narrows it, and a factory's declared type is often the base). A module must have no module-level `__getattr__` and no star import from outside the organisation, and a name it imports, assigns or star-imports from the organisation counts as present. Names starting with `__` are never judged.
 - **Splats.** `f(*args)` makes the positional count unknown (no `too-many-arguments` or `missing-argument`); `f(**options)` makes the keywords unknown (no `missing-argument`). A signature with `*args` takes any number of positional arguments, and one with `**kwargs` any keyword.
-- **Imports.** Only imports from the organisation's own packages are judged; `from x import *` lines are skipped.
+- **Imports.** Only imports from the organisation's own packages are judged; `from x import *` lines are skipped. A Go import of a directory that has Go files (even only tests or examples) is a package.
+- **API listings.** A block of three or more statements calling functions of one imported module (`z.bigint();`, `z.map();`, `z.refine()` among `z.regex(regex)`) lists the API rather than using it: a call there with no arguments names the function, and is not a `missing-argument`. Calls on objects (`db.close();`) are never a listing.
+- **Older and translated docs.** Examples on a versioned copy of the docs kept next to the current ones (`docs-v3/` beside `docs/`, `guide-v1/` beside `guide/`, anything under Docusaurus `versioned_docs/`) document an older API on purpose, and a translated README (`README_KO.md`, `README.zh-CN.md`, `index.ja.md`) is maintained apart from its source: both are linked but not checked, like a `skip`.
 - **Marked examples.** Examples with a `skip` or `expect-error` directive, and examples matched by `skip-examples`, are linked but not checked.
 
 The `index` summary adds `<n> mismatches (staleproof audit <repo>)` to each docs repository's line, and the [index report](#the-index-report) has the count per repository.
@@ -253,6 +275,16 @@ Docs can mark an example as not runnable or as failing on purpose. A marked exam
 | reStructuredText comment before the block | `.. staleproof: skip` (or `no-run`, `ignore`), Sybil's `.. skip: next` | `.. staleproof: expect-error` (or `raises`) |
 
 A comment counts only when it is the nearest non-blank line above the block: prose in between cancels it. Case does not matter. Whole pages or directories are marked with `skip-examples` in the repository's [configuration](configuration.md#repository-configuration).
+
+## Monorepos
+
+A repository with several packages is indexed as several packages of one repository, each with its own module tree, so its docs' examples are checked against the package they import:
+
+- **npm, yarn and pnpm workspaces**: every `package.json` with a `name` that is not `private` is a published package, and a file belongs to the nearest enclosing one ([TypeScript and JavaScript](#typescript-and-javascript)). Private workspace members (apps, docs sites, tooling) are not library code.
+- **uv workspaces and several `pyproject.toml` packages**: each Python project names its packages from its own source root ([Module names](#module-names)), so a namespace split across members (`acme.graph` in one, `acme.tools` in another) resolves as Python imports it.
+- **Go**: each `go.mod` is a module, `go.work` or not ([Go](#go)).
+
+`workspacePackages` and `nearestPackage` in [src/indexer/repo.ts](../src/indexer/repo.ts) list a repository's packages (npm, Python, Go) and find the one a file belongs to, the closest enclosing package: `packages/core/README.md` belongs to `packages/core/package.json`, so the commands a page names resolve against that package's scripts.
 
 ## Repository dependencies
 
@@ -321,7 +353,7 @@ Only 5 call edges cross repositories, yet 1,257 symbol-to-doc paths do: the docs
 
 ## Limits
 
-- **Python, TypeScript and JavaScript.** Code in other languages is not parsed. TypeScript and JavaScript count only inside a published npm package; their calls get no argument checks (JavaScript accepts any count) and their examples are linked and checked but never run. Examples in other languages (Cypher, shell) are indexed without being linked to code.
+- **Python, TypeScript, JavaScript and Go.** Code in other languages is not parsed. TypeScript and JavaScript count only inside a published npm package; JavaScript files declare no optional parameters, so only too many arguments count there. Go examples are linked and checked but not run. Examples in other languages (Cypher, shell) are indexed without being linked to code.
 - **Static checks follow exact resolutions.** A call reached by name, or not resolved, is never judged; neither is anything behind a decorator outside the allow-list, a dynamic class or module, or a splat.
 - **reStructuredText is read by a line scanner**, not by Sphinx: `.. include::`, autodoc output, substitutions and Sphinx extensions are not expanded, and `:ref:` links resolve within one page.
 - **Index together for cross-repository edges.** Edges between repositories exist only when the repositories are indexed in one command; indexing one alone drops its edges into the others.

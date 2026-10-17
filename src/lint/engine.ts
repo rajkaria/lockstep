@@ -6,7 +6,13 @@ import { buildSymbolTable, parseRepo, type ParsedRepo } from '../indexer/index.j
 import { git } from '../indexer/repo.js';
 import { trackedOrWalked } from '../indexer/files.js';
 import { loadRepoConfig, type RepoConfig } from '../indexer/repo-config.js';
+import { cacheEnabled, loadHistoryCached, ParseCache } from './cache.js';
+import { checkCli } from './check-cli.js';
+import { checkCommands } from './check-commands.js';
+import { checkDocstrings } from './check-docstrings.js';
+import { checkEnv } from './check-env.js';
 import { checkLinks, checkPaths, pathClaims } from './check-paths.js';
+import { checkSymbols } from './check-symbols.js';
 import { exampleFinding, exampleMismatches } from './examples.js';
 import { RepoFacts } from './facts.js';
 import { lintTargets, type LintTarget } from './files.js';
@@ -46,6 +52,10 @@ export interface LintOptions {
   config?: RepoConfig;
   /** File list instead of `git ls-files` (a tarball listing). */
   paths?: string[];
+  /** The local parse cache (`src/lint/cache.ts`): `true` opens the checkout's own; default none. */
+  cache?: ParseCache | boolean;
+  /** Receives the parsed code when a check parsed it (the coding-agent hooks reuse it). */
+  onParsed?: (parsed: ParsedRepo[]) => void;
 }
 
 const SURFACE_ORDER: Record<Surface, number> = { agent: 0, readme: 1, docs: 2, example: 3, docstring: 4, config: 5 };
@@ -109,6 +119,9 @@ export async function lintRepo(opts: LintOptions): Promise<LintResult> {
   const facts = new RepoFacts(dir, new Set(paths), !opts.paths);
   const targets = lintTargets(paths, config);
 
+  // Warm runs read unchanged files' parses (code, docs examples) from the local cache (src/lint/cache.ts).
+  const cache = opts.cache === true ? (cacheEnabled() ? await ParseCache.open(dir) : undefined) : opts.cache || undefined;
+
   const enabled = (rule: RuleId): boolean => {
     if (opts.rules?.length && !opts.rules.includes(rule)) return false;
     if (opts.disable?.includes(rule)) return false;
@@ -126,38 +139,61 @@ export async function lintRepo(opts: LintOptions): Promise<LintResult> {
     scanned.push({ target, doc: scanClaims(target.path, text), text });
   }
 
-  // One `git check-ignore` for every path a page names that is not in the file list.
-  const claimsByPage = scanned.map((s) => pathClaims(s.doc, facts));
-  await facts.loadIgnored(claimsByPage.flatMap((cs) => cs.flatMap((c) => c.candidates)));
-  if (claimsByPage.some((cs) => cs.some((c) => !c.candidates.some((x) => facts.exists(x))))) await facts.loadHistory();
+  // One `git check-ignore` for every path a page names that is not in the file list, and the git
+  // history only when a named path is missing: both serve the path rules alone (seconds on big repositories).
+  const wantPaths = enabled('path-missing') || enabled('line-out-of-range');
+  const claimsByPage = scanned.map((s) => (wantPaths ? pathClaims(s.doc, facts) : []));
+  if (wantPaths) {
+    await facts.loadIgnored(claimsByPage.flatMap((cs) => cs.flatMap((c) => c.candidates)));
+    if (claimsByPage.some((cs) => cs.some((c) => !c.candidates.some((x) => facts.exists(x))))) await loadHistoryCached(facts, cache);
+  }
 
   const raw: { page: (typeof scanned)[number]; f: RawFinding }[] = [];
   for (const [i, page] of scanned.entries()) {
-    if (enabled('path-missing') || enabled('line-out-of-range')) {
+    if (wantPaths) {
       const surface = page.target.surface === 'agent' || page.target.surface === 'readme' ? page.target.surface : 'docs';
       for (const f of await checkPaths(page.doc, facts, claimsByPage[i]!, surface)) raw.push({ page, f });
     }
     if (enabled('link-broken') || enabled('anchor-missing')) {
       for (const f of await checkLinks(page.doc, facts)) raw.push({ page, f });
     }
+    if (enabled('command-missing')) {
+      for (const f of await checkCommands(page.doc, { facts, repo, surface: page.target.surface })) raw.push({ page, f });
+    }
+    if (enabled('cli-command-unknown') || enabled('cli-flag-unknown')) {
+      for (const f of await checkCli(page.doc, { facts, repo, surface: page.target.surface })) raw.push({ page, f });
+    }
   }
 
-  if (opts.examples !== false && [...RULE_BY_ID.keys()].some((r) => r.startsWith('example-') && enabled(r))) {
+  // The code is parsed once, for the example checks and for the symbol and docstring rules.
+  const wantExamples = opts.examples !== false && [...RULE_BY_ID.keys()].some((r) => r.startsWith('example-') && enabled(r));
+  const wantDocstrings = enabled('docstring-param-unknown') || enabled('docstring-param-undocumented');
+  if (wantExamples || enabled('symbol-missing') || wantDocstrings) {
     const checkouts = [{ repo, dir, sha: sha ?? 'worktree' }];
     for (const w of opts.with ?? []) {
       const wd = resolve(w);
       checkouts.push({ repo: (await repoName(wd)) ?? basename(wd), dir: wd, sha: (await headSha(wd)) ?? 'worktree' });
     }
+    // Go code matters to lint only through Go examples (the symbol and docstring rules read Python and JS/TS).
+    const go = scanned.some((s) => s.doc.fences.some((f) => f.lang === 'go' || f.lang === 'golang'));
     const parsed: ParsedRepo[] = [];
-    for (const c of checkouts) parsed.push(await parseRepo(c));
+    for (const c of checkouts) parsed.push(await parseRepo(c, { memo: cache, go }));
+    opts.onParsed?.(parsed);
     const table = buildSymbolTable(parsed);
     const codeRepos = new Set(parsed.filter((p) => p.modules.length).map((p) => p.checkout.repo));
     const pages = scanned.filter((s) => s.target.surface !== 'agent' || /\.mdx?$/i.test(s.target.path)).map((s) => ({ path: s.target.path, text: s.text }));
-    for (const e of await exampleMismatches(parsed[0]!, pages, table, codeRepos)) {
+    for (const e of wantExamples ? await exampleMismatches(parsed[0]!, pages, table, codeRepos, cache) : []) {
       const page = scanned.find((s) => s.target.path === e.path)!;
       raw.push({ page, f: exampleFinding(e, page.doc.lines) });
     }
+    if (enabled('symbol-missing')) raw.push(...(await checkSymbols(scanned, table, parsed)));
+    if (wantDocstrings) raw.push(...(await checkDocstrings(parsed[0]!, (p) => facts.text(p))));
   }
+  if (enabled('env-unused') || enabled('env-undocumented')) {
+    raw.push(...(await checkEnv({ dir, repo, paths, pages: scanned, config, cache, unused: enabled('env-unused'), undocumented: enabled('env-undocumented') })));
+  }
+
+  await cache?.save();
 
   const findings: Finding[] = [];
   const occurrences = new Map<string, number>();

@@ -1,3 +1,5 @@
+import type { PrFindings } from '../agent/graph-check.js';
+import { formatMarkdown } from '../lint/format.js';
 import type { VerdictRow } from '../patch.js';
 import { commitLabel } from './text.js';
 import type { ExampleRunRow } from './report.js';
@@ -32,6 +34,23 @@ function esc(s: string): string {
   return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
 
+export const NEW_FINDINGS_HEADING = '#### Docs this pull request makes wrong';
+
+/**
+ * The "Docs this pull request makes wrong" section: references in the docs and AI agent
+ * files that were true at the base commit and are not at the head, agent files first.
+ */
+export function newFindingsMarkdown(pf: PrFindings, subject = 'this pull request'): string {
+  const heading = subject === 'this pull request' ? NEW_FINDINGS_HEADING : `#### Docs ${subject} make wrong`;
+  const intro =
+    `References that were true at \`${pf.base.slice(0, 7)}\` and are not after ${subject}, in the docs, READMEs and AI agent instructions ` +
+    '(read from the repository at both commits; no graph needed):';
+  const body = formatMarkdown({ version: 1, findings: pf.findings, summary: pf.summary, warnings: [] });
+  const more = pf.total > pf.findings.length ? `\n\n_${pf.total - pf.findings.length} more not shown._` : '';
+  const fixed = pf.fixed ? `\n\nIt also fixes ${pf.fixed} reference${pf.fixed === 1 ? '' : 's'} that ${pf.fixed === 1 ? 'was' : 'were'} wrong before.` : '';
+  return `${heading}\n\n${intro}\n\n${body}${more}${fixed}`;
+}
+
 /** The PR comment: impacted sections with evidence paths, clearance, and (agent mode) verdicts. */
 export function checkMarkdown(opts: {
   impact: ImpactData;
@@ -42,6 +61,10 @@ export function checkMarkdown(opts: {
   runs?: ExampleRunRow[];
   agentSummary?: string;
   org: string;
+  /** Lint findings the change introduced ("Docs this pull request makes wrong"). */
+  newFindings?: PrFindings;
+  /** Why the docs references could not be checked, when they could not. */
+  newFindingsError?: string;
 }): string {
   const { impact } = opts;
   const runs = opts.runs ?? [];
@@ -55,16 +78,22 @@ export function checkMarkdown(opts: {
   const predictedExamples = new Set(predicted.map((p) => p.example)).size;
   const elsewhere = impact.sections.filter((s) => !onTouchedPage(s.section.replace('#', ':'))).length;
   const n = impact.totalSections;
+  const wrong = opts.newFindings?.total ?? 0;
   const title = breaks
     ? `${subject} break${subject === 'these changes' ? '' : 's'} ${breaks} docs example${breaks === 1 ? '' : 's'}`
     : predictedExamples
       ? `${subject} ${subject === 'these changes' ? 'are' : 'is'} predicted to break ${predictedExamples} docs example${predictedExamples === 1 ? '' : 's'}`
+    : wrong
+      ? `${subject} make${subject === 'these changes' ? '' : 's'} ${wrong} docs reference${wrong === 1 ? '' : 's'} wrong` +
+        (n ? ` and can make ${n} doc section${n === 1 ? '' : 's'} false` : '')
     : n && !impact.truncated && elsewhere === 0
       ? `the ${n === 1 ? 'doc section' : `${n} doc sections`} ${subject} reach${subject === 'these changes' ? '' : 'es'} ${n === 1 ? 'is' : 'are'} on pages ${subject === 'these changes' ? 'they edit' : 'it edits'}`
       : n
         ? `${n} doc section${n === 1 ? '' : 's'} ${subject} can make false`
         : `no docs reach the code ${subject} changed`;
   const out: string[] = [COMMENT_MARKER, `### Staleproof: ${title}`, '', opts.summary, ''];
+  // Above the graph's impact: these are certain (the reference is wrong at the head commit).
+  if (wrong) out.push(newFindingsMarkdown(opts.newFindings!, subject), '');
   if (predicted.length) {
     out.push(
       `**Predicted to break** — the call as written no longer fits the code after ${subject} (a static check, before anything runs):`,
@@ -121,8 +150,17 @@ export function checkMarkdown(opts: {
     out.push(`This pull request also edits ${impact.pr.docsTouched.map((p) => `\`${p}\``).join(', ')}: examples on those pages are run after the change as the pull request leaves them; the sections above are linked as they are on the default branch.`, '');
   }
   if (opts.agentSummary) out.push(opts.agentSummary, '');
-  out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${opts.org}\` · ${commitLabel(impact.pr.before)}..${commitLabel(impact.pr.after)}</sub>`);
+  const lintNote = opts.newFindings
+    ? wrong
+      ? ''
+      : ` · docs references: none made wrong (${opts.newFindings.files} file${opts.newFindings.files === 1 ? '' : 's'} checked)`
+    : opts.newFindingsError
+      ? ` · docs references not checked: ${esc(opts.newFindingsError.split('\n')[0]!.slice(0, 160))}`
+      : '';
+  out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${opts.org}\` · ${commitLabel(impact.pr.before)}..${commitLabel(impact.pr.after)}${lintNote}</sub>`);
   // Machine-readable counts for CI (the GitHub Action's outputs and fail-on).
+  // The docs references on their own line (the GitHub Action's `findings` output and `fail-on: findings`); the counts line keeps its shape.
+  if (opts.newFindings) out.push(`<!-- staleproof:findings new=${wrong} errors=${opts.newFindings.summary.errors} warnings=${opts.newFindings.summary.warnings} -->`);
   out.push(`<!-- staleproof:counts breaks=${breaks} predicted=${predictedExamples} sections=${n} mismatched=${impact.mismatched?.length ?? 0} -->`);
   return out.join('\n');
 }

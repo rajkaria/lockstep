@@ -1,6 +1,7 @@
 import { classifyFile } from '../indexer/repo.js';
 import { matchesAny, type RepoConfig } from '../indexer/repo-config.js';
 import { TRANSLATION_DIR } from '../hosted/workspaces.js';
+import { ENV_FILE } from './facts-env.js';
 import type { Surface } from './types.js';
 
 /**
@@ -71,4 +72,14 @@ export function lintTargets(paths: string[], config?: RepoConfig): LintTarget[] 
   }
   const order: Record<string, number> = { agent: 0, readme: 1, docs: 2 };
   return out.sort((a, b) => order[a.surface]! - order[b.surface]! || a.path.localeCompare(b.path));
+}
+
+/**
+ * Env example files (`.env.example`, `.env.sample`, `.env.template`, `.env.dist`, ...) read as
+ * configuration claims: the variables they list should be read by the code. Never `.env`
+ * itself, and never vendored, fixture or excluded files.
+ */
+export function envExampleFiles(paths: string[], config?: RepoConfig): LintTarget[] {
+  const exclude = [...(config?.ignore ?? []), ...(config?.lint?.exclude ?? [])];
+  return paths.filter((p) => ENV_FILE.test(p) && !VENDORED.test(p) && !matchesAny(p, exclude)).map((path) => ({ path, surface: 'config' as const }));
 }

@@ -21,7 +21,8 @@ export class RepoTooLargeError extends Error {}
 function wanted(path: string): boolean {
   if (classifyFile(path)) return true;
   const base = posix.basename(path);
-  return base === 'pyproject.toml' || base === 'package.json' || path === '.staleproof.toml' || /^requirements[\w.-]*\.txt$/.test(base);
+  // go.mod names a Go module's packages (src/indexer/go.ts).
+  return base === 'pyproject.toml' || base === 'package.json' || base === 'go.mod' || path === '.staleproof.toml' || /^requirements[\w.-]*\.txt$/.test(base);
 }
 
 /**

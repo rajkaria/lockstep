@@ -14,10 +14,10 @@ import { indexOrg } from './indexer/index.js';
 import { parseRepoName, type Checkout } from './indexer/repo.js';
 import { checkoutOrDownload } from './indexer/ensure.js';
 import { packageRoot, packageVersion } from './pkg.js';
-import { clearanceText, dim, impactText, runText, traceLine } from './format/text.js';
+import { clearanceText, dim, impactText, newFindingsText, runText, traceLine } from './format/text.js';
 import { AnthropicModel, claudeCredentialsAvailable, type Effort } from './agent/anthropic.js';
 import { runAgentCheck } from './agent/loop.js';
-import { runGraphCheck } from './agent/graph-check.js';
+import { prNewFindings, runGraphCheck } from './agent/graph-check.js';
 import type { TraceEvent } from './agent/trace.js';
 import type { ClearedSymbol, ImpactData, RankedSection } from './tools/graph-tools.js';
 import type { RunExampleData } from './tools/run-example.js';
@@ -34,10 +34,12 @@ import type { ToolContext } from './tools/types.js';
 import { auditDocs } from './audit.js';
 import { auditMarkdown, auditText } from './format/audit.js';
 import { docsForTool } from './tools/docs-for.js';
-import { analyzeChanges, localChanges } from './pr/local.js';
+import { analyzeChanges, localChanges, worktreeFindings } from './pr/local.js';
 import { checkMarkdown } from './format/markdown.js';
 import { lintRepo } from './lint/engine.js';
-import { formatLint, lintExitCode, lintSummaryLine, LINT_FORMATS, type LintFormat } from './lint/format.js';
+import { cacheEnabled, ParseCache } from './lint/cache.js';
+import { lintNew, lintStaged } from './lint/diff.js';
+import { formatGithub, formatLint, lintExitCode, lintSummaryLine, LINT_FORMATS, type LintFormat } from './lint/format.js';
 import { isRuleId } from './lint/rules.js';
 import type { RuleId } from './lint/types.js';
 
@@ -173,7 +175,8 @@ program
   .option('--base <ref>', 'without a pull request: compare with this commit (default: merge base with the remote default branch)')
   .option('--repo <owner/name>', 'without a pull request: the GitHub repository the checkout is (default: from its origin remote)')
   .option('--fail-on-predicted', 'exit 1 when an example is predicted to break (a pre-push hook or CI gate)')
-  .action(async (prUrl: string | undefined, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean; dir?: string; base?: string; repo?: string; failOnPredicted?: boolean }) => {
+  .option('--annotations', 'also print the docs references the pull request makes wrong as GitHub workflow commands (annotations in a GitHub Actions job)')
+  .action(async (prUrl: string | undefined, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean; dir?: string; base?: string; repo?: string; failOnPredicted?: boolean; annotations?: boolean }) => {
     if (!prUrl) {
       await checkLocal(opts);
       return;
@@ -181,7 +184,7 @@ program
     await checkPr(prUrl, opts);
   });
 
-async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean }) {
+async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; effort?: string; maxSteps: string; maxHops: string; runs: string; json?: boolean; format: string; out?: string; with: string[]; index: boolean; annotations?: boolean }) {
     aboutRepo(parsePrUrl(prUrl).fullName);
     await withGraph(async (store, org) => {
       const config = settings();
@@ -217,6 +220,7 @@ async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; ef
         if (opts.json) console.log(JSON.stringify(r, null, 2));
         else console.log(dim(`\nPatch: staleproof patch ${r.pr}   Trace: stored on ${r.checkId}`));
         if (opts.format === 'markdown') await emitMarkdown(ctx, org, r.pr, opts.out, r.summary);
+        if (opts.annotations) await emitAnnotations(ctx, r.pr);
         if (r.status === 'error' || r.status === 'refused') process.exitCode = 1;
         return;
       }
@@ -225,6 +229,7 @@ async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; ef
         const line = traceLine(e);
         if (line) log(line);
       } : undefined });
+      if (opts.annotations) await emitAnnotations(ctx, r.pr);
       if (opts.format === 'markdown') {
         await emitMarkdown(ctx, org, r.pr, opts.out);
         if (r.status === 'error') process.exitCode = 1;
@@ -239,6 +244,7 @@ async function checkPr(prUrl: string, opts: { agent: boolean; model?: string; ef
       const impact = data('impact') as ImpactData | undefined;
       const cleared = (data('clearance') as { cleared: ClearedSymbol[] } | undefined)?.cleared ?? [];
       const ranked = (data('rank_sections') as { ranked: RankedSection[] } | undefined)?.ranked;
+      if (r.newFindings) console.log(`${newFindingsText(r.newFindings)}\n`);
       if (impact) console.log(impactText(impact, ranked));
       console.log('');
       console.log(clearanceText(cleared));
@@ -265,12 +271,16 @@ async function checkLocal(opts: { dir?: string; base?: string; repo?: string; js
       title: `Working tree of ${local.branch} against ${local.base.slice(0, 7)}`,
     };
     const r = await analyzeChanges(graph, config.home, local.repo, local.diff, label);
+    // Docs references the working tree makes wrong (lint at the base and on disk).
+    const newFindings = await worktreeFindings(local).catch((err: Error) => void log(`docs references not checked: ${err.message}`));
+    if (newFindings) r.data.newFindings = newFindings;
     if (opts.json) console.log(JSON.stringify({ summary: r.summary, ...r.data }, null, 2));
     else if (opts.format === 'markdown') {
-      const md = checkMarkdown({ impact: r.data.impact, summary: r.summary, cleared: r.data.cleared, org });
+      const md = checkMarkdown({ impact: r.data.impact, summary: r.summary, cleared: r.data.cleared, org, ...(newFindings ? { newFindings } : {}) });
       if (opts.out) await writeFile(opts.out, `${md}\n`);
       else console.log(md);
     } else {
+      if (newFindings) console.log(`${newFindingsText(newFindings, 'these changes')}\n`);
       console.log(impactText(r.data.impact));
       console.log('');
       console.log(clearanceText(r.data.cleared));
@@ -311,7 +321,7 @@ program
   .command('audit')
   .description('Audit docs with no pull request: health score, examples that no longer fit the code, API coverage, example runs')
   .argument('[repos...]', 'repositories to audit as owner/name (default: every repository in the graph); indexed together on first use')
-  .option('--run <n>', 'first run up to n examples at the indexed commits (needs Python 3.12+ and uv)', '0')
+  .option('--run <n>', 'first run up to n examples at the indexed commits (Python needs 3.12+ and uv; JavaScript and TypeScript need Node)', '0')
   .option('--limit <n>', 'how many undocumented symbols to list', '25')
   .option('--format <format>', 'text | markdown | json', 'text')
   .option('--out <file>', 'write the report to a file instead of stdout')
@@ -364,13 +374,18 @@ program
   .option('--disable <ids...>', 'skip these rules')
   .option('--files <paths...>', 'report only findings in these files or about them')
   .option('--with <dirs...>', 'other local checkouts whose code the docs examples call (an SDK next to a docs repo)', [])
-  .option('--no-examples', 'skip the static checks of docs code examples (no code parsing)')
+  .option('--no-examples', 'skip the static checks of docs code examples (the symbol and docstring rules still parse the code)')
   .option('--repo <owner/name>', 'the GitHub repository the checkout is (default: from its origin remote)')
+  .option('--new', 'only findings the changes introduced: absent at the base commit')
+  .option('--base <ref>', 'with --new: the commit to compare with (default: HEAD with uncommitted changes, else the merge base with the default branch)')
+  .option('--staged', 'lint the git index (what the next commit contains) instead of the files on disk')
+  .option('--no-cache', 'parse every file again instead of reading the local parse cache (.staleproof/cache)')
   .action(
     async (
       dir: string,
-      opts: { format: string; out?: string; failOn: string; rule?: string[]; disable?: string[]; files?: string[]; with: string[]; examples: boolean; repo?: string },
+      opts: { format: string; out?: string; failOn: string; rule?: string[]; disable?: string[]; files?: string[]; with: string[]; examples: boolean; repo?: string; new?: boolean; base?: string; staged?: boolean; cache: boolean },
     ) => {
+      if (opts.base && !opts.new) throw new Error('--base needs --new (compare with that commit)');
       if (!LINT_FORMATS.includes(opts.format as LintFormat)) throw new Error(`unknown --format ${opts.format} (${LINT_FORMATS.join(', ')})`);
       if (!['error', 'warning', 'info', 'never'].includes(opts.failOn)) throw new Error(`--fail-on must be error, warning, info or never (got ${opts.failOn})`);
       const ids = (xs?: string[]): RuleId[] | undefined => {
@@ -379,7 +394,7 @@ program
         if (bad.length) throw new Error(`unknown rule ${bad.join(', ')} (see https://staleproof.dev/#/docs/rules)`);
         return xs as RuleId[];
       };
-      const r = await lintRepo({
+      const lintOpts = {
         dir,
         rules: ids(opts.rule),
         disable: ids(opts.disable),
@@ -387,7 +402,13 @@ program
         with: opts.with,
         examples: opts.examples,
         ...(opts.repo ? { repo: parseRepoName(opts.repo) } : {}),
-      });
+        // One cache instance, so the temporary trees of --new and --staged read and fill the checkout's own.
+        ...(opts.cache && cacheEnabled() ? { cache: await ParseCache.open(dir) } : {}),
+      };
+      // --new: findings absent at the base commit; --staged: the index instead of the disk (src/lint/diff.ts).
+      const diff = opts.new ? await lintNew({ ...lintOpts, base: opts.base, staged: opts.staged }) : undefined;
+      const r = diff ?? (opts.staged ? await lintStaged(lintOpts) : await lintRepo(lintOpts));
+      if (diff) log(`new findings only: ${diff.head.label} against ${diff.base.label} (${diff.base.why}); ${diff.fixed} fixed`);
       const body = formatLint(r, opts.format as LintFormat);
       if (opts.out) {
         await writeFile(opts.out, `${body}\n`);
@@ -398,6 +419,47 @@ program
       process.exitCode = lintExitCode(r, opts.failOn as 'error' | 'warning' | 'info' | 'never');
     },
   );
+
+program
+  .command('hook')
+  .description('Coding-agent hooks (Claude Code, Cursor): read the hook JSON on stdin, print what the agent should know about the docs its edits made wrong. Silent when nothing is; never fails the agent; nothing leaves the machine.')
+  .argument('<event>', 'session-start | post-edit | stop')
+  .option('--cursor', "Cursor's hook JSON (default: read from the input)")
+  .option('--no-graph', 'stop: skip predicted breaks from a FalkorDB already running on this machine')
+  .action(async (event: string, opts: { cursor?: boolean; graph: boolean }) => {
+    const { HOOK_EVENTS, readStdin, runHook } = await import('./hooks/index.js');
+    if (!HOOK_EVENTS.includes(event as (typeof HOOK_EVENTS)[number])) throw new Error(`unknown hook ${event} (${HOOK_EVENTS.join(', ')})`);
+    const r = await runHook(event as (typeof HOOK_EVENTS)[number], await readStdin(process.stdin), { dialect: opts.cursor ? 'cursor' : undefined, graph: opts.graph });
+    // Exit at once: a hook that gave up must not wait for the work it abandoned.
+    process.stdout.write(r.stdout ? `${r.stdout}\n` : '', () => process.exit(0));
+  });
+
+program
+  .command('init')
+  .description('Set Staleproof up in a repository: .staleproof.toml, the GitHub workflow, a README badge, the pre-commit hook, Claude Code or Cursor hooks. Asks first; --yes takes the detected defaults; idempotent.')
+  .argument('[dir]', 'the repository', '.')
+  .option('-y, --yes', 'take the detected defaults without asking')
+  .option('--dry-run', 'print what would be written, and write nothing')
+  .option('--claude', 'add the Staleproof hooks to .claude/settings.json (without the plugin)')
+  .option('--cursor', 'add the Staleproof hooks to .cursor/hooks.json')
+  .option('--docs-repo <owner/name>', 'the docs live in another repository: index it with this one in the workflow')
+  .option('--skip <items...>', 'leave these out: config, workflow, badge, pre-commit, gitignore, vscode')
+  .action(async (dir: string, opts: { yes?: boolean; dryRun?: boolean; claude?: boolean; cursor?: boolean; docsRepo?: string; skip?: string[] }) => {
+    const { INIT_SKIPS, runInit, terminalAsker } = await import('./init/index.js');
+    const bad = (opts.skip ?? []).filter((s) => !INIT_SKIPS.includes(s as (typeof INIT_SKIPS)[number]));
+    if (bad.length) throw new Error(`unknown --skip ${bad.join(', ')} (${INIT_SKIPS.join(', ')})`);
+    const interactive = !opts.yes && !!process.stdin.isTTY && !!process.stdout.isTTY;
+    const r = await runInit({
+      dir,
+      dryRun: opts.dryRun,
+      claude: opts.claude,
+      cursor: opts.cursor,
+      docsRepo: opts.docsRepo ? parseRepoName(opts.docsRepo) : undefined,
+      skip: (opts.skip ?? []) as (typeof INIT_SKIPS)[number][],
+      ask: interactive ? terminalAsker() : undefined,
+    });
+    console.log(r.text);
+  });
 
 program
   .command('run')
@@ -561,6 +623,13 @@ async function emitMarkdown(ctx: ToolContext, org: string, prUrl: string, out: s
   } else {
     console.log(md);
   }
+}
+
+/** The docs references a pull request makes wrong, as GitHub workflow commands: annotations on the job (and its Files tab). */
+async function emitAnnotations(ctx: ToolContext, prUrl: string): Promise<void> {
+  const nf = await prNewFindings(ctx, prUrl).catch((err: Error) => void log(`docs references not checked: ${err.message}`));
+  const lines = nf ? formatGithub({ version: 1, findings: nf.findings, summary: nf.summary, warnings: [] }) : '';
+  if (lines) console.log(lines);
 }
 
 function log(msg: string): void {

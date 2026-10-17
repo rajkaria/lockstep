@@ -4,7 +4,8 @@ import { orgSlug, type Config } from '../config.js';
 import type { GraphStore, OrgGraph } from '../graph/client.js';
 import { INDEX_VERSION, indexOrg, type IndexProgress, type IndexReport } from '../indexer/index.js';
 import { parseRepoName, type Checkout } from '../indexer/repo.js';
-import { downloadRepo, RepoTooLargeError, type TarballLimits } from '../indexer/tarball.js';
+import { RepoTooLargeError, type TarballLimits } from '../indexer/tarball.js';
+import { downloadTree } from '../lint/sources.js';
 
 /**
  * Hosted workspaces: the graph that answers for a repository.
@@ -95,7 +96,8 @@ export class Workspaces {
   private readonly registry: OrgGraph;
   readonly limits: HostedLimits;
   readonly prefix: string;
-  private readonly fetchImpl?: typeof fetch;
+  /** Downloads (tests pass a fake); the hosted PR check and lint download through it too. */
+  readonly fetchImpl?: typeof fetch;
 
   constructor(
     private readonly store: GraphStore,
@@ -246,20 +248,24 @@ export class Workspaces {
       await this.makeRoom(graphName, onEvent);
       const started = Date.now();
       const checkouts: Checkout[] = [];
+      // Every path of each repository: lint judges paths against the whole tree, not just the extracted files.
+      const files: Record<string, string[]> = {};
       for (const repo of repos) {
         onEvent({ type: 'index_progress', repo, phase: 'download', message: `downloading ${repo}`, at: Date.now() });
         // No token: the hosted service indexes public repositories only, whatever its GITHUB_TOKEN can read.
-        const c = await downloadRepo(this.config.home, repo, 'HEAD', {
+        // The indexer's files (what `maxFiles` counts) plus what lint reads: agent files, Makefiles, env files.
+        const c = await downloadTree(this.config.home, repo, 'HEAD', {
           token: undefined,
           limits: this.limits.tarball,
           fetchImpl: this.fetchImpl,
           skip: (path) => TRANSLATION_DIR.test(path),
         });
         onEvent({ type: 'index_progress', repo, phase: 'download', message: `${repo}@${c.sha.slice(0, 7)} downloaded`, at: Date.now() });
-        checkouts.push(c);
+        checkouts.push({ repo: c.repo, dir: c.dir, sha: c.sha });
+        files[c.repo] = c.paths;
       }
       const graph = this.graph(graphName);
-      const report = await indexOrg(graph, checkouts, (p) => onEvent({ type: 'index_progress', repo: p.repo, phase: p.phase, message: p.message, at: Date.now() })).finally(() =>
+      const report = await indexOrg(graph, checkouts, (p) => onEvent({ type: 'index_progress', repo: p.repo, phase: p.phase, message: p.message, at: Date.now() }), { lint: { files } }).finally(() =>
         // The extracted files are only read while indexing; serverless /tmp is small.
         Promise.all(checkouts.map((c) => rm(c.dir, { recursive: true, force: true }))),
       );

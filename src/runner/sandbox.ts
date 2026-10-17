@@ -83,7 +83,7 @@ async function which(cmd: string): Promise<boolean> {
 }
 
 /** Extract `sha` of a clone into `dest` (git archive | tar), fetching missing blobs lazily. */
-async function archive(dir: string, sha: string, dest: string): Promise<void> {
+export async function archive(dir: string, sha: string, dest: string): Promise<void> {
   await mkdir(dest, { recursive: true });
   await new Promise<void>((resolve, reject) => {
     // Blob-less clones fetch missing blobs here, so this git needs the token too (private repositories).

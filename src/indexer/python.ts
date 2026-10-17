@@ -38,8 +38,18 @@ export interface PyDef {
   params: PyParam[];
   /** What a call must pass: parameter kinds, defaults, `*args`/`**kwargs` (functions and methods). */
   arity?: Arity;
+  /** First line of the docstring (what the graph stores). */
   doc?: string;
+  /**
+   * The whole docstring as written: a Python string's text between its quotes, or the JSDoc
+   * block comment before a TypeScript/JavaScript function. For the docstring checks.
+   */
+  docText?: string;
+  /** 1-based line where `docText` starts. */
+  docLine?: number;
   isAsync: boolean;
+  /** The file it is defined in, when its module spans several files (a Go package); else the module's path. */
+  file?: string;
 }
 
 export interface PyImport {
@@ -73,6 +83,8 @@ export interface PyCall {
   lineno: number;
   /** The arguments as written: positional count, keyword names, splats. */
   args?: CallArgs;
+  /** A statement of its own whose value is unused (`z.map();`): in a docs block, maybe a name in a listing. */
+  bare?: boolean;
 }
 
 export interface PyModule {
@@ -85,7 +97,7 @@ export interface PyModule {
   /** Every identifier that appears in the source (for docs examples' late linking). */
   idents: string[];
   /** Source language (absent: Python). */
-  lang?: 'python' | 'ts';
+  lang?: 'python' | 'ts' | 'go';
 }
 
 interface Scope {
@@ -174,6 +186,7 @@ export async function extractPython(source: string, opts: ExtractOptions): Promi
           bases,
           params: [],
           doc: docstring(node.childForFieldName('body')),
+          ...docBlock(node.childForFieldName('body')),
           isAsync: false,
         };
         out.defs.push(def);
@@ -207,6 +220,7 @@ export async function extractPython(source: string, opts: ExtractOptions): Promi
           params,
           arity,
           doc: docstring(node.childForFieldName('body')),
+          ...docBlock(node.childForFieldName('body')),
           isAsync,
         };
         out.defs.push(def);
@@ -533,6 +547,16 @@ function docstring(body: Node | null): string | undefined {
   if (str?.type !== 'string') return undefined;
   const text = str.text.replace(/^[rRbBuUfF]*("""|'''|"|')/, '').replace(/("""|'''|"|')$/, '').trim();
   return text.split('\n')[0]?.trim() || undefined;
+}
+
+/** The whole docstring between its quotes, and the line it starts on (for the docstring checks). */
+function docBlock(body: Node | null): { docText: string; docLine: number } | undefined {
+  const str = body?.namedChildren[0]?.type === 'expression_statement' ? body.namedChildren[0].namedChildren[0] : undefined;
+  if (str?.type !== 'string') return undefined;
+  const open = /^[rRbBuUfF]*("""|'''|"|')/.exec(str.text);
+  if (!open) return undefined;
+  const end = str.text.length > open[0].length && str.text.endsWith(open[1]!) ? str.text.length - open[1]!.length : str.text.length;
+  return { docText: str.text.slice(open[0].length, end), docLine: str.startPosition.row + 1 };
 }
 
 function joinDotted(a: string, b: string): string {

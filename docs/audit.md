@@ -1,6 +1,6 @@
 # Docs audit
 
-A docs audit answers "how true are these docs right now?" with no pull request: every call in a docs example checked against the code it reaches (in its own repository or another), the latest example runs at the indexed commits, and how much of the public API the docs name or call, summed up as a health score from 0 to 100. This page covers what the audit checks, how the score is computed, the CLI command, the web page, the README badge, the HTTP API and MCP tool, the GitHub Action's scheduled audit, how to read and act on the report, and its limits. It is for maintainers and docs teams who want a baseline before relying on pull request checks, or a weekly report after.
+A docs audit answers "how true are these docs right now?" with no pull request: every call in a docs example checked against the code it reaches (in its own repository or another), every path, link, command and env var the docs, READMEs and AI agent files (`AGENTS.md`, `CLAUDE.md`, Cursor rules) name that the repository does not have, the latest example runs at the indexed commits, and how much of the public API the docs name or call, summed up as a health score from 0 to 100. This page covers what the audit checks, how the score is computed, the CLI command, the web page, the README badge, the HTTP API and MCP tool, the GitHub Action's scheduled audit, how to read and act on the report, and its limits. It is for maintainers and docs teams who want a baseline before relying on pull request checks, or a weekly report after.
 
 ## Run it
 
@@ -13,6 +13,21 @@ With no FalkorDB configured the CLI starts a local one, indexes the repository a
 Other ways to run the same audit: the page [staleproof.dev/#/audit](https://staleproof.dev/#/audit) for any public repository, [`GET /api/audit`](http-api.md#get-apiaudit), the MCP tool [`audit_docs`](tools.md#audit_docs), and the [GitHub Action](github-action.md#audit-the-docs-on-a-schedule) on a schedule.
 
 ## What it checks
+
+### Docs references
+
+When a repository is indexed, [`staleproof lint`](lint.md) runs on the checkout and every finding is stored in the graph as a `Finding` node (placed in the doc section that holds it with an `IN_SECTION` edge), so the audit reads them later without a checkout. They are the references that no longer match the repository: missing paths and line numbers, broken links and anchors, `npm run`/`make`/`just` commands no script defines, unknown subcommands and flags of the repository's own CLI, documented env vars no code reads, and docstrings that document parameters a function lacks ([Lint rules](rules.md) lists every rule). The report lists them **AI agent instructions first**, then READMEs and contributing guides, then the docs, each with its line, the message and the rule:
+
+```text
+Docs references that no longer match the repository (3: 3 errors)
+  AI agent instructions
+    AGENTS.md:6 error `docs/setup.md` does not exist; it moved to `docs/guides/setup.md`. [path-missing]
+    AGENTS.md:5 error `lint:docs` is not a script in package.json. [command-missing]
+  README and contributing guides
+    README.md:5 error The link target `docs/setup.md` does not exist. [link-broken]
+```
+
+Example findings (`example-*` rules) are not stored twice: the examples section below is the indexer's own `MISMATCH` edges. A repository indexed by Staleproof 0.4 or later (index version 4) has its references checked; an older graph is re-indexed on next use on the hosted service, and with `staleproof index` elsewhere.
 
 ### Examples that no longer fit the code
 
@@ -30,7 +45,7 @@ The details above come from the test suite's fixture docs. Nothing runs to find 
 
 ### Example runs
 
-The audit reads the latest recorded run of each example at the indexed commits (the `current` side; runs before and after a pull request are not counted), and only runs whose installed commits are the ones the graph holds now. `staleproof audit --run <n>` first runs up to `n` Python examples in the [sandbox](example-runner.md): those with a mismatch first, then the ones that call the most code. Examples marked `skip` or `expect-error` ([directives](indexing.md#example-directives)) are never run. Without `--run`, the audit uses only what earlier runs recorded.
+The audit reads the latest recorded run of each example at the indexed commits (the `current` side; runs before and after a pull request are not counted), and only runs whose installed commits are the ones the graph holds now. `staleproof audit --run <n>` first runs up to `n` Python, JavaScript and TypeScript examples in the [sandbox](example-runner.md): those with a mismatch first, then the ones that call the most code. Examples marked `skip` or `expect-error` ([directives](indexing.md#example-directives)) are never run. Without `--run`, the audit uses only what earlier runs recorded.
 
 ### API coverage
 
@@ -49,17 +64,20 @@ The public symbols no doc names or calls, ordered by how much other code depends
 
 ## The score
 
-The score starts at 100 and loses points for three things:
+The score starts at 100 and loses points for four things:
 
 | Deduction | Points | Cap |
 |---|---|---|
 | Each example with at least one line that no longer fits the code | 8 | 50 |
 | Each other example that fails when run (`fail` or `timeout`; examples already counted as mismatched are not counted twice) | 6 | 30 |
+| **Docs references**: each error-level finding in the docs, READMEs and AI agent files (a missing path, a broken link, an undefined command); each warning (a missing anchor, a line past the end of a file) costs 1; info findings (an env var the env file does not list) cost nothing | 3 | 25 |
 | Each percent of public API that no doc names or calls | 0.3, rounded | none |
 
 The score never goes below 0. The grade is `A` from 90, `B` from 80, `C` from 70, `D` from 60, else `F`. Each deduction is listed in the report with its reason.
 
-For example, auditing the fixture repository `acme/mini-client` from the test suite: 2 examples call it in ways it no longer accepts (−16), and 4 of its 11 public symbols are named or called by no doc, 63.6% coverage (−11, from 36.4 × 0.3). The score is 73, grade C.
+For example, auditing the fixture repository `acme/mini-client` from the test suite: 2 examples call it in ways it no longer accepts (−16), and 4 of its 11 public symbols are named or called by no doc, 63.6% coverage (−11, from 36.4 × 0.3). The score is 73, grade C. A repository whose agent file names a moved file and whose README runs a renamed script loses 6 more: `Docs references: 2 errors where the docs or AI agent files name a path, link, command or setting the repository does not have (3 per error, 1 per warning, at most 25)`.
+
+The "Docs references" deduction arrived with Staleproof 0.5 (index version 4): a score computed before it can be up to 25 points higher for the same repository.
 
 ## What an audit covers
 
@@ -78,7 +96,7 @@ staleproof audit [options] [repos...]
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--run <n>` | `0` | First run up to `n` Python examples at the indexed commits (needs `git`, and uv or Python 3.12+) |
+| `--run <n>` | `0` | First run up to `n` Python, JavaScript and TypeScript examples at the indexed commits (needs `git`, and uv or Python 3.12+ for Python, Node for JavaScript and TypeScript) |
 | `--limit <n>` | `25` | How many undocumented symbols to list |
 | `--format <format>` | `text` | `text`, `markdown` (the Action's job summary and issue body) or `json` |
 | `--out <file>` | stdout | Write the report to a file; logs `wrote <file>: <summary>` on stderr |
@@ -120,21 +138,24 @@ API coverage: 7 of 11 public symbols (63.6%) named or called by a doc
 Badge: [![docs health](https://staleproof.dev/api/badge/acme/mini-client.svg)](https://staleproof.dev/#/audit?repo=acme%2Fmini-client)
 ```
 
-The mismatched examples live in another repository (`acme/stale-docs`) and call `acme/mini-client`'s code, so they count for it. When runs are recorded, a section `Example runs at the indexed commits (<p> pass, <f> fail, <s> skipped, <e> not installed)` lists the failing ones. The badge line appears when one repository is audited. When a summary sentence `Indexed by an older Staleproof: …` appears, see [Limits](#limits).
+The mismatched examples live in another repository (`acme/stale-docs`) and call `acme/mini-client`'s code, so they count for it. When the repository's docs references were checked, a section `Docs references that no longer match the repository (<n>: <errors>, <warnings>)` comes before the examples (see [Docs references](#docs-references)), or one line saying all of them match; the summary gains `<n> docs references in <f> files no longer match the repository (<a> in AI agent instructions).` When runs are recorded, a section `Example runs at the indexed commits (<p> pass, <f> fail, <s> skipped, <e> not installed)` lists the failing ones. The badge line appears when one repository is audited. When a summary sentence `Indexed by an older Staleproof: …` appears, see [Limits](#limits).
 
-**Prints, Markdown.** The same content as tables: the deductions, the mismatched lines with links to the exact doc line (`| [docs/stale.md:1 line 20](…#L20) | Upgrading guide > Query | `g.read_only` | `Graph` has no attribute `read_only` |`), the failing runs, coverage with the undocumented symbols in a collapsed `<details>` block, the badge, a footer with the graph and commits, and a last line the GitHub Action reads:
+**Prints, Markdown.** The same content as tables: the deductions, the docs references (one table per surface, AI agent instructions first, each row linked to the line: `| [AGENTS.md:5](…#L5) | `lint:docs` is not a script in package.json. | command-missing |`; the first 100, the JSON has all), the mismatched lines with links to the exact doc line (`| [docs/stale.md:1 line 20](…#L20) | Upgrading guide > Query | `g.read_only` | `Graph` has no attribute `read_only` |`), the failing runs, coverage with the undocumented symbols in a collapsed `<details>` block, the badge, a footer with the graph and commits, and two last lines the GitHub Action reads:
 
 ```text
+<!-- staleproof:audit-findings findings=3 errors=3 warnings=0 -->
 <!-- staleproof:audit score=73 mismatched=2 failing=0 coverage=63.6 -->
 ```
 
+The `audit-findings` line appears from Staleproof 0.5 on; the `audit` line keeps its shape.
+
 The first line is the marker `<!-- staleproof-audit -->`, which the Action uses to find its issue.
 
-**JSON.** `{summary, org, repos: [{name, sha, symbols, sections, indexVersion}], outdatedIndex, score, grade, deductions: [{points, why}], examples: {total, python, linked, mismatched}, mismatches: [{example, url, repo, path, heading, line, kind, detail, call, symbol}], coverage: {api, documented, percent}, undocumented: [{qualname, repo, kind, signature, url, callers, crossRepoCallers}], runs: [{example, url, status, error, reason}], runCounts: {pass, fail, skipped, error}, generatedAt}`. `examples.linked` counts the examples that call at least one indexed symbol; `examples.mismatched` the ones with at least one `MISMATCH` line.
+**JSON.** `{summary, org, repos: [{name, sha, symbols, sections, indexVersion, findingsChecked}], outdatedIndex, score, grade, deductions: [{points, why}], examples: {total, python, linked, mismatched}, mismatches: [{example, url, repo, path, heading, line, kind, detail, call, symbol}], coverage: {api, documented, percent}, undocumented: [{qualname, repo, kind, signature, url, callers, crossRepoCallers}], runs: [{example, url, status, error, reason}], runCounts: {pass, fail, skipped, error}, findings: [Finding & {heading}], findingCounts: {errors, warnings, infos, byRule, bySurface}, generatedAt}`. Each finding has the [lint JSON shape](lint.md#json-output) (`rule`, `severity`, `message`, `repo`, `path`, `line`, `column`, `endLine`, `endColumn`, `surface`, `subject`, `evidence`, `fix`, `fingerprint`) plus the `heading` of its doc section when it is in one; `findings` lists AI agent instruction files first. `findingsChecked` is false for a repository indexed before index version 4 or from a partial file list; the new fields are additive. `examples.linked` counts the examples that call at least one indexed symbol; `examples.mismatched` the ones with at least one `MISMATCH` line.
 
 ## On the web
 
-[staleproof.dev/#/audit](https://staleproof.dev/#/audit) audits any public GitHub repository: type `owner/name` (or a repository URL) and press **Audit**. The first audit downloads and indexes the repository into the workspace graph of its owner, showing the progress, then shows the score and grade, the deductions, every example line that no longer fits (linked to the line on GitHub), failing runs recorded earlier, the coverage bar with the undocumented symbols, the badge Markdown (pointing at the host serving the page) and a link to install the GitHub Action. A link to a repository's report is `https://staleproof.dev/#/audit?repo=<owner>%2F<name>`; opening it starts the audit.
+[staleproof.dev/#/audit](https://staleproof.dev/#/audit) audits any public GitHub repository: type `owner/name` (or a repository URL) and press **Audit**. The first audit downloads and indexes the repository into the workspace graph of its owner, showing the progress, then shows the score and grade, the deductions, the docs references that no longer match the repository (AI agent instructions first, each linked to its line), every example line that no longer fits (linked to the line on GitHub), failing runs recorded earlier, the coverage bar with the undocumented symbols, the badge Markdown (pointing at the host serving the page) and a link to install the GitHub Action. A link to a repository's report is `https://staleproof.dev/#/audit?repo=<owner>%2F<name>`; opening it starts the audit.
 
 The hosted service runs no examples, so its audit scores the static checks and coverage only (plus runs recorded earlier, for FalkorDB's curated repositories). A server you run with `staleproof serve` serves the same page at `#/audit`; it audits the repositories in its graph, and with `--hosted` indexes any public repository first.
 
@@ -192,7 +213,7 @@ Every Monday at 06:00 UTC it indexes the repository (and `also-index`), runs up 
 
 ## Reading the report
 
-Work through the mismatches first: each one is a line a reader will copy and see fail.
+Start with the docs references in AI agent instructions: every agent session reads them, so one stale path misleads every run. Then the mismatches: each one is a line a reader will copy and see fail. A docs reference names its fix in the message when there is one (`it moved to docs/guides/setup.md`); `staleproof lint` in the checkout shows the same findings, and `<!-- staleproof: ignore rule-id -->` silences one that is intentional ([Lint: configure and silence](lint.md#configure-and-silence)).
 
 | Kind | What to do |
 |---|---|
@@ -219,11 +240,12 @@ Lines the static checks report on repositories as they are today (checked on 202
 
 - **Static checks follow exact resolutions only.** A call whose receiver the types do not reveal (resolved by name, or not at all) is never judged, so a clean audit means "nothing found where the source is certain", not "every example works". Runs (`--run`, or the Action's `audit-runs`) cover the rest for Python.
 - **Guards leave lines unjudged**: functions with a decorator outside a short allow-list (`staticmethod`, `classmethod`, `functools.cache`, `lru_cache`, `abstractmethod`, `override`, `final`, `deprecated`, `wraps`), several definitions under one name (`@overload`), properties, classes with class decorators, a metaclass, a `__getattr__`, a `__new__` or a base class outside the organisation (other than `object`, `ABC`, `Generic`, `Protocol`), modules with a `__getattr__` or a star import from outside the organisation, calls with `*args` or `**kwargs`, and calls or signatures tree-sitter cannot read.
-- **TypeScript and JavaScript get no argument checks** (JavaScript accepts any argument count), only names that do not exist; their examples are never run.
-- **Runs need a sandbox.** `--run` needs `git` and uv or Python 3.12+; the hosted service and `audit_docs` run nothing and read only recorded runs.
+- **TypeScript and JavaScript argument checks follow the language**: optional, default and rest parameters as TypeScript reads them, every parameter optional in JavaScript files; overloads, decorators and functions that read `arguments` are not judged. Go examples are checked (names, argument counts, packages) but not run.
+- **Runs need a sandbox.** `--run` needs `git` and uv or Python 3.12+ for Python examples, and Node with the repository's package manager for JavaScript and TypeScript ones ([JavaScript and TypeScript runs](example-runner.md#javascript-and-typescript)); the hosted service and `audit_docs` run nothing and read only recorded runs.
 - **Coverage counts references, not explanations.** A symbol named once in inline code counts as documented.
 - **An older index** (written before Staleproof 0.3) has no `MISMATCH` edges or export flags. The audit then adds `Indexed by an older Staleproof: examples are not checked against the code until the repositories are indexed again (staleproof index).` to its summary and sets `outdatedIndex`; re-index the repositories. Hosted workspaces indexed by an older version are re-indexed on their next use.
 - **One graph at a time.** An audit covers repositories in one graph; cross-repository findings need the repositories indexed together.
+- **Docs references need a full file list.** Lint judges paths against the whole tree, so the indexer lints a git checkout (the CLI and the Action) or a tarball whose every path it listed (the hosted service). A checkout from a partial download is not linted (`findingsChecked: false`) rather than reporting files it left out as missing. Findings are those of the indexed commit: run `staleproof lint` for the working tree.
 
 ## Related
 

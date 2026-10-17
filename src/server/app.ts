@@ -25,6 +25,11 @@ import { parseRepoName } from '../indexer/repo.js';
 import { canonicalPrUrl, NotIndexedError, refreshIfMoved } from '../pr/ingest.js';
 import { handleMcpRequest } from '../mcp/http.js';
 import { auditDocs, type AuditData } from '../audit.js';
+import { DEFAULT_TARBALL_LIMITS } from '../indexer/tarball.js';
+import { hasFreshRemoteLint, lintGitHubRepo } from '../lint/diff.js';
+import { formatJson, formatLint, LINT_FORMATS, type LintFormat } from '../lint/format.js';
+import { isRuleId } from '../lint/rules.js';
+import type { RuleId } from '../lint/types.js';
 import { healthBadge } from './badge.js';
 import { docsForTool } from '../tools/docs-for.js';
 
@@ -105,6 +110,8 @@ export function createApp(opts: AppOptions): Hono {
   const mutex = new Mutex();
   const limiter = new RateLimiter(opts.rateLimit ?? 30);
   const mcpLimiter = new RateLimiter((opts.rateLimit ?? 30) * 10);
+  /** `/api/lint` downloads a tarball on a cache miss: misses count, cached answers do not. */
+  const lintLimiter = new RateLimiter((opts.rateLimit ?? 30) * 2);
   let factsCache: { at: number; facts: Facts } | undefined;
   /** Audits by graph and repository, for badges (10 minutes; the CDN caches the SVG for an hour on top). */
   const auditCache = new Map<string, { at: number; data: AuditData; summary: string }>();
@@ -310,7 +317,13 @@ export function createApp(opts: AppOptions): Hono {
           const budgetMs = config.checkBudgetMs ? Math.max(45_000, config.checkBudgetMs - (Date.now() - t0)) : undefined;
           if (mode === 'agent') await runAgentCheck(ctx, opts.model!(), pr, { onEvent: send, budgetMs });
           // A hosted workspace has no recorded runs and the server no sandbox: don't try examples there.
-          else await runGraphCheck(ctx, pr, { onEvent: send, maxRuns: target.curated ? undefined : 0 });
+          // Its docs references are linted from the public tarballs of both commits (never with the server's token).
+          else
+            await runGraphCheck(ctx, pr, {
+              onEvent: send,
+              maxRuns: target.curated ? undefined : 0,
+              ...(hosted ? { lint: { token: null, fetchImpl: hosted.fetchImpl, limits: hosted.limits.tarball, timeoutMs: 90_000 } } : {}),
+            });
         });
       } catch (err) {
         send({ type: 'error', message: visitorMessage((err as Error).message) });
@@ -365,6 +378,51 @@ export function createApp(opts: AppOptions): Hono {
       }
       await chain;
     });
+  });
+
+  /**
+   * Graph-free lint of any public repository at a ref (its tarball; no index needed): the paths,
+   * links, anchors, commands, CLI flags and env vars its docs and AI agent files name that the
+   * repository does not have. JSON by default (`version: 1`, like `staleproof lint --format json`),
+   * or `format=markdown|text|sarif|github`. Cached 10 minutes per repository and ref.
+   */
+  app.get('/api/lint', async (c) => {
+    let repo: string;
+    try {
+      repo = parseRepoName(c.req.query('repo') ?? '');
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    const ref = c.req.query('ref')?.trim() || 'HEAD';
+    if (!/^[\w.\/-]{1,200}$/.test(ref) || ref.includes('..')) return c.json({ error: 'ref must be a branch, tag or commit' }, 400);
+    const format = (c.req.query('format') ?? 'json') as LintFormat;
+    if (!LINT_FORMATS.includes(format)) return c.json({ error: `format must be one of ${LINT_FORMATS.join(', ')}` }, 400);
+    const rules = (c.req.query('rule') ?? '').split(',').map((r) => r.trim()).filter(Boolean);
+    const bad = rules.filter((r) => !isRuleId(r));
+    if (bad.length) return c.json({ error: `unknown rule ${bad.join(', ')} (see https://staleproof.dev/#/docs/rules)` }, 400);
+    const lint = { examples: c.req.query('examples') !== '0', ...(rules.length ? { rules: rules as RuleId[] } : {}) };
+    const fresh = c.req.query('fresh') === '1';
+    if ((fresh || !hasFreshRemoteLint(repo, { ref, lint })) && !lintLimiter.allow(`lint:${clientKey(c)}`)) return c.json({ error: 'rate limited: try again later' }, 429);
+    let r: Awaited<ReturnType<typeof lintGitHubRepo>>;
+    try {
+      // The hosted service reads public repositories only, whatever its own GITHUB_TOKEN can see.
+      r = await lintGitHubRepo(repo, {
+        ref,
+        fresh,
+        home: config.home,
+        token: hosted ? undefined : config.githubToken,
+        fetchImpl: hosted?.fetchImpl,
+        limits: hosted?.limits.tarball ?? DEFAULT_TARBALL_LIMITS,
+        lint,
+      });
+    } catch (err) {
+      if (/not found/i.test((err as Error).message)) return c.json({ error: (err as Error).message }, 404);
+      throw err;
+    }
+    const headers = { 'cache-control': 'public, max-age=60, s-maxage=600' };
+    if (format === 'json') return c.body(formatJson(r), 200, { ...headers, 'content-type': 'application/json; charset=utf-8' });
+    const type = format === 'sarif' ? 'application/sarif+json' : format === 'markdown' ? 'text/markdown' : 'text/plain';
+    return c.body(formatLint(r, format), 200, { ...headers, 'content-type': `${type}; charset=utf-8` });
   });
 
   /** Which docs depend on a symbol (no pull request): `symbol` is an id, a qualified name or `Class.method`; `repo` picks the graph. */

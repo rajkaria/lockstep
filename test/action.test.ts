@@ -74,6 +74,26 @@ describe('GitHub Action', () => {
     expect(sh(predictedExpr)).toBe('5');
   });
 
+  it('annotates and counts the docs references a pull request makes wrong, and can fail on them', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const yml = await readFile(join(root, 'action.yml'), 'utf8');
+    const cli = await readFile(join(root, 'src', 'cli.ts'), 'utf8');
+    const action = parse(yml) as { outputs: Record<string, { value: string }>; runs: { steps: { name?: string; if?: string }[] } };
+    expect(action.outputs.findings!.value).toBe('${{ steps.check.outputs.findings }}');
+    // The flag is passed only when the installed CLI has it (an older pinned version keeps working).
+    expect(yml).toContain("grep -q -- '--annotations' <<< \"$help\"");
+    expect(cli).toContain(".option('--annotations'");
+    const line = '<!-- staleproof:findings new=3 errors=2 warnings=1 -->';
+    const sh = (name: string) => {
+      const expr = new RegExp(`${name}=\\$\\(echo "\\$lint" \\| sed -E '([^']+)'\\)`).exec(yml)![1]!;
+      return execFileSync('bash', ['-c', `lint='${line}'; echo "$lint" | sed -E '${expr}'`], { encoding: 'utf8' }).trim();
+    };
+    expect([sh('findings'), sh('finding_errors')]).toEqual(['3', '2']);
+    expect(yml).toContain("grep -o '<!-- staleproof:findings [^>]*-->'");
+    const fail = action.runs.steps.find((s) => s.name === 'Fail on docs references the pull request makes wrong')!;
+    expect(fail.if).toContain("inputs.fail-on == 'findings'");
+  });
+
   it('reads score and counts from the line the audit report ends with', async () => {
     const { execFileSync } = await import('node:child_process');
     const { auditMarkdown } = await import('../src/format/audit.js');

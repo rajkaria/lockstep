@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auditDocs, auditTool, publicApi, scoreAudit } from '../src/audit.js';
 import { auditMarkdown, auditText } from '../src/format/audit.js';
 import type { OrgGraph } from '../src/graph/client.js';
-import { indexOrg } from '../src/indexer/index.js';
+import { indexOrg, INDEX_VERSION } from '../src/indexer/index.js';
 import type { ToolContext } from '../src/tools/types.js';
 import { FIXTURE_REPOS, STALE_DOCS, testConfig, testGraph } from './helpers.js';
 
@@ -44,7 +44,10 @@ describe('docs audit (FalkorDB)', () => {
     expect(r.summary).toBe(
       'Docs health 67/100 (D) for 4 repositories. 3 of 8 examples that call the code no longer fit it (5 lines). 10 of 14 public symbols (71.4%) are named or called by a doc.',
     );
-    expect(r.queries.map((q) => q.name)).toEqual(['auditRepos', 'auditExamples', 'auditMismatches', 'auditRuns', 'auditSymbols']);
+    expect(r.queries.map((q) => q.name)).toEqual(['auditRepos', 'auditExamples', 'auditMismatches', 'auditRuns', 'auditSymbols', 'auditFindings']);
+    // The fixtures are plain folders, not git checkouts or tarball listings: their docs references were not linted.
+    expect(r.data.findings).toEqual([]);
+    expect(r.data.repos.every((x) => x.findingsChecked === false)).toBe(true);
   });
 
   it('scopes to repositories: their docs, and examples elsewhere that call their code', async () => {
@@ -64,7 +67,7 @@ describe('docs audit (FalkorDB)', () => {
       expect(r.data.outdatedIndex).toBe(true);
       expect(r.summary).toContain('Indexed by an older Staleproof');
     } finally {
-      await graph.run(`MATCH (r:Repo {name: 'acme/mini-sdk'}) SET r.index_version = 3`);
+      await graph.run(`MATCH (r:Repo {name: 'acme/mini-sdk'}) SET r.index_version = $v`, { v: INDEX_VERSION });
     }
   });
 

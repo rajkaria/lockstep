@@ -1,0 +1,9 @@
+{
+  "name": "@acme/broken",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "node -e \"console.error('cannot build'); process.exit(1)\""
+  }
+}

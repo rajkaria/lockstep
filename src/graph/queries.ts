@@ -45,6 +45,8 @@ export const SCHEMA_INDEXES: [label: string, prop: string][] = [
   ['Run', 'id'],
   ['Run', 'key'],
   ['Check', 'id'],
+  ['Finding', 'id'],
+  ['Finding', 'repo'],
 ];
 
 // ─── index: code ────────────────────────────────────────────────────────────
@@ -167,6 +169,33 @@ export const markGoneDocs = q('index', 'markGoneDocs', 'Doc sections and example
   RETURN count(d) AS gone
 `);
 
+// ─── index: lint findings ───────────────────────────────────────────────────
+
+export const deleteRepoFindings = q('index', 'deleteRepoFindings', 'Drop a repository\'s Finding nodes before storing the current ones (a re-index replaces them).', `
+  MATCH (f:Finding {repo: $repo})
+  DETACH DELETE f
+`);
+
+export const findingSections = q('index', 'findingSections', 'The live doc sections of a repository with their line ranges, to place each finding in the section that holds it.', `
+  MATCH (d:DocSection {repo: $repo})
+  WHERE d.status = 'live'
+  RETURN d.id AS id, d.path AS path, d.lineno AS lineno, d.end_lineno AS endLineno
+`);
+
+export const upsertFindings = q('index', 'upsertFindings', 'Store what lint found in the docs and AI agent files (stale paths, links, commands, env vars), each in its doc section when it is in one.', `
+  UNWIND $rows AS row
+  MERGE (f:Finding {id: row.id})
+  SET f = row.props
+  WITH f, row
+  OPTIONAL MATCH (d:DocSection {id: row.section})
+  FOREACH (_ IN CASE WHEN d IS NULL THEN [] ELSE [1] END | MERGE (f)-[:IN_SECTION]->(d))
+`);
+
+export const markLinted = q('index', 'markLinted', 'Record whether a repository\'s docs references were checked at index time, and how many findings it has.', `
+  MATCH (r:Repo {name: $repo})
+  SET r.findings_checked = $checked, r.findings = $count
+`);
+
 // ─── pull requests ──────────────────────────────────────────────────────────
 
 export const upsertPullRequest = q('index', 'upsertPullRequest', 'Record a pull request and forget its previous change set (re-checking is idempotent).', `
@@ -247,11 +276,11 @@ export const predictedCalls = q('tool', 'predictedCalls', 'Examples that call a 
   WHERE c.kind IN ['removed', 'renamed', 'signature', 'export-removed']
   MATCH (e:CodeExample)-[u:USES]->(s)
   WHERE e.status = 'live' AND coalesce(e.directive, '') = ''
-    AND (e.lang = 'python' OR (c.kind <> 'signature' AND e.lang IN ['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']))
+    AND e.lang IN ['python', 'go', 'javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']
   OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
   RETURN e.id AS example, e.code AS code, e.lang AS lang, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
          coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
-         s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+         s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators, s.path AS symbolPath,
          c.kind AS change, c.before AS before, c.after AS after, c.renamed_to AS renamedTo
   ORDER BY example, line
 `);
@@ -310,11 +339,11 @@ export const predictedCallsOfChanges = q('tool', 'predictedCallsOfChanges', 'Exa
   WHERE ch.kind IN ['removed', 'renamed', 'signature', 'export-removed']
   MATCH (e:CodeExample)-[u:USES]->(s)
   WHERE e.status = 'live' AND coalesce(e.directive, '') = ''
-    AND (e.lang = 'python' OR (ch.kind <> 'signature' AND e.lang IN ['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']))
+    AND e.lang IN ['python', 'go', 'javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']
   OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
   RETURN e.id AS example, e.code AS code, e.lang AS lang, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
          coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
-         s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+         s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators, s.path AS symbolPath,
          ch.kind AS change, ch.before AS before, ch.after AS after, ch.renamed_to AS renamedTo
   ORDER BY example, line
 `);
@@ -345,6 +374,11 @@ export const prChanges = q('tool', 'prChanges', 'What a pull request changed, sy
   RETURN s.qualname AS symbol, s.kind AS kind, c.kind AS change, c.before AS before, c.after AS after,
          c.renamed_to AS renamedTo, s.repo AS repo, s.path AS path, s.status AS status
   ORDER BY change, symbol
+`);
+
+export const prCommits = q('tool', 'prCommits', 'The two commits a pull request is compared between: its docs are linted at both, and findings only the second has are what it makes wrong.', `
+  MATCH (pr:PullRequest {url: $url})
+  RETURN pr.repo AS repo, pr.before_sha AS before, pr.after_sha AS after
 `);
 
 export const rankSections = q('tool', 'rankSections', 'Order doc sections by how central their page is: PageRank over LINKS_TO, summed per page.', `
@@ -726,7 +760,8 @@ export const auditRepos = q('report', 'auditRepos', 'The repositories a docs aud
   WITH r, count(s) AS symbols
   OPTIONAL MATCH (d:DocSection {repo: r.name})
   WHERE d.status = 'live'
-  RETURN r.name AS name, r.sha AS sha, r.indexed_at AS indexedAt, coalesce(r.index_version, 0) AS indexVersion, symbols, count(d) AS sections
+  RETURN r.name AS name, r.sha AS sha, r.indexed_at AS indexedAt, coalesce(r.index_version, 0) AS indexVersion, symbols, count(d) AS sections,
+         coalesce(r.findings_checked, false) AS findingsChecked
   ORDER BY name
 `);
 
@@ -768,6 +803,16 @@ export const auditRuns = q('report', 'auditRuns', 'Recorded runs of the audited 
   WHERE e.id IN $ids AND r.side = 'current'
   RETURN e.id AS example, e.url AS url, r.status AS status, r.error AS error, r.reason AS reason, r.installed AS installed, r.created_at AS at
   ORDER BY at ASC
+`);
+
+export const auditFindings = q('report', 'auditFindings', 'What lint found at index time in the audited repositories\' docs and AI agent files (stale paths, links, commands, env vars), with the section each is in.', `
+  MATCH (f:Finding)
+  WHERE f.repo IN $repos
+  OPTIONAL MATCH (f)-[:IN_SECTION]->(d:DocSection)
+  RETURN f.rule AS rule, f.severity AS severity, f.message AS message, f.repo AS repo, f.path AS path, f.line AS line, f.column AS column,
+         f.endLine AS endLine, f.endColumn AS endColumn, f.surface AS surface, f.subject AS subject, f.evidence AS evidence, f.fix AS fix,
+         f.fingerprint AS fingerprint, d.heading_path AS heading
+  ORDER BY repo, path, line, column
 `);
 
 export const ALL_QUERIES: NamedQuery[] = [
@@ -832,7 +877,13 @@ export const ALL_QUERIES: NamedQuery[] = [
   auditSymbols,
   auditExamples,
   auditRuns,
+  auditFindings,
   markGoneDocs,
+  deleteRepoFindings,
+  findingSections,
+  upsertFindings,
+  markLinted,
+  prCommits,
   repoSymbols,
   callsFrom,
   graphCounts,

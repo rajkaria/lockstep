@@ -36,3 +36,6 @@ export { predictBreaks, type PredictedBreak } from './pr/predict.js';
 export { canonicalPrUrl, refreshIfMoved } from './pr/ingest.js';
 export { INDEX_VERSION } from './indexer/index.js';
 export * from './lint/index.js';
+export { ParseCache } from './lint/cache.js';
+export { runHook, type HookEvent, type HookResult } from './hooks/index.js';
+export { runInit } from './init/index.js';

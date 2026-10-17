@@ -105,7 +105,7 @@ Input problems are caught before a tool runs, with the same rules in the agent l
 
 ### `check_pull_request`
 
-Check a GitHub pull request for docs it can make false, in one call: every doc section and example the changed code reaches (with the evidence path), the changed symbols no doc reaches, ranked by PageRank, as a Markdown report. Start here; use impact/read_section/decisions_for to dig into one section.
+Check a GitHub pull request for docs it can make false, in one call: the references in the docs and AI agent files it makes wrong (paths, links, commands, env vars; linted at both commits), every doc section and example the changed code reaches (with the evidence path), the changed symbols no doc reaches, ranked by PageRank, as a Markdown report. Start here; use impact/read_section/decisions_for to dig into one section.
 
 Available to MCP clients.
 
@@ -131,6 +131,22 @@ Available to MCP clients.
 
 Cypher it runs: `impactOfChanges`, `predictedCallsOfChanges`, `clearanceOfChanges`, `mismatchesFor` ([full text](GRAPH-MODEL.md)).
 
+### `lint_docs`
+
+Lint the docs, READMEs and AI agent instruction files (AGENTS.md, CLAUDE.md, Cursor and Copilot rules) of a repository: every path, link, anchor, command, CLI flag, env var and docstring parameter they name that the repository does not have, with the exact line and where Staleproof looked. No graph and no index needed. Pass repo (owner/name of a public GitHub repository, optionally ref), or on a local server dir (a checkout); with dir, new_only keeps only findings the working tree introduced (absent at base, default HEAD when there are uncommitted changes, else the merge base with the default branch).
+
+Available to MCP clients.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `repo` | string | no | owner/name of a GitHub repository to lint from its tarball |
+| `ref` | string | no | With repo: a branch, tag or commit (default: the default branch) |
+| `dir` | string | no | Local servers only: a checkout to lint |
+| `new_only` | boolean | no | With dir: only findings absent at the base commit |
+| `base` | string | no | With dir and new_only: the commit to compare with |
+| `rules` | string[] | no | Only these rule ids (see https://staleproof.dev/#/docs/rules) |
+| `files` | string[] | no | Only findings in these files or about them |
+
 ### `docs_for_symbol`
 
 Which doc sections and code examples depend on a symbol, in any repository, with the evidence path for each: symbol ← up to 3 callers ← doc. Call it before changing a function, class or method to know which docs to update in the same change. The symbol can be an id (owner/repo:pkg.mod.Class.method), a qualified name, a dotted suffix like Graph.query, or a bare name.
@@ -146,7 +162,7 @@ Cypher it runs: `docsForSymbol`, `findSymbols`, `mismatchesFor` ([full text](GRA
 
 ### `audit_docs`
 
-Audit the docs of indexed repositories with no pull request: a 0-100 health score, every example line that no longer fits the code it calls (unknown keywords, wrong argument counts, names that no longer exist, found statically across repositories), API coverage (public symbols no doc names or calls, most used first) and the latest example runs at the indexed commits.
+Audit the docs of indexed repositories with no pull request: a 0-100 health score, every example line that no longer fits the code it calls (unknown keywords, wrong argument counts, names that no longer exist, found statically across repositories), the references in the docs and AI agent files that no longer match the repository (paths, links, commands, env vars; agent files first), API coverage (public symbols no doc names or calls, most used first) and the latest example runs at the indexed commits.
 
 Available to MCP clients.
 
@@ -155,7 +171,7 @@ Available to MCP clients.
 | `repos` | string[] | no | Repositories to audit as owner/name (default: every repository in the graph) |
 | `limit` | integer 0–200 | no | How many undocumented symbols to list (default 25) |
 
-Cypher it runs: `auditRepos`, `auditExamples`, `auditMismatches`, `auditRuns`, `auditSymbols` ([full text](GRAPH-MODEL.md)).
+Cypher it runs: `auditRepos`, `auditExamples`, `auditMismatches`, `auditRuns`, `auditSymbols`, `auditFindings` ([full text](GRAPH-MODEL.md)).
 
 ### `impact`
 

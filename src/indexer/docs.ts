@@ -5,8 +5,10 @@ import type { OrgGraph } from '../graph/client.js';
 import * as Q from '../graph/queries.js';
 import { identifiersIn, packagesNamedIn, scanDoc, type ExampleDirective, type MdDoc } from './markdown.js';
 import { matchesAny } from './repo-config.js';
+import { directoriesOf, olderOrTranslatedDocs } from './repo.js';
 import { extractPython, type PyModule } from './python.js';
 import { bareModule, extractTs } from './typescript.js';
+import { extractGoExample, goImportSpecs, goModuleOf } from './go.js';
 import type { ParsedRepo } from './index.js';
 import { fileId, writeBatched } from './write.js';
 import type { Mismatch, Resolution, SymbolTable } from './resolve.js';
@@ -113,6 +115,7 @@ export async function writeDocs(
   }
 
   const ownPackages = new Set(p.modules.map((m) => m.module.split('.')[0]!));
+  const docDirs = directoriesOf(p.files.map((f) => f.path));
   for (const doc of docs) {
     const contextRepos = pageContext(doc, ownPackages, table);
 
@@ -122,7 +125,9 @@ export async function writeDocs(
     callGroupsRef.current = callGroups;
     let acc = '';
     let jsAcc = '';
-    const skipPage = matchesAny(doc.path, p.config?.skipExamples ?? []);
+    let goImports: string[] = [];
+    // Versioned copies of older docs and translated READMEs are linked, never judged against today's code.
+    const skipPage = matchesAny(doc.path, p.config?.skipExamples ?? []) || olderOrTranslatedDocs(doc.path, docDirs);
     for (const ex of doc.examples) {
       const id = exampleId(repo, doc.path, ex.index);
       const section = sectionId(repo, doc.path, ex.sectionAnchor);
@@ -162,6 +167,18 @@ export async function writeDocs(
           dispose();
         }
         idents = [...new Set(ex.code.match(/[A-Za-z_$][\w$]*/g) ?? [])].sort();
+      } else if (ex.lang === 'go') {
+        // Each Go block is its own program; a fragment without imports gets the page's earlier ones.
+        const earlier = goImports;
+        goImports = [...goImports, ...goImportSpecs(ex.code)];
+        const mod = await extractGoExample(ex.code, { module: `${pseudoModule(repo, doc.path)}_go`, path: doc.path, earlierImports: earlier });
+        const dispose = table.addEphemeral(repo, mod);
+        try {
+          linkExample(id, mod, 1, (line) => ex.lineno + line - 1, directive);
+        } finally {
+          dispose();
+        }
+        idents = mod.idents;
       } else {
         idents = [...new Set(ex.code.match(/[A-Za-z_]\w*/g) ?? [])].sort();
       }
@@ -226,6 +243,42 @@ export async function writeDocs(
         if (target && target !== id) links.push({ from: id, to: target });
       }
     }
+  }
+
+  // Go example programs shipped inside code repositories (examples/*/main.go) are docs too.
+  for (const f of p.files.filter((x) => x.kind === 'go-example')) {
+    const code = await readFile(join(p.checkout.dir, f.path), 'utf8');
+    const id = exampleId(repo, f.path, 0);
+    const mod = await extractGoExample(code, { module: `${pseudoModule(repo, f.path)}_go`, path: f.path });
+    const dispose = table.addEphemeral(repo, mod);
+    const groups: Row[][] = [];
+    const skip = matchesAny(f.path, p.config?.skipExamples ?? []);
+    try {
+      linkExample(id, mod, 1, (line) => line, skip ? 'skip' : undefined, groups);
+    } finally {
+      dispose();
+    }
+    const used = usedScopes(groups);
+    for (const g of groups) uses.push(...narrow(g, used));
+    exampleRows.push({
+      id,
+      file: fileId(repo, f.path),
+      section: '',
+      props: {
+        repo,
+        path: f.path,
+        index: 0,
+        lang: 'go',
+        meta: '',
+        code: code.slice(0, MAX_CODE),
+        lineno: 1,
+        end_lineno: code.split('\n').length,
+        idents: mod.idents,
+        kind: 'script',
+        directive: skip ? 'skip' : '',
+        url: blob(f.path, 1),
+      },
+    });
   }
 
   // Example scripts shipped inside code repositories (examples/*.js, *.ts) are docs too.
@@ -383,6 +436,8 @@ export function pageContext(doc: MdDoc, ownPackages: Set<string>, table: SymbolT
       for (const m of ex.code.matchAll(/^\s*(?:from\s+(\w+)|import\s+(\w+))/gm)) packages.add(m[1] ?? m[2]!);
     } else if (ex.lang === 'bash') {
       for (const line of ex.code.split('\n')) for (const pkg of packagesNamedIn(line.replace(/^\$\s*/, ''))) packages.add(pkg);
+    } else if (ex.lang === 'go') {
+      for (const spec of goImportSpecs(ex.code)) packages.add(goModuleOf(spec.replace(/^[\w.]+\s+/, '').replace(/"/g, '')).split('.')[0]!);
     } else if (JS_LANGS.has(ex.lang)) {
       for (const m of ex.code.matchAll(/(?:from\s+|require\(\s*|import\(\s*)["']([^"'./][^"']*)["']/g)) packages.add(bareModule(m[1]!).split('.')[0]!);
     }

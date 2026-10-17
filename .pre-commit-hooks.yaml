@@ -1,0 +1,26 @@
+# Staleproof hooks for pre-commit (https://pre-commit.com). In .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/rajkaria/staleproof
+#     rev: v0.5.0
+#     hooks:
+#       - id: staleproof            # on commit: docs and agent files the staged changes make wrong
+#       - id: staleproof-predicted  # on push: docs examples the changes are predicted to break (needs a graph)
+#
+# Both run the Staleproof release this tag ships (`npx staleproof@<version>`), or the project's own install
+# when it has one: see docs/pre-commit.md for why the hooks do not build this repository.
+- id: staleproof
+  name: staleproof (docs and agent files)
+  description: Docs, READMEs and AI agent files (AGENTS.md, CLAUDE.md) the staged changes make wrong. Reads the git index; nothing leaves the machine.
+  entry: plugins/claude-code/scripts/staleproof.mjs lint --new --staged
+  language: script
+  pass_filenames: false
+  stages: [pre-commit]
+  minimum_pre_commit_version: '3.2.0'
+- id: staleproof-predicted
+  name: staleproof (docs examples predicted to break)
+  description: Docs examples in this and other repositories that the unpushed changes are predicted to break, from a local Staleproof graph.
+  entry: plugins/claude-code/scripts/staleproof.mjs check --fail-on-predicted
+  language: script
+  pass_filenames: false
+  stages: [pre-push]
+  minimum_pre_commit_version: '3.2.0'

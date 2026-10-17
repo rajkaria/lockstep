@@ -1,0 +1,22 @@
+{
+  "session_id": "3b6f0c2e-7d4a-4f51-9a0e-1c2d3e4f5a6b",
+  "transcript_path": "/home/dev/.claude/projects/-home-dev-demo/3b6f0c2e-7d4a-4f51-9a0e-1c2d3e4f5a6b.jsonl",
+  "cwd": "{{root}}",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "{{root}}/demo/client.py",
+    "old_string": "def connect(host, timeout=10):",
+    "new_string": "def connect(host, deadline=10):",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "{{root}}/demo/client.py",
+    "oldString": "def connect(host, timeout=10):",
+    "newString": "def connect(host, deadline=10):",
+    "replaceAll": false,
+    "userModified": false
+  },
+  "tool_use_id": "toolu_01A1b2C3d4E5f6G7h8I9j0K1"
+}

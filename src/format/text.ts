@@ -1,6 +1,8 @@
 import type { ClearedSymbol, ImpactData, RankedSection } from '../tools/graph-tools.js';
 import type { RunExampleData } from '../tools/run-example.js';
 import type { TraceEvent } from '../agent/trace.js';
+import type { PrFindings } from '../agent/graph-check.js';
+import { formatText } from '../lint/format.js';
 
 const tty = process.stdout.isTTY;
 const c = (code: number) => (s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -102,4 +104,16 @@ function compactInput(input: unknown): string {
       return `${k}=${s.length > 60 ? `${s.slice(0, 57)}…` : s}`;
     })
     .join(', ');
+}
+
+/** "Docs this pull request makes wrong" for the terminal: new lint findings, agent files first. */
+export function newFindingsText(pf: PrFindings, subject = 'this pull request'): string {
+  const head = bold(`Docs ${subject} make${subject === 'these changes' ? '' : 's'} wrong (${pf.total})`);
+  const where = dim(`  lint at ${commitLabel(pf.base)} and ${commitLabel(pf.head)}${pf.fixed ? `; ${pf.fixed} fixed` : ''}`);
+  if (!pf.total) return `${head}\n${where}\n  ${dim(`none: ${pf.files} file${pf.files === 1 ? '' : 's'} checked`)}`;
+  const body = formatText({ version: 1, findings: pf.findings, summary: pf.summary, warnings: [] })
+    .split('\n')
+    .map((l) => (l ? `  ${l}` : l))
+    .join('\n');
+  return `${head}\n${where}\n\n${body}`;
 }

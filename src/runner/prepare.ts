@@ -13,6 +13,8 @@ export interface PreparedExample {
   stitched: string[];
   /** Why this example cannot be run honestly; set → the run is recorded as skipped. */
   skip?: string;
+  /** The program's language when stitching changed it (a TypeScript block in front of a JavaScript one). */
+  lang?: string;
 }
 
 const LLM =

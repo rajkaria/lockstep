@@ -9,6 +9,9 @@ import { git, parseRepoName } from '../indexer/repo.js';
 import { symbolId } from '../indexer/resolve.js';
 import { countMatches, groupImpact, shellQuote, type ClearedSymbol, type ImpactData, type ImpactRow, type Severity } from '../tools/graph-tools.js';
 import { result, Tracer, type ToolContext, type ToolDef } from '../tools/types.js';
+import { prFindingsSummary, type PrFindings } from '../agent/graph-check.js';
+import { diffResults, lintNew } from '../lint/diff.js';
+import { commitTree, lintTree, overlayTree } from '../lint/sources.js';
 import { diffWith, parseHunks, parseNameStatus, type ChangedFile, type DiffSource, type Hunks, type PrDiff } from './changes.js';
 import { knownMismatches, predictBreaksForChanges, type ChangeRow } from './predict.js';
 
@@ -112,6 +115,8 @@ export interface LocalChanges {
   base: string;
   branch: string;
   diff: PrDiff;
+  /** The top of the checkout. */
+  root: string;
 }
 
 /** The symbol-level diff of a checkout's working tree (and its unpushed commits) against a base. */
@@ -121,12 +126,56 @@ export async function localChanges(dir: string, opts: { base?: string; repo?: st
   const base = opts.base ? (await git(root, ['rev-parse', opts.base])).trim() : await defaultBase(root);
   const branch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => 'HEAD')).trim();
   const diff = await diffWith(worktreeSource(root), repo, base, WORKTREE);
-  return { repo, base, branch, diff };
+  return { repo, base, branch, diff, root };
 }
 
 export interface ChangesReport {
   impact: ImpactData;
   cleared: ClearedSymbol[];
+  /** Docs references the changes make wrong: lint at the base commit and with the changes (`head` is `WORKTREE`). */
+  newFindings?: PrFindings;
+  /** Why the docs references could not be checked, when they could not. */
+  newFindingsError?: string;
+}
+
+const COMMIT = /^[0-9a-f]{40}$/;
+/** Examples are the graph's part (predicted breaks); lint adds every other reference. */
+const LINT = { examples: false } as const;
+
+/** Docs references a checkout's working tree makes wrong against a base commit (`lint --new`). */
+export async function worktreeFindings(local: Pick<LocalChanges, 'root' | 'repo' | 'base'>): Promise<PrFindings> {
+  const started = Date.now();
+  const d = await lintNew({ dir: local.root, repo: local.repo, base: local.base, ...LINT });
+  return { repo: local.repo, base: d.base.sha ?? local.base, head: WORKTREE, findings: d.findings, total: d.findings.length, fixed: d.fixed, summary: d.summary, files: d.summary.files, ms: Date.now() - started };
+}
+
+/**
+ * Docs references edited files make wrong: the base commit (a local clone, else its tarball)
+ * linted as it is and with the files replaced. Undefined when the base is not a commit.
+ */
+export async function editedFindings(
+  ctx: ToolContext,
+  repo: string,
+  sha: string,
+  files: { path: string; content: string | null }[],
+  clone?: string,
+): Promise<PrFindings | undefined> {
+  if (!COMMIT.test(sha)) return undefined;
+  const started = Date.now();
+  const base = await commitTree(repo, sha, { home: ctx.config.home, clone, token: ctx.allowDir ? ctx.config.githubToken : undefined });
+  try {
+    const head = await overlayTree(base, files);
+    try {
+      const b = await lintTree(base, { ...LINT, repo });
+      const h = await lintTree(head, { ...LINT, repo, sha });
+      const d = diffResults(b, h, { base: { ref: sha, sha, label: sha.slice(0, 7) }, head: { label: head.label } });
+      return { repo, base: sha, head: WORKTREE, findings: d.findings, total: d.findings.length, fixed: d.fixed, summary: d.summary, files: d.summary.files, ms: Date.now() - started };
+    } finally {
+      await head.dispose();
+    }
+  } finally {
+    await base.dispose();
+  }
 }
 
 /**
@@ -243,6 +292,7 @@ export const checkChangesTool: ToolDef<
     let repo: string;
     let diff: PrDiff;
     let label: { url: string; title: string };
+    let findings: () => Promise<PrFindings | undefined>;
     if (input.files) {
       if (!input.repo) throw new Error('repo (owner/name) is required with files');
       repo = (await tracer.run<{ name: string }>(`MATCH (r:Repo) WHERE toLower(r.name) = toLower($name) RETURN r.name AS name`, { name: parseRepoName(input.repo) })).rows[0]?.name ?? parseRepoName(input.repo);
@@ -254,14 +304,26 @@ export const checkChangesTool: ToolDef<
         : rawReader(repo, sha, ctx.config.githubToken);
       diff = await diffWith(contentSource(await indexedFiles(ctx.graph, repo), input.files, readBase), repo, sha, WORKTREE);
       label = { url: `https://github.com/${repo}/tree/${sha}`, title: `${input.files.length} edited file${input.files.length === 1 ? '' : 's'} on ${repo}@${sha.slice(0, 7)}` };
+      const edited = input.files;
+      findings = () => editedFindings(ctx, repo, sha, edited, existsSync(join(clone, '.git')) ? clone : undefined);
     } else {
       if (!ctx.allowDir) throw new Error('send the changed files: files: [{path, content}] with repo (this server cannot read your disk)');
       const local = await localChanges(input.dir ?? process.cwd(), { base: input.base, repo: input.repo });
       repo = local.repo;
       diff = local.diff;
       label = { url: `https://github.com/${repo}/compare/${local.base}...${local.branch}`, title: `Working tree of ${local.branch} against ${local.base.slice(0, 7)}` };
+      findings = () => worktreeFindings(local);
     }
     const r = await analyzeChanges(ctx.graph, ctx.config.home, repo, diff, label, tracer);
-    return result('check_changes', tracer, r.summary, r.data);
+    // Docs references the edits make wrong (graph-free), next to what the graph says they reach.
+    let summary = r.summary;
+    try {
+      const nf = await findings();
+      if (nf) r.data.newFindings = nf;
+      if (nf?.total) summary += ` ${prFindingsSummary(nf, 'These changes')}`;
+    } catch (err) {
+      r.data.newFindingsError = (err as Error).message;
+    }
+    return result('check_changes', tracer, summary, r.data);
   },
 };

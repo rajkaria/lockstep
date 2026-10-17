@@ -3,7 +3,11 @@ import { streamAudit, type AuditEvent } from './api';
 import { PACKAGE, PRODUCT, SITE_URL } from './docs/manifest';
 import { CodeBlock, Icon } from './layout';
 import { repoFromInput } from './install-links';
+import { findingGroups, type WebFinding } from './CheckResults';
 import type { AuditData, Health } from './types';
+
+/** Audit additions of index version 4 (src/audit.ts): lint findings stored at index time. */
+type AuditFindings = { findings?: (WebFinding & { heading?: string; repo?: string })[]; repos: { findingsChecked?: boolean }[] };
 
 const PICKS = ['pallets/flask', 'encode/httpx', 'psf/requests', 'FalkorDB/falkordb-ts'];
 
@@ -89,7 +93,8 @@ export function AuditPage({ initialRepo, health }: { initialRepo?: string; healt
       <h1>How true are your docs right now?</h1>
       <p className="lede">
         No pull request needed. {PRODUCT} indexes a public Python, TypeScript or JavaScript repository, checks every call in its docs examples against the code they reach — in that
-        repository or another — and lists the ones the code no longer accepts, with the line. Then it measures how much of the public API the docs cover.
+        repository or another — and lists the ones the code no longer accepts, with the line. It lists every path, link and command its docs and AI agent files (AGENTS.md,
+        CLAUDE.md) name that the repository does not have. Then it measures how much of the public API the docs cover.
       </p>
       <div className="demo-card">
         <form
@@ -126,6 +131,59 @@ export function AuditPage({ initialRepo, health }: { initialRepo?: string; healt
       </div>
       {state.phase === 'done' && <AuditReport repo={state.repo} summary={state.summary} data={state.data} indexedMs={state.indexedMs} />}
     </section>
+  );
+}
+
+/** Docs references that no longer match the repository, AI agent instructions first. */
+function FindingsSection({ data }: { data: AuditFindings }) {
+  const findings = data.findings;
+  if (!findings || !data.repos.some((r) => r.findingsChecked)) return null;
+  const multi = data.repos.length > 1;
+  return (
+    <>
+      <h3>
+        Docs references that no longer match the repository{' '}
+        <span className={`chip ${findings.length ? 'sev breaking' : 'ok'}`}>{findings.length}</span>
+      </h3>
+      {findings.length === 0 ? (
+        <p className="audit-ok">
+          <Icon name="check" size={16} /> Every path, link, anchor, command and env var the docs and AI agent files name matches the repository.
+        </p>
+      ) : (
+        <>
+          <p className="muted small">Read from the repository at the indexed commit: each one names its line and where {PRODUCT} looked.</p>
+          {findingGroups(findings).map(([title, list]) => (
+            <div key={title}>
+              <h4>{title}</h4>
+              <ul className="mismatch-list">
+                {list.map((f) => (
+                  <li key={`${f.repo ?? ''}|${f.fingerprint}`}>
+                    <div className="mm-top">
+                      {f.evidence?.url ? (
+                        <a href={f.evidence.url} target="_blank" rel="noreferrer">
+                          <code>
+                            {multi && f.repo ? `${f.repo}:` : ''}
+                            {f.path}
+                          </code>{' '}
+                          line {f.line}
+                        </a>
+                      ) : (
+                        <span>
+                          <code>{f.path}</code> line {f.line}
+                        </span>
+                      )}
+                      <span className={`chip ${f.severity === 'error' ? 'sev breaking' : 'sev api'}`}>{f.rule}</span>
+                    </div>
+                    {f.heading && <div className="mm-heading muted small">{f.heading}</div>}
+                    <div className="mm-detail">{f.message}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </>
+      )}
+    </>
   );
 }
 
@@ -166,6 +224,7 @@ function AuditReport({ repo, summary, data, indexedMs }: { repo: string; summary
           until the repositories are indexed again (<code>npx -y {PACKAGE} index {data.repos.map((r) => r.name).join(' ')}</code>).
         </div>
       )}
+      <FindingsSection data={data as unknown as AuditFindings} />
       <h3>
         Examples that no longer fit the code{' '}
         <span className={`chip ${data.examples.mismatched ? 'sev breaking' : 'ok'}`}>

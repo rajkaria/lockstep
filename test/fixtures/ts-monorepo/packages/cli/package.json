@@ -1,0 +1,5 @@
+{
+  "name": "@mono/cli",
+  "private": true,
+  "bin": { "mono": "dist/main.js" }
+}

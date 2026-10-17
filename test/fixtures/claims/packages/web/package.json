@@ -1,0 +1,8 @@
+{
+  "name": "@claims/web",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build:web": "vite build"
+  }
+}

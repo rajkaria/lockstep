@@ -47,3 +47,17 @@ export function pythonParser(): Promise<Parser> {
   })();
   return parserPromise;
 }
+
+let goPromise: Promise<Parser> | undefined;
+
+/** Go (`tree-sitter-go.wasm`, from the tree-sitter-go npm package). */
+export function goParser(): Promise<Parser> {
+  goPromise ??= (async () => {
+    await init();
+    const language = await Language.load(grammarPath('tree-sitter-go.wasm'));
+    const parser = new Parser();
+    parser.setLanguage(language);
+    return parser;
+  })();
+  return goPromise;
+}

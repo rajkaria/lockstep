@@ -351,8 +351,8 @@ Stated plainly; most are "not yet" rather than "never".
 
 **What is analysed**
 
-- **Python, TypeScript and JavaScript code.** Python is read anywhere in a repository; TypeScript and JavaScript only inside a published npm package (a `package.json` with a `name`, not `private`). Other languages are not parsed, and notebooks are not read.
-- **TypeScript and JavaScript get name checks, not argument checks.** JavaScript accepts any argument count, so their examples are flagged only for names a package does not export and methods a class does not have, and a signature change predicts no JavaScript break. JavaScript and TypeScript examples are linked and checked but never run.
+- **Python, TypeScript, JavaScript and Go code.** Python is read anywhere in a repository; TypeScript and JavaScript only inside a published npm package (a `package.json` with a `name`, not `private`); Go in every package under a `go.mod`. Other languages are not parsed, and notebooks are not read.
+- **Argument checks follow each language.** TypeScript's optional, default and rest parameters are respected, and in JavaScript files every parameter is optional, so a JavaScript example is flagged for too many arguments only past a rest-free signature; overloads, decorators and functions that read `arguments` are not judged. Go examples are checked (variadic aware) but not run; JavaScript and TypeScript examples run in Node ([JavaScript and TypeScript](example-runner.md#javascript-and-typescript)).
 - **reStructuredText is scanned, not built.** Titles, code directives (`code-block`, `testcode`, `doctest`, …), `::` literal blocks, `>>>` doctests, API roles and `:doc:`/`:ref:` links are read. `.. include::`, autodoc output (`.. autofunction::` and the like), substitutions and Sphinx extensions are not expanded, and `:ref:` resolves only to labels on the same page.
 - **Static checks follow exact resolutions only.** An example call is judged only when it resolved through imports and types, to a function whose signature no unknown decorator wraps, on a class or module whose members are all visible, without `*args`/`**kwargs` splats. The rest is silent, so no mismatch and no predicted break is not proof that an example works; runs are.
 - **Static call resolution.** Calls are resolved through imports, re-exports, attribute types, return annotations and base classes. Where the types do not say, a method call falls back to a by-name edge when 1 to 4 functions of that name exist in repositories the module imports; such edges are labelled `by-name` everywhere. Generic names (`get`, `run`, `close`, ...) are never matched by name.
@@ -385,7 +385,7 @@ Stated plainly; most are "not yet" rather than "never".
 
 ### Which languages does it support?
 
-Code in Python, and TypeScript and JavaScript in published npm packages; docs in Markdown, MDX and reStructuredText (Sphinx) from any repository. Python examples are linked to code, checked against its signatures and run; JavaScript and TypeScript examples are linked and checked for names that do not exist, but not run. Other languages are not parsed.
+Code in Python, Go, and TypeScript and JavaScript in published npm packages; docs in Markdown, MDX and reStructuredText (Sphinx) from any repository. Python, JavaScript and TypeScript examples are linked to code, checked against its signatures and run; Go examples are linked and checked but not run. Other languages are not parsed.
 
 ### Do I need an LLM API key?
 

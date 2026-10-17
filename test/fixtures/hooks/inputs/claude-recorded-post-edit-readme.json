@@ -1,0 +1,47 @@
+{
+  "session_id": "835aa976-88d4-47c4-8f5d-8b74bc6a0164",
+  "transcript_path": "/home/dev/.claude/projects/-home-dev-demo/835aa976-88d4-47c4-8f5d-8b74bc6a0164.jsonl",
+  "cwd": "{{root}}",
+  "scratchpad_dir": "/tmp/claude/demo/835aa976-88d4-47c4-8f5d-8b74bc6a0164/scratchpad",
+  "prompt_id": "476e7ced-15e2-4ff8-b7e6-ec33fd0a7119",
+  "permission_mode": "acceptEdits",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "{{root}}/README.md",
+    "old_string": "conn = connect(\"localhost\", timeout=5)",
+    "new_string": "conn = connect(\"localhost\", deadline=5)",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "{{root}}/README.md",
+    "oldString": "conn = connect(\"localhost\", timeout=5)",
+    "newString": "conn = connect(\"localhost\", deadline=5)",
+    "originalFile": "# demo\n\nOpen a connection:\n\n```python\nfrom demo.client import connect\n\nconn = connect(\"localhost\", timeout=5)\n```\n\nLint the docs with `npm run lint:docs`. The client is in `demo/client.py`.\n",
+    "structuredPatch": [
+      {
+        "oldStart": 5,
+        "oldLines": 7,
+        "newStart": 5,
+        "newLines": 7,
+        "lines": [
+          " ```python",
+          " from demo.client import connect",
+          " ",
+          "-conn = connect(\"localhost\", timeout=5)",
+          "+conn = connect(\"localhost\", deadline=5)",
+          " ```",
+          " ",
+          " Lint the docs with `npm run lint:docs`. The client is in `demo/client.py`."
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01FKbi8tDpHLX1gqWSkwUD6Q",
+  "duration_ms": 15
+}

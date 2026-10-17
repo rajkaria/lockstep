@@ -27,7 +27,7 @@ A whole-word grep for the changed names finds none of those 43 sections and matc
 
 **Limits.**
 
-- Code is read as Python, or TypeScript and JavaScript in published npm packages; only Python examples run.
+- Code is read as Python, Go, or TypeScript and JavaScript in published npm packages; Python, JavaScript and TypeScript examples run, Go examples are checked only.
 - Calls and doc links cross repositories only between repositories indexed in the same `index` command. Indexing or re-indexing one repository alone drops its cross-repository edges.
 - Example runs install today's third-party dependencies, and version skew between repositories (an SDK pinning an older client) is recorded as an install error, not a result.
 - Edges resolved by name rather than through types are labelled `by-name`; a path made of them is weaker evidence than an `exact` one.
@@ -141,8 +141,8 @@ Then the failing runs, the most used undocumented API, and the score with each d
 
 **Limits.**
 
-- Static checks judge only calls resolved through imports and types; a clean audit is not proof that every example works. The runs cover the rest, for Python.
-- TypeScript and JavaScript examples get name checks only, no argument checks, and are never run.
+- Static checks judge only calls resolved through imports and types; a clean audit is not proof that every example works. The runs cover the rest, for Python, JavaScript and TypeScript.
+- Go examples get name and argument checks but are never run.
 - Coverage counts a symbol as documented when any doc names or calls it, however briefly.
 - The issue tracks examples that no longer fit or fail; low coverage lowers the score but opens no issue on its own.
 

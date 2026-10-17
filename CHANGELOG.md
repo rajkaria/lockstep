@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.5.0 — 2026-10-17
+
+Commands, CLIs, environment variables, symbols and docstrings checked too; only what a change makes wrong in pull
+requests; JS/TS argument checks and runs; Go.
+
+- **More claims checked by `staleproof lint`** ([docs/lint.md](docs/lint.md)):
+  - `command-missing`: `npm run`/`npm test`/`start`/`stop`, `pnpm [run]`, `yarn [run]`, `bun run` against the
+    nearest `package.json` and the workspace that `-w`/`--filter`/`--prefix`/`yarn workspace`/`cd` pick; `make`
+    targets (includes, `.PHONY`, pattern rules), `just` recipes, `task` tasks (included namespaces); near-renames of
+    the repository's own scripts through `uv`/`poetry`/`hatch`/`pdm run`; `python -m` modules of its own packages.
+  - `cli-command-unknown` and `cli-flag-unknown`: the repository's own CLI shown with a subcommand or option its
+    definition lacks, however it is invoked (`npx`, `uv run`, `python -m`, `node dist/cli.js`, `tsx src/cli.ts`),
+    read statically from commander, click, typer, argparse and strict yargs, across files.
+  - `env-unused` (warning) and `env-undocumented` (info): documented environment variables (env example files, env
+    tables, `export X=`, `X=1 cmd`, code spans next to "environment variable") that no code, build, CI or hook file
+    reads, and product code reading a variable its `.env.example` does not list. Platform, toolchain and dependency
+    variables, the docs' own examples, families and computed reads are never judged.
+  - `symbol-missing`: a code span `Client.query_v2` / `pkg.connect_async()` whose owner is exactly the repository's
+    own class or module and has no such member, with the same openness guards as the example checks.
+  - `docstring-param-unknown` and `docstring-param-undocumented` (info): Google, NumPy and Sphinx docstrings and
+    JSDoc/TSDoc `@param` against the signature, reported on the docstring line in the code file.
+  - Code suppressions `# staleproof: ignore[rule]` / `// staleproof: ignore[rule]`; the code is parsed once for the
+    example, symbol and docstring checks. Every finding on 22 public repositories was checked by hand; each false
+    positive became a guard, ending with zero known at error severity.
+- **Only what a change makes wrong** ([docs/lint.md](docs/lint.md#only-what-a-change-introduced)):
+  `staleproof lint --new [--base <ref>]` reports the findings a change introduced, by line-independent fingerprint
+  (default base: `HEAD` for uncommitted changes, else the merge base with the default branch; never fetched), and
+  `--staged` lints the git index, also inside pre-commit hooks. A script renamed in `package.json` makes the untouched
+  README's `npm run` a new finding.
+- **Pull request checks list "Docs this pull request makes wrong"**: the docs and AI agent files linted at both
+  commits, above the impact, in the comment, CLI text and JSON, and the web check view; graph mode's first step is
+  `new_findings`; `check --annotations` prints GitHub workflow commands; `staleproof check` without a pull request lists
+  what the working tree makes wrong. The GitHub Action adds the annotations, a `findings` output and
+  `fail-on: findings`.
+- **Index format 4**: lint findings are stored as Finding nodes in their doc sections; hosted workspaces re-index on
+  next use and read every tarball path, hidden agent files included. The audit lists findings agent files first, with
+  a "Docs references" deduction (3 per error, 1 per warning, at most 25) ([docs/audit.md](docs/audit.md)).
+- **`GET /api/lint?repo=owner/name`** lints any public repository without indexing it (cached 10 minutes), and the
+  MCP tool **`lint_docs`** does the same for agents (or a local checkout with `new_only`); `check_pull_request` and
+  `check_changes` include the new findings.
+- **JavaScript and TypeScript**: docs examples get `example-too-many-arguments` and `example-missing-argument`
+  (optional, default, rest and destructured parameters as TypeScript reads them; every parameter optional in
+  JavaScript files; overloads, decorators and `arguments` never judged); signature changes predict the examples they
+  break; examples run in a Node sandbox against packages built from source at the pull request's commits, with only
+  the scratch FalkorDB reachable ([docs/example-runner.md](docs/example-runner.md#javascript-and-typescript)).
+  `audit --run` runs them too.
+- **Go**: packages named from `go.mod` (multi-module repositories and `go.work`), Go examples in docs checked for
+  missing or unexported names, argument counts (variadic aware) and packages, Go pull request diffs compared per
+  package with predicted breaks ([docs/indexing.md](docs/indexing.md#go)).
+- **Monorepos and precision for every language**: Python namespace packages split across uv workspace members
+  resolve; API listing blocks, versioned copies of older docs and translated READMEs are not judged; subclass
+  attributes and overrides are respected; long chains of example bindings resolve again.
+- Fix: `lint --new` on a checkout reached through a symlink (macOS temporary folders) compared the working tree with
+  itself.
+- **Claude Code plugin** ([docs/claude-code.md](docs/claude-code.md)): `/plugin marketplace add rajkaria/staleproof`,
+  then `/plugin install staleproof@staleproof`. After every edit Claude hears which docs and agent files the edit made
+  wrong (path:line, rule); before it stops it is asked once to fix what the session introduced. A `staleproof`
+  skill, `/staleproof:check`, `/staleproof:fix`, `/staleproof:audit` and `/staleproof:docs-for`, and the MCP server
+  come with it. Everything runs locally.
+- **`staleproof hook session-start|post-edit|stop`** for Claude Code and Cursor: silent when nothing is wrong, never
+  fails the agent, blocks a stop at most once (`stop_hook_active`); `[hooks] stop = "block" | "warn" | "off"`,
+  overridden by `STALEPROOF_HOOK`. A light `dist/hook.js` entry starts in a quarter of a second.
+- **`staleproof init`** writes `.staleproof.toml`, the workflow (pull request check plus a weekly audit), the README
+  badge, the pre-commit, lefthook or husky hook and `.gitignore` lines; `--claude`/`--cursor` add the agent hooks;
+  `--yes`, `--dry-run`, `--skip`; a second run changes nothing.
+- **pre-commit** ([docs/pre-commit.md](docs/pre-commit.md)): hook `staleproof` runs `lint --new --staged` on commit,
+  `staleproof-predicted` runs on pre-push.
+- **Local parse cache** in `.staleproof/cache/` (by file content; `--no-cache`, `STALEPROOF_CACHE`,
+  `STALEPROOF_CACHE_DIR`), and lint skips the git history and Go parsing when no enabled rule needs them. The Action's
+  new `cache` input keeps the graph dump and the parse cache between runs with actions/cache.
+
 ## 0.4.0 — 2026-10-17
 
 Every repository, every teammate, every agent.

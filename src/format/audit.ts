@@ -1,5 +1,6 @@
-import type { AuditData } from '../audit.js';
+import type { AuditData, AuditFinding } from '../audit.js';
 import { MISMATCH_LABEL } from '../indexer/signature.js';
+import { SURFACE_TITLE } from '../lint/format.js';
 import { bold, cyan, dim, green, red, yellow } from './text.js';
 
 export const AUDIT_MARKER = '<!-- staleproof-audit -->';
@@ -11,6 +12,24 @@ function esc(s: string): string {
 }
 
 const shortExample = (id: string) => id.split(':').slice(1).join(':');
+
+/** How many findings the text and Markdown reports list (the JSON has them all). */
+const MAX_LISTED = 100;
+
+/** Findings grouped under their section title, in order (AI agent instructions first). */
+function bySurface(findings: AuditFinding[]): [string, AuditFinding[]][] {
+  const out = new Map<string, AuditFinding[]>();
+  for (const f of findings) out.set(SURFACE_TITLE[f.surface], [...(out.get(SURFACE_TITLE[f.surface]) ?? []), f]);
+  return [...out];
+}
+
+function findingCountsLabel(d: AuditData): string {
+  const c = d.findingCounts;
+  if (!c) return '';
+  return [c.errors && `${c.errors} error${c.errors === 1 ? '' : 's'}`, c.warnings && `${c.warnings} warning${c.warnings === 1 ? '' : 's'}`, c.infos && `${c.infos} info`]
+    .filter(Boolean)
+    .join(', ');
+}
 
 /** The README badge for a repository's docs health, served by the hosted API. */
 export function badgeMarkdown(repo: string): string {
@@ -26,6 +45,21 @@ export function auditText(d: AuditData, summary: string): string {
     out.push(bold('Score'));
     for (const x of d.deductions) out.push(`  ${red(`-${x.points}`)} ${x.why}`);
     out.push('');
+  }
+  const findings = d.findings ?? [];
+  if (findings.length) {
+    out.push(bold(`Docs references that no longer match the repository (${findings.length}: ${findingCountsLabel(d)})`));
+    for (const [title, list] of bySurface(findings.slice(0, MAX_LISTED))) {
+      out.push(`  ${title}`);
+      for (const f of list) {
+        const sev = f.severity === 'error' ? red(f.severity) : f.severity === 'warning' ? yellow(f.severity) : dim(f.severity);
+        out.push(`    ${cyan(`${d.repos.length > 1 ? `${f.repo}:` : ''}${f.path}:${f.line}`)} ${sev} ${f.message} ${dim(`[${f.rule}]`)}`);
+      }
+    }
+    if (findings.length > MAX_LISTED) out.push(dim(`  … and ${findings.length - MAX_LISTED} more (--format json lists them all)`));
+    out.push('');
+  } else if (d.findings && d.repos.some((r) => r.findingsChecked)) {
+    out.push(bold('Docs references'), dim('  every path, link, anchor, command and env var the docs and AI agent files name matches the repository'), '');
   }
   out.push(bold(`Examples that no longer fit the code (${d.examples.mismatched} examples, ${d.mismatches.length} lines)`));
   if (!d.mismatches.length) out.push(dim('  none found: every call in an example fits the signature it reaches'));
@@ -55,6 +89,24 @@ export function auditMarkdown(d: AuditData, summary: string): string {
     out.push('| Points | Why |', '|---:|---|');
     for (const x of d.deductions) out.push(`| −${x.points} | ${esc(x.why)} |`);
     out.push('');
+  }
+  const findings = d.findings ?? [];
+  if (findings.length) {
+    out.push(
+      `#### Docs references that no longer match the repository (${findings.length})`,
+      '',
+      `${findingCountsLabel(d)}: paths, links, anchors, commands, CLI flags and env vars that the docs, READMEs and AI agent instructions name and the repository does not have, at the indexed commit.`,
+      '',
+    );
+    for (const [title, list] of bySurface(findings.slice(0, MAX_LISTED))) {
+      out.push(`**${title}**`, '', '| Where | Problem | Rule |', '|---|---|---|');
+      for (const f of list) {
+        const where = `${d.repos.length > 1 ? `${f.repo}:` : ''}${f.path}:${f.line}`;
+        out.push(`| ${f.evidence?.url ? `[${esc(where)}](${f.evidence.url})` : `\`${esc(where)}\``} | ${esc(f.message)}${f.fix?.verified ? ` Fix: ${esc(f.fix.description)}` : ''} | ${f.rule} |`);
+      }
+      out.push('');
+    }
+    if (findings.length > MAX_LISTED) out.push(`_${findings.length - MAX_LISTED} more not shown (\`staleproof audit --format json\` lists them all)._`, '');
   }
   if (d.mismatches.length) {
     out.push(
@@ -88,6 +140,8 @@ export function auditMarkdown(d: AuditData, summary: string): string {
   }
   if (d.repos.length === 1) out.push(`Badge for the README: \`${badgeMarkdown(d.repos[0]!.name)}\``, '');
   out.push(`<sub>[Staleproof](${REPO_URL}) · FalkorDB graph \`${d.org}\` · ${d.repos.map((r) => `${r.name}@${(r.sha ?? '').slice(0, 7)}`).join(', ')}</sub>`);
+  // Machine-readable counts: the docs references on their own line, so the audit line keeps its shape.
+  if (d.findings) out.push(`<!-- staleproof:audit-findings findings=${findings.length} errors=${d.findingCounts?.errors ?? 0} warnings=${d.findingCounts?.warnings ?? 0} -->`);
   out.push(`<!-- staleproof:audit score=${d.score} mismatched=${d.examples.mismatched} failing=${d.runCounts.fail} coverage=${d.coverage.percent} -->`);
   return out.join('\n');
 }

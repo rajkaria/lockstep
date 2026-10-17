@@ -189,6 +189,8 @@ The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
 | Website | Paste a pull request URL on [staleproof.dev](https://staleproof.dev), or audit a repository at [#/audit](https://staleproof.dev/#/audit) — no install, any public repository | [docs/install.md](docs/install.md) |
 | CLI | `npx -y staleproof <command>` — lint, index, check (a PR or your working tree), audit, docs-for, run, decide, patch, serve | [docs/cli.md](docs/cli.md) |
 | GitHub Action | `uses: rajkaria/staleproof@v1` — zero config: a comment on every PR with the docs it can make false, the examples predicted to break and the examples run before and after ([`examples/staleproof.yml`](examples/staleproof.yml)); on a schedule, a docs audit kept in one issue | [docs/github-action.md](docs/github-action.md) |
+| Claude Code plugin | `/plugin marketplace add rajkaria/staleproof`, then `/plugin install staleproof@staleproof` — after every edit Claude hears which docs and agent files it made wrong, and fixes them before it stops | [docs/claude-code.md](docs/claude-code.md) |
+| pre-commit | `staleproof init`, or `repo: https://github.com/rajkaria/staleproof` with hook `staleproof` — blocks a commit that makes a docs reference wrong | [docs/pre-commit.md](docs/pre-commit.md) |
 | MCP, hosted | `claude mcp add --transport http staleproof https://staleproof.dev/api/mcp` — nothing to install | [docs/mcp.md](docs/mcp.md) |
 | MCP, local (Claude Code) | `claude mcp add staleproof -- npx -y staleproof mcp` — runs examples too | [docs/mcp.md](docs/mcp.md) |
 | HTTP API | `staleproof serve`: JSON API with checks and audits streamed over server-sent events, and the README badge | [docs/http-api.md](docs/http-api.md) |
@@ -496,11 +498,11 @@ MATCH (pr:PullRequest {url: $pr})<-[c:CHANGED_IN]-(s:Symbol)
 WHERE c.kind IN ['removed', 'renamed', 'signature', 'export-removed']
 MATCH (e:CodeExample)-[u:USES]->(s)
 WHERE e.status = 'live' AND coalesce(e.directive, '') = ''
-  AND (e.lang = 'python' OR (c.kind <> 'signature' AND e.lang IN ['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']))
+  AND e.lang IN ['python', 'go', 'javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']
 OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
 RETURN e.id AS example, e.code AS code, e.lang AS lang, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
        coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
-       s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+       s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators, s.path AS symbolPath,
        c.kind AS change, c.before AS before, c.after AS after, c.renamed_to AS renamedTo
 ORDER BY example, line
 ```
@@ -569,11 +571,11 @@ MATCH (s:Symbol {id: ch.id})
 WHERE ch.kind IN ['removed', 'renamed', 'signature', 'export-removed']
 MATCH (e:CodeExample)-[u:USES]->(s)
 WHERE e.status = 'live' AND coalesce(e.directive, '') = ''
-  AND (e.lang = 'python' OR (ch.kind <> 'signature' AND e.lang IN ['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']))
+  AND e.lang IN ['python', 'go', 'javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'node']
 OPTIONAL MATCH (e)-[:IN_SECTION]->(sec:DocSection)
 RETURN e.id AS example, e.code AS code, e.lang AS lang, e.lineno AS lineno, e.url AS url, e.repo AS repo, e.path AS path,
        coalesce(sec.id, e.id) AS section, u.line AS line, u.text AS text, u.resolved AS resolved,
-       s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators,
+       s.qualname AS symbol, s.name AS name, s.kind AS symbolKind, s.decorators AS decorators, s.path AS symbolPath,
        ch.kind AS change, ch.before AS before, ch.after AS after, ch.renamed_to AS renamedTo
 ORDER BY example, line
 ```
@@ -589,6 +591,13 @@ WITH s, ch, count(p) AS reach
 WHERE reach = 0
 RETURN s.qualname AS symbol, s.name AS name, s.repo AS repo, ch.kind AS change, s.visibility AS visibility
 ORDER BY symbol
+```
+
+**`prCommits`** — The two commits a pull request is compared between: its docs are linted at both, and findings only the second has are what it makes wrong.
+
+```cypher
+MATCH (pr:PullRequest {url: $url})
+RETURN pr.repo AS repo, pr.before_sha AS before, pr.after_sha AS after
 ```
 
 #### Memory: decisions, verdicts, runs, checks
@@ -760,7 +769,7 @@ MATCH (v:Verdict {check: $id})-[:ABOUT]->(d:DocSection)
 RETURN DISTINCT d.id AS id
 ```
 
-Indexing and reporting queries (43 more) are in [docs/GRAPH-MODEL.md](docs/GRAPH-MODEL.md).
+Indexing and reporting queries (48 more) are in [docs/GRAPH-MODEL.md](docs/GRAPH-MODEL.md).
 <!-- generated:cypher:end -->
 
 ## Develop

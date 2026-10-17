@@ -1,9 +1,10 @@
 import * as Q from '../graph/queries.js';
 import { fromRepl } from '../indexer/docs.js';
-import { arityOfSignature, extractPython, type PyCall } from '../indexer/python.js';
+import { extractGoExample } from '../indexer/go.js';
+import { extractPython, type PyCall } from '../indexer/python.js';
 import { shown } from '../indexer/resolve.js';
 import { bareModule, extractTs } from '../indexer/typescript.js';
-import { checkArgs, trustsSignature, type Arity, type MismatchKind } from '../indexer/signature.js';
+import { arityOf, checkArgs, langOfPath, trustsSignature, type Arity, type MismatchKind } from '../indexer/signature.js';
 import type { Tracer } from '../tools/types.js';
 
 /**
@@ -56,6 +57,8 @@ interface Row {
   name: string;
   symbolKind: string;
   decorators: string[] | null;
+  /** The changed symbol's file (its language decides how its signature reads). */
+  symbolPath?: string | null;
   change: string;
   before: string;
   after: string;
@@ -81,6 +84,8 @@ export function importsName(code: string, module: string, name: string): boolean
  * class passes it explicitly; `g.query(q)` through an instance does not.
  */
 function dropsFirst(row: Row, call: PyCall): boolean | undefined {
+  // JavaScript/TypeScript and Go methods take no `self`: the call passes every parameter.
+  if (langOfPath(row.symbolPath) !== 'python') return false;
   const decorators = row.decorators ?? [];
   if (row.symbolKind === 'function') return false;
   if (row.symbolKind !== 'method') return undefined;
@@ -95,6 +100,7 @@ function dropsFirst(row: Row, call: PyCall): boolean | undefined {
 
 async function callsIn(code: string, lang: string): Promise<PyCall[]> {
   try {
+    if (lang === 'go') return (await extractGoExample(code, { module: '__predict__', path: '__predict__.go' })).calls;
     if (lang !== 'python') return (await extractTs(code, { module: '__predict__', path: '__predict__.tsx', tsx: true })).calls;
     return (await extractPython(fromRepl(code), { module: '__predict__', path: '__predict__.py' })).calls;
   } catch {
@@ -112,9 +118,14 @@ export function importsNameJs(code: string, module: string, name: string): boole
   return false;
 }
 
+/** Python's `__init__`, a TypeScript class's `constructor`: called through the class name. */
+function isConstructor(row: Row): boolean {
+  return row.symbolKind === 'method' && (row.name === '__init__' || (row.name === 'constructor' && langOfPath(row.symbolPath) === 'ts'));
+}
+
 /** The calls in an example that a USES edge points at: same callee text, closest to the recorded line. */
 function matchingCalls(calls: PyCall[], row: Row): PyCall[] {
-  const name = row.name === '__init__' ? row.symbol.split('.').slice(-2, -1)[0]! : row.name;
+  const name = isConstructor(row) ? row.symbol.split('.').slice(-2, -1)[0]! : row.name;
   // A late link records only the name: any call of it (`g.ro_query`, `Client().select_graph().ro_query`).
   const same =
     row.text && row.text.includes('.') ? calls.filter((c) => c.text === row.text) : calls.filter((c) => c.text === name || c.text.endsWith(`.${name}`));
@@ -154,9 +165,11 @@ async function predictFromRows(rows: Row[], subject: string, codeAfter?: CodeAft
   const out: PredictedBreak[] = [];
   const parsed = new Map<string, Promise<PyCall[]>>();
   const arities = new Map<string, Promise<Arity | undefined>>();
-  const arity = (sig: string) => {
-    if (!arities.has(sig)) arities.set(sig, arityOfSignature(sig));
-    return arities.get(sig)!;
+  const arity = (sig: string, path?: string | null) => {
+    const lang = langOfPath(path);
+    const key = `${lang}|${/\.(js|jsx|mjs|cjs)$/.test(path ?? '') ? 'js' : ''}|${sig}`;
+    if (!arities.has(key)) arities.set(key, arityOf(sig, lang, path ?? undefined));
+    return arities.get(key)!;
   };
   const seen = new Set<string>();
   const add = (row: Row, line: number, kind: MismatchKind, detail: string, call: string) => {
@@ -222,16 +235,21 @@ async function predictFromRows(rows: Row[], subject: string, codeAfter?: CodeAft
     }
     if (row.change !== 'signature' || row.resolved !== 'exact') continue;
     if (!trustsSignature(row.decorators ?? [])) continue;
-    const [before, after] = await Promise.all([arity(row.before), arity(row.after)]);
+    const [before, after] = await Promise.all([arity(row.before, row.symbolPath), arity(row.after, row.symbolPath)]);
     if (!before || !after) continue;
     for (const call of matchingCalls(calls, row)) {
       if (!call.args) continue;
       const drop = dropsFirst(row, call);
       if (drop === undefined) continue;
-      const callee = row.name === '__init__' ? row.symbol.split('.').slice(-2, -1)[0]! : short;
-      const wasOk = checkArgs(call.args, before, { dropFirst: drop, callee }).length === 0;
+      const lang = langOfPath(row.symbolPath);
+      const callee = isConstructor(row)
+        ? row.symbol.split('.').slice(-2, -1)[0]!
+        : lang !== 'python' && row.symbolKind === 'function'
+          ? row.name
+          : short;
+      const wasOk = checkArgs(call.args, before, { dropFirst: drop, callee, lang }).length === 0;
       if (!wasOk) continue;
-      for (const m of checkArgs(call.args, after, { dropFirst: drop, callee })) add(row, docLine(call), m.kind, m.detail, call.text);
+      for (const m of checkArgs(call.args, after, { dropFirst: drop, callee, lang })) add(row, docLine(call), m.kind, m.detail, call.text);
     }
   }
   return out.sort((a, b) => a.example.localeCompare(b.example) || a.line - b.line);

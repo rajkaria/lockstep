@@ -1,0 +1,7 @@
+[project]
+name = "claims-demo"
+version = "1.0.0"
+dependencies = ["click>=8"]
+
+[project.scripts]
+claims-py = "claims_demo.cli:cli"

@@ -1,0 +1,20 @@
+{
+  "name": "claims-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "bin": {
+    "claims-demo": "bin/demo.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "report": "node scripts/report.js",
+    "docs:build": "vitepress build docs"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  }
+}

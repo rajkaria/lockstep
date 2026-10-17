@@ -35,7 +35,7 @@ And with no graph at all, in about a second:
 npx -y staleproof lint
 ```
 
-It checks every path, link, anchor and code example in the docs, READMEs and AI agent files against the checkout ([`lint`](#lint), [Lint docs and agent files](lint.md)).
+It checks every path, link, anchor, command (scripts, make targets, the repository's own CLI and its flags) and code example in the docs, READMEs and AI agent files against the checkout ([`lint`](#lint), [Lint docs and agent files](lint.md)).
 
 The first checks the working tree of the checkout you are in (uncommitted and unpushed changes) and exits 1 when an example is predicted to break, which makes it a pre-push hook ([below](#check-without-a-pull-request)); the second lists the docs that depend on a symbol before you change it; the third audits the docs as they are ([Docs audit](audit.md)).
 
@@ -184,6 +184,9 @@ staleproof check [options] [pr-url]
 | `--base <ref>` | the merge base with `origin/HEAD`, else `origin/main`, else `origin/master`, else `HEAD` | Without a pull request: the commit the working tree is compared with. |
 | `--repo <owner/name>` | the checkout's `origin` remote on github.com | Without a pull request: the GitHub repository the checkout is. |
 | `--fail-on-predicted` | off | Without a pull request: exit 1 when an example is predicted to break (a pre-push hook or a CI gate). |
+| `--annotations` | off | With a pull request: also print the docs references it makes wrong as GitHub workflow commands on stdout (`::error file=…,line=…::…`), which a GitHub Actions job turns into annotations. The [GitHub Action](github-action.md#docs-this-pull-request-makes-wrong) passes it. |
+
+**Docs this pull request makes wrong.** A pull request check also lints the repository's docs, READMEs and AI agent files at the two commits the pull request is compared between and reports the findings only the second has (in the comment of both modes, in graph mode's text and JSON, and with `--annotations`): a path the pull request moved that `AGENTS.md` still names, a script it renamed that the README still runs ([Lint: only what a change introduced](lint.md#only-what-a-change-introduced)). The commits come from the local clone the check uses (else from GitHub's tarballs, with `GITHUB_TOKEN` for private repositories). Graph mode runs it as its first step, `new_findings`; examples stay with the graph (predicted breaks and runs), so lint's own example checks are left out here. It is skipped when the graph recorded no real commits for the pull request, and its failure (or a run over 120 s) never fails the check: the comment then says `docs references not checked: <why>`.
 
 **The four invocations.**
 
@@ -209,6 +212,12 @@ npx -y staleproof check https://github.com/FalkorDB/falkordb-py/pull/267 --no-ag
 **Prints, graph mode.** The shape of the output, with placeholders in angle brackets:
 
 ```text
+Docs this pull request makes wrong (<k>)
+  lint at <before> and <after>
+  AI agent instructions
+    <path>
+      <line>:<column>  error    <message>  [<rule>]
+
 <pull request title>
 <url> (<state>, <before>..<after>)
 
@@ -263,9 +272,9 @@ Patch: staleproof patch <pr>   Trace: stored on chk-<id>
 
 The final status is `Done`, `Incomplete`, `refused` or `error`. The check is `Done` only when every impacted section, on every impact page, has a verdict or an edit. When the model stops with sections still open it is reminded up to twice; after that, or after `--max-steps` turns, the check is `Incomplete` and lists the open sections.
 
-**Prints, `--format markdown`.** The report the GitHub Action posts as its comment, on stdout or into `--out`: the title (what broke first), the impact summary, the examples predicted to break, a table of the examples run before and after the pull request, the impacted sections with their evidence paths, the lines already out of date, the cleared symbols, the verdicts and, in agent mode, the agent's summary. It ends with a machine-readable line, `<!-- staleproof:counts breaks=<n> predicted=<n> sections=<n> mismatched=<n> -->`. [GitHub Action](github-action.md#the-comment) shows the format.
+**Prints, `--format markdown`.** The report the GitHub Action posts as its comment, on stdout or into `--out`: the title (what broke first), the impact summary, "Docs this pull request makes wrong" (the new lint findings, AI agent instructions first), the examples predicted to break, a table of the examples run before and after the pull request, the impacted sections with their evidence paths, the lines already out of date, the cleared symbols, the verdicts and, in agent mode, the agent's summary. It ends with machine-readable lines: `<!-- staleproof:findings new=<n> errors=<n> warnings=<n> -->` when the docs references were checked, then `<!-- staleproof:counts breaks=<n> predicted=<n> sections=<n> mismatched=<n> -->`. [GitHub Action](github-action.md#the-comment) shows the format.
 
-**JSON.** `{checkId, pr, status, summary, events, impacted, missing, toolOrder, since}`. `events` holds every trace event, including each tool's full result in `tool_result.data`. In graph mode `impacted` and `missing` are empty; read the sections from the `impact` result in `events`.
+**JSON.** `{checkId, pr, status, summary, events, impacted, missing, toolOrder, since, newFindings}`. `events` holds every trace event, including each tool's full result in `tool_result.data`. In graph mode `impacted` and `missing` are empty; read the sections from the `impact` result in `events`. `newFindings` (graph mode, when the docs references were checked) is `{repo, base, head, findings, total, fixed, summary, files, ms}`, `findings` in the [lint JSON shape](lint.md#json-output).
 
 **Notes.**
 
@@ -290,6 +299,7 @@ What it does:
 2. Indexes the repository (and the `--with` repositories) when the graph does not have it, as a pull request check does, unless `--no-index`.
 3. Compares the base commit with the files on disk: staged, unstaged and untracked (not ignored) files, and any commits since the base, so unpushed commits count. Python and TypeScript/JavaScript library files become symbol-level changes, as for a pull request.
 4. Walks the graph from the changed symbols: the impacted sections with their evidence paths, the examples [predicted to break](concepts.md#predicted-breaks), the impacted lines already out of date, and the cleared symbols.
+5. Lints the docs and agent files on disk and at the base commit, and lists the findings only the working tree has under "Docs these changes make wrong" (as [`lint --new --base <base>`](lint.md#only-what-a-change-introduced) would).
 
 Nothing runs and nothing about the changes is written to the graph: no pull request, no check, no run. The agent and run options (`--no-agent`, `--model`, `--runs`, …) do not apply.
 
@@ -321,7 +331,7 @@ Cleared: reach no doc within 3 hops (0)
 Static check of the working tree: nothing was run or written to the graph. Push and open a pull request to run the examples before and after.
 ```
 
-With `--json`: `{summary, impact, cleared}`, where `impact` has the shape of the [`impact` result](tools.md#impact-result) (`pr.state` is `local`). With `--format markdown`: the comment format, titled `these changes are predicted to break <n> docs example(s)` (or `<n> doc section(s) these changes can make false`), written to `--out` when given.
+With `--json`: `{summary, impact, cleared, newFindings}`, where `impact` has the shape of the [`impact` result](tools.md#impact-result) (`pr.state` is `local`) and `newFindings` lists the docs references the working tree makes wrong (`head` is `WORKTREE`). With `--format markdown`: the comment format, titled `these changes are predicted to break <n> docs example(s)` (or `<n> doc section(s) these changes can make false`), written to `--out` when given.
 
 **As a pre-push hook.** `--fail-on-predicted` exits 1 when any example is predicted to break, so git stops the push:
 
@@ -375,7 +385,7 @@ No match prints `No live symbol in the "<graph>" graph is named <symbol>.`; a sy
 
 ### `lint`
 
-Check every claim the docs, READMEs and AI agent instruction files (`AGENTS.md`, `CLAUDE.md`, Cursor, Copilot, Windsurf and Cline rules) make about the repository: the paths they name, the links and anchors they follow, and their code examples. Needs no FalkorDB and no network. [Lint docs and agent files](lint.md) explains what is read, each rule and the precision guards; [Lint rules](rules.md) lists every rule.
+Check every claim the docs, READMEs and AI agent instruction files (`AGENTS.md`, `CLAUDE.md`, Cursor, Copilot, Windsurf and Cline rules) make about the repository: the paths they name, the links and anchors they follow, the commands they run (package scripts, make/just/task targets, the repository's own CLI subcommands and flags), and their code examples. Needs no FalkorDB and no network. [Lint docs and agent files](lint.md) explains what is read, each rule and the precision guards; [Lint rules](rules.md) lists every rule.
 
 ```text
 staleproof lint [options] [dir]
@@ -394,19 +404,81 @@ staleproof lint [options] [dir]
 | `--with <dirs...>` | none | Other local checkouts whose code the docs examples call |
 | `--no-examples` | examples on | Skip the static checks of docs code examples (no code is parsed) |
 | `--repo <owner/name>` | origin remote | The GitHub repository the checkout is, for links in reports |
+| `--new` | off | Only findings the changes introduced: absent at the base commit |
+| `--base <ref>` | `HEAD` with uncommitted changes, else the merge base with the default branch | With `--new`: the commit to compare with (read from the local clone, never fetched). `--base` without `--new` is a usage error |
+| `--staged` | off | Lint the git index (what the next commit contains) instead of the files on disk; with `--new` the base is `HEAD` |
+| `--no-cache` | cache on | Parse every file again instead of reading the local parse cache in `.staleproof/cache/` (also `STALEPROOF_CACHE=off`); see [Lint: the parse cache](lint.md#the-parse-cache) |
 
 **Examples.**
 
 ```bash
 npx -y staleproof lint
+npx -y staleproof lint --new
+npx -y staleproof lint --staged --new --fail-on error
 npx -y staleproof lint --format github
 npx -y staleproof lint ../acme-docs --with ../acme-client --format markdown --out lint.md
 npx -y staleproof lint --rule path-missing link-broken --fail-on warning
 ```
 
-**Prints.** Findings grouped by section (AI agent instructions first, then READMEs, docs, code examples), each as `line:column  severity  message  [rule]`, then a summary: `<n> errors, <n> warnings in <files> files (<checked> files checked, <ms> ms)`, or `No stale references in <n> files`. Config warnings (unknown keys) are printed as `warning: …` and never stop the run. Unknown rule ids fail with `unknown rule <id>`; a bad `--format` or `--fail-on` with the allowed values.
+**Prints.** Findings grouped by section (AI agent instructions first, then READMEs, docs, code examples), each as `line:column  severity  message  [rule]`, then a summary: `<n> errors, <n> warnings in <files> files (<checked> files checked, <ms> ms)`, or `No stale references in <n> files`. Config warnings (unknown keys) are printed as `warning: …` and never stop the run. Unknown rule ids fail with `unknown rule <id>`; a bad `--format` or `--fail-on` with the allowed values. With `--new`, only the new findings are printed and stderr says what was compared: `new findings only: <working tree|index> against <base> (<why>); <n> fixed`. [Lint: only what a change introduced](lint.md#only-what-a-change-introduced) explains the base and the fingerprints.
 
 **Exit status.** 1 when a finding is at or above `--fail-on`; 2 on a usage or internal error; otherwise 0.
+
+### `hook`
+
+Run one coding-agent hook: read the hook's JSON on stdin (Claude Code's or Cursor's), lint the working tree against `HEAD`, and print what the agent should know, as the agent's hook JSON. The [Claude Code plugin](claude-code.md) runs it; `init --claude` and `init --cursor` write it into the agent's settings. Needs no FalkorDB and sends nothing anywhere.
+
+```text
+staleproof hook [options] <event>
+```
+
+**Arguments.** `<event>`: `session-start` (lint once to warm the cache, remember what was already new), `post-edit` (the docs the edited files made wrong), or `stop` (the docs the session made wrong, before the agent stops).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--cursor` | read from the input | Answer in Cursor's hook JSON (`additional_context`, `followup_message`) |
+| `--no-graph` | graph on | `stop`: skip the docs examples predicted to break, read from a FalkorDB already running on this machine |
+
+**Prints.** Nothing when there is nothing to say. `post-edit`: `{"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "<list>"}}`. `stop`: `{"decision": "block", "reason": "<list>"}`, or `{"systemMessage": "<list>"}` with `[hooks] stop = "warn"`, `STALEPROOF_HOOK=warn` or when the agent is already continuing for a stop hook. The list has at most ten items, `path:line:column message [rule]`. [Claude Code plugin](claude-code.md#other-agents) has the fields each event reads.
+
+**Exit status.** Always 0, also on an error or after its time limit (10 seconds for `post-edit`, 50 for `stop`): a hook never fails the agent. An unknown event exits 1.
+
+### `init`
+
+Set Staleproof up in a repository: detect the GitHub repository (origin remote), languages, docs folders, agent files and a separate docs repository the README links to, then offer each file and write the ones you accept. Run again, it leaves what is in place alone and writes nothing.
+
+```text
+staleproof init [options] [dir]
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-y`, `--yes` | ask in a terminal | Take the detected defaults without asking (also the default when stdin is not a terminal) |
+| `--dry-run` | off | Print the plan with each new file's content and each change as a diff, and write nothing |
+| `--claude` | off | Add the [hooks](claude-code.md#without-the-plugin) to `.claude/settings.json`, merged with what is there |
+| `--cursor` | off | Add the [hooks](claude-code.md#cursor) to `.cursor/hooks.json` |
+| `--docs-repo <owner/name>` | asked when one is detected | The docs live in another repository: the workflow indexes it with this one (`also-index`) |
+| `--skip <items...>` | none | Leave out `config`, `workflow`, `badge`, `pre-commit`, `gitignore` or `vscode` |
+
+| File | Written when | Content |
+|---|---|---|
+| `.staleproof.toml` | there is none (and no `[tool.staleproof]` in `pyproject.toml`) | What init found, every setting commented out, `[hooks] stop = "block"` |
+| `.github/workflows/staleproof.yml` | no workflow uses `rajkaria/staleproof@` yet | The pull request check and a weekly audit (`uses: rajkaria/staleproof@v1`) |
+| `README.md` | it has no badge yet | The [docs health badge](audit.md#the-readme-badge) at the end of the badge row, else after the title |
+| `.pre-commit-config.yaml` | it exists, or the repository is Python | The [`staleproof` hook](pre-commit.md), in the file's own list style |
+| `lefthook.yml` or `.husky/pre-commit` | either exists (and pre-commit is not used) | `staleproof lint --new --staged` on commit |
+| `.gitignore` | it does not ignore `.staleproof/` | `.staleproof/` (the parse cache) |
+| `.claude/settings.json`, `.cursor/hooks.json` | `--claude`, `--cursor` | The agent hooks |
+
+**Examples.**
+
+```bash
+npx -y staleproof init
+npx -y staleproof init --yes --dry-run
+npx -y staleproof init --yes --claude --docs-repo acme/docs
+```
+
+**Prints.** One line per file (`create`, `update`, `unchanged`, or `manual` with what to add by hand when a file cannot be edited safely, such as a README that starts with HTML), then the next steps: commit the workflow, `pre-commit install`, restart Claude Code. A JSON settings file that is not plain JSON is never rewritten.
 
 ### `audit`
 
@@ -420,7 +492,7 @@ staleproof audit [options] [repos...]
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--run <n>` | `0` | First run up to `n` Python examples at the indexed commits, examples with a mismatch first (needs `git`, and uv or Python 3.12+) |
+| `--run <n>` | `0` | First run up to `n` Python, JavaScript and TypeScript examples at the indexed commits, examples with a mismatch first (needs `git`, and uv or Python 3.12+ for Python, Node for JavaScript and TypeScript) |
 | `--limit <n>` | `25` | How many undocumented symbols to list |
 | `--format <format>` | `text` | `text`, `markdown` (the GitHub Action's job summary and issue body) or `json` |
 | `--out <file>` | stdout | Write the report to a file; logs `wrote <file>: <summary>` on stderr |

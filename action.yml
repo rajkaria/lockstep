@@ -25,7 +25,7 @@ inputs:
     description: Graph mode runs up to this many affected examples before and after the pull request (0 to skip).
     default: '3'
   fail-on:
-    description: "`never` (default); `breaks`: fail the job when an example passes before the pull request and fails after it; `predicted`: also fail when a static check predicts an example's call no longer fits the changed code; `mismatches` (audit): fail when any example no longer fits the code."
+    description: "`never` (default); `breaks`: fail the job when an example passes before the pull request and fails after it; `predicted`: also fail when a static check predicts an example's call no longer fits the changed code; `findings`: fail when the pull request makes a docs reference wrong (a new error-level finding, e.g. a script it renamed that the README or AGENTS.md still runs); `mismatches` (audit): fail when any example no longer fits the code."
     default: never
   fail-under:
     description: Audit mode. Fail the job when the docs health score is below this (0-100).
@@ -59,7 +59,10 @@ inputs:
     default: ${{ github.token }}
   version:
     description: The staleproof npm version to run, or `source` to build the CLI from this action's checkout.
-    default: '0.4.0'
+    default: '0.5.0'
+  cache:
+    description: "Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the base commit: a later run on the same base skips indexing, an older dump is re-indexed with only changed files parsed again. `false` to index from scratch every run. Ignored with falkordb-url."
+    default: 'true'
 
 outputs:
   report:
@@ -71,6 +74,9 @@ outputs:
   predicted:
     description: How many docs examples a static check predicts the pull request breaks (their call no longer fits the changed code).
     value: ${{ steps.check.outputs.predicted }}
+  findings:
+    description: How many docs references the pull request makes wrong (new lint findings in its docs, READMEs and AI agent files; also shown as annotations).
+    value: ${{ steps.check.outputs.findings }}
   score:
     description: Audit mode. The docs health score (0-100).
     value: ${{ steps.audit.outputs.score }}
@@ -91,11 +97,45 @@ runs:
         enable-cache: false
         ignore-empty-workdir: true
 
+    - name: Cache key
+      id: cache-key
+      if: inputs.cache == 'true' && inputs.falkordb-url == ''
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+        REPO: ${{ github.repository }}
+        WITH: ${{ inputs.also-index }}
+        BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+      run: |
+        # The graph of the base commit (a FalkorDB dump) and the parse cache, for the next run. The key is the
+        # Staleproof version, the repository, the also-index list and the base commit; older dumps are the fallback.
+        dir="$RUNNER_TEMP/staleproof-cache"
+        mkdir -p "$dir/falkordb" "$dir/parse"
+        with_hash=$(echo "$WITH" | tr ', ' '\n\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sha256sum | cut -c1-10)
+        version="$VERSION"
+        [ "$VERSION" = "source" ] && version="source-${ACTION_REF:-local}"
+        prefix="staleproof-${version}-${REPO}-${with_hash}-"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}${BASE}" >> "$GITHUB_OUTPUT"
+        echo "STALEPROOF_CACHE_DIR=$dir/parse" >> "$GITHUB_ENV"
+
+    - name: Restore the graph and the parse cache
+      id: cache-restore
+      if: steps.cache-key.outputs.key != ''
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.cache-key.outputs.dir }}
+        key: ${{ steps.cache-key.outputs.key }}
+        restore-keys: ${{ steps.cache-key.outputs.prefix }}
+
     - name: Start FalkorDB
       id: db
       shell: bash
       env:
         FALKORDB_URL_INPUT: ${{ inputs.falkordb-url }}
+        GRAPH_DATA: ${{ steps.cache-key.outputs.dir != '' && format('{0}/falkordb', steps.cache-key.outputs.dir) || '' }}
       run: |
         if [ -n "$FALKORDB_URL_INPUT" ]; then
           echo "Using the FalkorDB from the falkordb-url input."
@@ -103,10 +143,20 @@ runs:
         fi
         if command -v docker >/dev/null 2>&1; then
           # One server for the graph, one disposable server the docs examples run against.
-          docker run -d --name staleproof-graph -p 6379:6379 falkordb/falkordb:latest >/dev/null
+          # With the cache, the graph server's data folder is the cached one: it loads the restored dump at start.
+          data=()
+          [ -n "$GRAPH_DATA" ] && data=(-v "$GRAPH_DATA:/var/lib/falkordb/data")
+          docker run -d --name staleproof-graph -p 6379:6379 "${data[@]}" falkordb/falkordb:latest >/dev/null
           docker run -d --name staleproof-scratch -p 6390:6379 falkordb/falkordb:latest >/dev/null
           for i in $(seq 1 90); do
             if (exec 3<>/dev/tcp/127.0.0.1/6379) 2>/dev/null && (exec 3<>/dev/tcp/127.0.0.1/6390) 2>/dev/null; then break; fi
+            if [ -n "$GRAPH_DATA" ] && [ "$(docker inspect -f '{{.State.Running}}' staleproof-graph 2>/dev/null)" = "false" ]; then
+              echo "::warning::The cached graph did not load; starting from an empty one."
+              docker rm -f staleproof-graph >/dev/null
+              # The dump is the container's (root's), in the runner's folder: the runner may remove it.
+              rm -f "$GRAPH_DATA"/*.rdb "$GRAPH_DATA/staleproof-version"
+              docker run -d --name staleproof-graph -p 6379:6379 -v "$GRAPH_DATA:/var/lib/falkordb/data" falkordb/falkordb:latest >/dev/null
+            fi
             sleep 1
           done
           echo "FALKORDB_URL=falkor://localhost:6379" >> "$GITHUB_ENV"
@@ -134,6 +184,34 @@ runs:
         else
           echo "::warning::staleproof@$VERSION is not on npm; building it from this action's source instead."
           from_source
+        fi
+
+    - name: Use the restored graph
+      if: steps.cache-restore.outputs.cache-matched-key != ''
+      shell: bash
+      env:
+        CLI: ${{ steps.cli.outputs.cli }}
+        DIR: ${{ steps.cache-key.outputs.dir }}
+        EXACT: ${{ steps.cache-restore.outputs.cache-hit }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        WITH: ${{ inputs.also-index }}
+      run: |
+        redis() { docker exec staleproof-graph redis-cli "$@" >/dev/null 2>&1 || { exec 3<>/dev/tcp/127.0.0.1/6379 && printf '%s\r\n' "$*" >&3 && read -r _ <&3; }; }
+        docker inspect staleproof-graph >/dev/null 2>&1 || { echo "No graph container: the cached graph is not used."; exit 0; }
+        version=$($CLI --version)
+        cached=$(cat "$DIR/falkordb/staleproof-version" 2>/dev/null || true)
+        if [ "$cached" != "$version" ]; then
+          echo "The cached graph was written by staleproof ${cached:-of an unknown version}, this run uses $version: starting from an empty graph."
+          redis FLUSHALL
+        elif [ "$EXACT" = "true" ]; then
+          echo "Restored the graph of this base commit: nothing to index."
+        else
+          echo "Restored the graph of an older base commit: re-indexing (files that did not change come from the parse cache)."
+          if ! $CLI index "$REPO" $(echo "$WITH" | tr ',' ' '); then
+            echo "::warning::Re-indexing the restored graph failed; the check indexes from scratch."
+            redis FLUSHALL
+          fi
         fi
 
     - name: Choose check or audit
@@ -192,11 +270,17 @@ runs:
         with_args=()
         for r in $(echo "$WITH" | tr ',' ' '); do with_args+=("$r"); done
         report="$RUNNER_TEMP/staleproof-report.md"
+        # Docs references the pull request makes wrong also print as workflow commands (annotations); older CLIs lack the flag.
+        annotations=()
+        help=$($CLI check --help 2>/dev/null || true)
+        if grep -q -- '--annotations' <<< "$help"; then annotations=(--annotations); fi
         status=0
-        $CLI check "$PR_URL" $mode --runs "$RUNS" --format markdown --out "$report" ${with_args[@]:+--with "${with_args[@]}"} || status=$?
+        $CLI check "$PR_URL" $mode --runs "$RUNS" --format markdown --out "$report" ${with_args[@]:+--with "${with_args[@]}"} "${annotations[@]}" || status=$?
         echo "report=$report" >> "$GITHUB_OUTPUT"
         breaks=0
         predicted=0
+        findings=0
+        finding_errors=0
         if [ -f "$report" ]; then
           counts=$(grep -o '<!-- staleproof:counts [^>]*-->' "$report" | tail -1 || true)
           if [ -n "$counts" ]; then
@@ -205,10 +289,17 @@ runs:
           else
             breaks=$(grep -c '| \*\*breaks\*\*' "$report" || true)
           fi
+          lint=$(grep -o '<!-- staleproof:findings [^>]*-->' "$report" | tail -1 || true)
+          if [ -n "$lint" ]; then
+            findings=$(echo "$lint" | sed -E 's/.*new=([0-9]+).*/\1/')
+            finding_errors=$(echo "$lint" | sed -E 's/.* errors=([0-9]+).*/\1/')
+          fi
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
         fi
         echo "breaks=$breaks" >> "$GITHUB_OUTPUT"
         echo "predicted=$predicted" >> "$GITHUB_OUTPUT"
+        echo "findings=$findings" >> "$GITHUB_OUTPUT"
+        echo "finding-errors=$finding_errors" >> "$GITHUB_OUTPUT"
         if [ "$status" != "0" ] && [ ! -f "$report" ]; then
           echo "::error::staleproof check failed (exit $status); see the log above."
           exit "$status"
@@ -345,3 +436,35 @@ runs:
       run: |
         echo "::error::A static check predicts this pull request breaks $PREDICTED docs example(s): their calls no longer fit the changed code. See the report in the job summary."
         exit 1
+
+    - name: Fail on docs references the pull request makes wrong
+      if: steps.mode.outputs.mode == 'check' && inputs.fail-on == 'findings' && steps.check.outputs.finding-errors != '0' && steps.check.outputs.finding-errors != ''
+      shell: bash
+      env:
+        FINDINGS: ${{ steps.check.outputs.finding-errors }}
+      run: |
+        echo "::error::This pull request makes $FINDINGS docs reference(s) wrong (paths, links, commands or settings the docs and agent files still name). See the annotations and the report in the job summary."
+        exit 1
+
+    - name: Prepare the graph for the cache
+      id: cache-prepare
+      if: always() && steps.cache-key.outputs.key != '' && steps.cache-restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CLI: ${{ steps.cli.outputs.cli }}
+        DIR: ${{ steps.cache-key.outputs.dir }}
+      run: |
+        docker inspect staleproof-graph >/dev/null 2>&1 || { echo "No local graph to keep."; exit 0; }
+        if docker exec staleproof-graph redis-cli SAVE >/dev/null 2>&1 && [ -s "$DIR/falkordb/dump.rdb" ]; then
+          $CLI --version > "$DIR/falkordb/staleproof-version"
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Could not write the graph's dump; the next run indexes from scratch."
+        fi
+
+    - name: Save the graph and the parse cache
+      if: always() && steps.cache-prepare.outputs.ok == 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.cache-key.outputs.dir }}
+        key: ${{ steps.cache-key.outputs.key }}

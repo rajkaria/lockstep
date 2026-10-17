@@ -1,7 +1,8 @@
 import { extractPython, type DefKind, type PyDef, type PyModule } from '../indexer/python.js';
 import { extractTs } from '../indexer/typescript.js';
+import { extractGoFile, parseGoPackages } from '../indexer/go.js';
 import { readManifest, relativeResolver, tsModuleNames, type NpmPackage, type TsModuleName } from '../indexer/tsmodules.js';
-import { classifyFile, git, moduleNames } from '../indexer/repo.js';
+import { classifyFile, git, moduleNames, pythonSourceRoots } from '../indexer/repo.js';
 import type { PullRequestInfo } from './github.js';
 
 export type ChangeKind = 'removed' | 'renamed' | 'signature' | 'modified' | 'added' | 'export-removed';
@@ -102,13 +103,21 @@ export async function diffWith(source: DiffSource, repo: string, before: string,
   const docsTouched = files.filter((f) => classifyFile(f.path) === 'markdown').map((f) => f.path);
   const pyChanged = files.filter((f) => classifyFile(f.path) === 'python' || (f.oldPath && classifyFile(f.oldPath) === 'python'));
   const tsChanged = files.filter((f) => classifyFile(f.path) === 'typescript' || (f.oldPath && classifyFile(f.oldPath) === 'typescript'));
-  const tsSymbols: ChangedSymbol[] = tsChanged.length ? await diffTs(source, repo, before, after, tsChanged) : [];
+  const goChanged = files.filter((f) => classifyFile(f.path) === 'go' || (f.oldPath && classifyFile(f.oldPath) === 'go'));
+  const otherSymbols: ChangedSymbol[] = [
+    ...(tsChanged.length ? await diffTs(source, repo, before, after, tsChanged) : []),
+    ...(goChanged.length ? await diffGo(source, repo, before, after, goChanged) : []),
+  ];
   const symbols: ChangedSymbol[] = [];
-  if (pyChanged.length === 0) return { before, after, files, symbols: tsSymbols, docsTouched };
+  if (pyChanged.length === 0) return { before, after, files, symbols: otherSymbols, docsTouched };
 
-  const pyAt = async (sha: string) => (await source.files(sha)).filter((p) => classifyFile(p) === 'python');
-  const namesBefore = moduleNames(await pyAt(before));
-  const namesAfter = moduleNames(await pyAt(after));
+  // Module names as the index gives them: the commit's own Python projects decide the source roots.
+  const pyAt = async (sha: string) => {
+    const all = await source.files(sha);
+    return moduleNames(all.filter((p) => classifyFile(p) === 'python'), pythonSourceRoots(all));
+  };
+  const namesBefore = await pyAt(before);
+  const namesAfter = await pyAt(after);
 
   for (const f of pyChanged) {
     const oldPath = f.oldPath ?? f.path;
@@ -121,7 +130,7 @@ export async function diffWith(source: DiffSource, repo: string, before: string,
     const hunks = oldMod && newMod ? await source.hunks(before, after, oldPath, f.path) : undefined;
     symbols.push(...compareModules(repo, oldMod, newMod, hunks, { old: oldSrc, new: newSrc }));
   }
-  return { before, after, files, symbols: [...symbols, ...tsSymbols], docsTouched };
+  return { before, after, files, symbols: [...symbols, ...otherSymbols], docsTouched };
 }
 
 /** TypeScript/JavaScript module names at a commit, from the package manifests there. */
@@ -151,6 +160,51 @@ async function diffTs(source: DiffSource, repo: string, before: string, after: s
     const newMod = newSrc !== undefined && newMeta ? await extractTs(newSrc, { module: newMeta.module, path: f.path, tsx: tsx(f.path), resolve: relativeResolver(f.path, namesAfter) }) : undefined;
     const hunks = oldMod && newMod ? await source.hunks(before, after, oldPath, f.path) : undefined;
     out.push(...compareModules(repo, oldMod, newMod, hunks, { old: oldSrc, new: newSrc }));
+  }
+  return out;
+}
+
+const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+
+/**
+ * Go changes, by package: a package spans files, so a function moved to another file of
+ * its package is not removed. Removed, renamed, re-signed and added symbols come from the
+ * whole package before and after; `modified` from each changed file's own lines.
+ */
+async function diffGo(source: DiffSource, repo: string, before: string, after: string, changed: ChangedFile[]): Promise<ChangedSymbol[]> {
+  const dirs = new Set(changed.flatMap((f) => [dirOf(f.path), ...(f.oldPath ? [dirOf(f.oldPath)] : [])]));
+  const packagesAt = async (sha: string) => {
+    const all = await source.files(sha);
+    const files = all.filter((p) => classifyFile(p) === 'go' && dirs.has(dirOf(p)));
+    const mods = await parseGoPackages((p) => source.read(sha, p), { files, all, repo }, extractGoFile);
+    return new Map(mods.map((m) => [m.module, m]));
+  };
+  const [old, now] = await Promise.all([packagesAt(before), packagesAt(after)]);
+  const out: ChangedSymbol[] = [];
+  for (const module of [...new Set([...old.keys(), ...now.keys()])].sort()) {
+    const o = old.get(module);
+    const n = now.get(module);
+    const fileOf = new Map([...(o?.defs ?? []), ...(n?.defs ?? [])].map((d) => [d.qualname, d.file]));
+    const found = compareModules(repo, o, n).map((c) => ({ ...c, path: (c.change === 'removed' || c.change === 'renamed' ? o : n)?.defs.find((d) => d.qualname === c.qualname)?.file ?? fileOf.get(c.qualname) ?? c.path }));
+    const reported = new Set(found.map((c) => c.qualname));
+    out.push(...found);
+    if (!o || !n) continue;
+    for (const f of changed) {
+      const oldPath = f.oldPath ?? f.path;
+      if (f.status.startsWith('A') || f.status.startsWith('D')) continue;
+      const own = (m: typeof o, path: string) => ({ ...m, path, defs: [m.defs[0]!, ...m.defs.slice(1).filter((d) => d.file === path)] });
+      const subOld = own(o, oldPath);
+      const subNew = own(n, f.path);
+      if (subOld.defs.length < 2 && subNew.defs.length < 2) continue;
+      const hunks = await source.hunks(before, after, oldPath, f.path);
+      const [oldSrc, newSrc] = await Promise.all([source.read(before, oldPath), source.read(after, f.path)]);
+      for (const c of compareModules(repo, subOld, subNew, hunks, { old: oldSrc, new: newSrc })) {
+        if (c.change === 'modified' && !reported.has(c.qualname)) {
+          reported.add(c.qualname);
+          out.push(c);
+        }
+      }
+    }
   }
   return out;
 }
@@ -301,8 +355,8 @@ export function compareModules(
   if (oldMod && newMod) {
     const newAliases = new Set(newMod.imports.map((i) => i.alias));
     for (const imp of oldMod.imports) {
-      // TypeScript: only names the module exported (`export { X } from`) were part of its API.
-      if (oldMod.lang === 'ts' && !imp.exported) continue;
+      // TypeScript: only names the module exported (`export { X } from`) were part of its API. Go imports export nothing.
+      if ((oldMod.lang === 'ts' && !imp.exported) || oldMod.lang === 'go') continue;
       if (imp.alias === '*' || newAliases.has(imp.alias) || newDefs.has(`${newMod.module}.${imp.alias}`)) continue;
       if (!imp.target.startsWith(`${oldMod.module.split('.')[0]}.`)) continue; // only the package's own names
       out.push({

@@ -123,7 +123,7 @@ describe('a TypeScript library and its docs on the graph (FalkorDB)', () => {
     expect(calls.map((c) => c.b)).toEqual(['js-acme-minigraph.graph.Graph.query']);
   });
 
-  it('flags names the package does not export and methods the class does not have (never arity)', async () => {
+  it('flags names the package does not export and methods the class does not have', async () => {
     const mm = await rows<{ ex: string; detail: string; line: number }>(`MATCH (e:CodeExample)-[m:MISMATCH]->() RETURN e.id AS ex, m.detail AS detail, m.line AS line ORDER BY line`);
     expect(mm).toEqual([
       { ex: 'acme/js-docs:docs/js.md:1', detail: '`@acme/minigraph` has no `Gone`', line: 21 },
