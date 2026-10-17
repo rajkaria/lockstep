@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
@@ -20,6 +22,23 @@ async function action(): Promise<{ inputs: Record<string, { default: string }>; 
 }
 
 describe('action.yml caches the graph and the parse cache', () => {
+  it('computes the cache key under the runner\'s bash -e -o pipefail, with and without also-index', async () => {
+    const step = (await action()).runs.steps.find((s) => s.name === 'Cache key')!;
+    const key = async (WITH: string) => {
+      const tmp = await mkdtemp(join(tmpdir(), 'staleproof-cache-key-'));
+      const env = { PATH: process.env.PATH!, RUNNER_TEMP: tmp, GITHUB_OUTPUT: join(tmp, 'out'), GITHUB_ENV: join(tmp, 'env'), VERSION: 'source', ACTION_REF: 'main', REPO: 'acme/app', WITH, BASE: 'abc123' };
+      // sha256sum is GNU coreutils; macOS has shasum.
+      const script = step.run!.replace(/sha256sum/g, 'shasum -a 256');
+      execFileSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], { env });
+      return Object.fromEntries((await readFile(join(tmp, 'out'), 'utf8')).trim().split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2)));
+    };
+    const none = await key('');
+    expect(none.key).toMatch(/^staleproof-source-main-acme\/app-[0-9a-f]{10}-abc123$/);
+    const two = await key('acme/docs, acme/sdk');
+    expect(two.prefix).not.toBe(none.prefix);
+    expect((await key('acme/sdk acme/docs')).prefix).toBe(two.prefix);
+  });
+
   it('restores before FalkorDB starts and saves at the end, whatever the result', async () => {
     const a = await action();
     expect(a.inputs.cache!.default).toBe('true');

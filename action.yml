@@ -112,7 +112,8 @@ runs:
         # Staleproof version, the repository, the also-index list and the base commit; older dumps are the fallback.
         dir="$RUNNER_TEMP/staleproof-cache"
         mkdir -p "$dir/falkordb" "$dir/parse"
-        with_hash=$(echo "$WITH" | tr ', ' '\n\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sha256sum | cut -c1-10)
+        # `grep` exits 1 when also-index is empty; under pipefail that would fail the step.
+        with_hash=$(echo "$WITH" | tr ', ' '\n\n' | { grep -v '^$' || true; } | sort -u | tr '\n' ' ' | sha256sum | cut -c1-10)
         version="$VERSION"
         [ "$VERSION" = "source" ] && version="source-${ACTION_REF:-local}"
         prefix="staleproof-${version}-${REPO}-${with_hash}-"
