@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.1 — 2026-10-18
+
+What `staleproof init` writes catches up with what is live, and the pull request report says less that is not so.
+
+- **`staleproof init`**: the workflow it writes has the weekly fix job (`mode: fix`, allowed to fail) now that `v1`
+  has fix mode, and `.vscode/extensions.json` recommends the VS Code extension `staleproof.staleproof`, now on the
+  Visual Studio Marketplace.
+- **Pull request report**: the line about pages the pull request edits says only what applies (examples run after
+  the change, sections linked as on the default branch), and nothing when neither does, as in graph mode and the
+  GitHub App.
+- **GitHub App**: `github-app.json` and the docs register the webhook on `staleproof.dev`, the primary domain.
+- Every pinned version (Action default, Claude Code plugin, docs) is 0.6.1.
+
 ## 0.6.0 — 2026-10-17
 
 Fix, don't just flag; a GitHub App with no workflow file; diagnostics while you type; the team sees what was checked.

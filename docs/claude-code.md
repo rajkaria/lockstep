@@ -13,7 +13,7 @@ In Claude Code:
 
 On Claude Code 2.1.275 or later this is one step: `/plugin install staleproof --marketplace rajkaria/staleproof`. From a shell, `claude plugin marketplace add rajkaria/staleproof` then `claude plugin install staleproof@staleproof`. To try it from a clone of this repository without installing: `claude --plugin-dir plugins/claude-code`.
 
-The hooks need Node.js 20 or later and git on the `PATH`. They run the Staleproof the project already has (`node_modules/staleproof`, in the project or a folder above it), else a global `staleproof`, else the release the plugin was made with through `npx -y staleproof@0.6.0` (downloaded once, then cached by npm). A Staleproof older than 0.5 has no hooks and is skipped.
+The hooks need Node.js 20 or later and git on the `PATH`. They run the Staleproof the project already has (`node_modules/staleproof`, in the project or a folder above it), else a global `staleproof`, else the release the plugin was made with through `npx -y staleproof@0.6.1` (downloaded once, then cached by npm). A Staleproof older than 0.5 has no hooks and is skipped.
 
 | Part | Name | What it does |
 |---|---|---|
@@ -75,9 +75,9 @@ Rules, severities and excluded files come from the same config as [`staleproof l
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "npx -y staleproof@0.6.0 hook session-start", "async": true, "timeout": 120 }] }],
-    "PostToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "npx -y staleproof@0.6.0 hook post-edit", "timeout": 15 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "npx -y staleproof@0.6.0 hook stop", "timeout": 60 }] }]
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "npx -y staleproof@0.6.1 hook session-start", "async": true, "timeout": 120 }] }],
+    "PostToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "npx -y staleproof@0.6.1 hook post-edit", "timeout": 15 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "npx -y staleproof@0.6.1 hook stop", "timeout": 60 }] }]
   }
 }
 ```

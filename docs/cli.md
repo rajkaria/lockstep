@@ -52,7 +52,7 @@ The first checks the working tree of the checkout you are in (uncommitted and un
 
 | How | Command | Notes |
 |---|---|---|
-| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.6.0 <command>`. |
+| No install | `npx -y staleproof <command>` | `-y` answers npx's install prompt. Pin a version for repeatable runs: `npx -y staleproof@0.6.1 <command>`. |
 | Global install | `npm install -g staleproof`, then `staleproof <command>` | Puts `staleproof` on your `PATH`. |
 | From a clone | `npm install && npm run build`, then `node dist/cli.js <command>` | Or `npm run dev -- <command>` to run the TypeScript source. |
 

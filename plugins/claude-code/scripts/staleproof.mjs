@@ -8,7 +8,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 
 /** The release this plugin version ships with (kept equal to plugin.json and package.json by a test). */
-const PINNED = '0.6.0';
+const PINNED = '0.6.1';
 /** The first release with `staleproof hook`. */
 const MIN = [0, 5];
 

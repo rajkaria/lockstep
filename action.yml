@@ -62,7 +62,7 @@ inputs:
     default: ${{ github.token }}
   version:
     description: The staleproof npm version to run, or `source` to build the CLI from this action's checkout.
-    default: '0.6.0'
+    default: '0.6.1'
   cache:
     description: "Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the base commit: a later run on the same base skips indexing, an older dump is re-indexed with only changed files parsed again. `false` to index from scratch every run. Ignored with falkordb-url."
     default: 'true'
