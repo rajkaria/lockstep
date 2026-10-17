@@ -6,7 +6,7 @@ export const SITE = 'https://staleproof.dev';
 /** The workflow gets a weekly docs-fix job once the Action has `mode: fix`. */
 export const ACTION_HAS_FIX_MODE = true;
 /** The VS Code extension id, once it is published (then `init` recommends it in `.vscode/extensions.json`). */
-export const VSCODE_EXTENSION: string | undefined = undefined;
+export const VSCODE_EXTENSION: string | undefined = 'staleproof.staleproof';
 
 /** How a hook command runs Staleproof: the project's own install, else the pinned release through npx. */
 export function cliCommand(d: Pick<Detected, 'staleproofDependency'>, version: string): string {

@@ -56,7 +56,9 @@ describe('staleproof init', () => {
   it('writes valid files, and a second run writes nothing', async () => {
     const dir = await fixtureRepo('python');
     const first = await runInit({ dir, version: VERSION, claude: true, cursor: true });
-    expect(first.written.sort()).toEqual(['.claude/settings.json', '.cursor/hooks.json', '.github/workflows/staleproof.yml', '.gitignore', '.pre-commit-config.yaml', '.staleproof.toml', 'README.md']);
+    expect(first.written.sort()).toEqual(['.claude/settings.json', '.cursor/hooks.json', '.github/workflows/staleproof.yml', '.gitignore', '.pre-commit-config.yaml', '.staleproof.toml', '.vscode/extensions.json', 'README.md']);
+    const vscode = JSON.parse(await readFile(join(dir, '.vscode/extensions.json'), 'utf8')) as { recommendations: string[] };
+    expect(vscode.recommendations).toContain('staleproof.staleproof');
     // Every file is what its tool reads.
     const config = parseRepoConfig(await readFile(join(dir, '.staleproof.toml'), 'utf8'), '.staleproof.toml');
     expect(config.warnings).toBeUndefined();

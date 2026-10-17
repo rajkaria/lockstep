@@ -6,6 +6,7 @@ Staleproof init: acme/demo-node (TypeScript; docs in docs/; agent files: CLAUDE.
   update     .husky/pre-commit                 staleproof lint on the staged docs
   create     .gitignore                        .staleproof/ (the local parse cache)
   update     .claude/settings.json             Claude Code hooks: after each edit, and before stopping
+  create     .vscode/extensions.json           recommends the Staleproof extension
 
 Dry run: nothing was written.
 
@@ -149,6 +150,13 @@ jobs:
 +      }
      ]
    }
+
+--- .vscode/extensions.json (new)
+{
+  "recommendations": [
+    "staleproof.staleproof"
+  ]
+}
 
 Next:
   1. Run it again without --dry-run to write these files.

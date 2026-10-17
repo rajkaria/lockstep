@@ -5,6 +5,7 @@ Staleproof init: acme/demo-py (Python; docs in docs/; agent files: AGENTS.md)
   update     README.md                         the docs health badge, after the title
   update     .pre-commit-config.yaml           the staleproof pre-commit hook
   update     .gitignore                        .staleproof/ (the local parse cache)
+  create     .vscode/extensions.json           recommends the Staleproof extension
 
 Dry run: nothing was written.
 
@@ -101,6 +102,13 @@ jobs:
 +
 +# Staleproof parse cache and hook state
 +.staleproof/
+
+--- .vscode/extensions.json (new)
+{
+  "recommendations": [
+    "staleproof.staleproof"
+  ]
+}
 
 Next:
   1. Run it again without --dry-run to write these files.
