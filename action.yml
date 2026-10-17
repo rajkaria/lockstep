@@ -1,5 +1,5 @@
 name: Staleproof docs check
-description: Comment on every pull request with the docs it can make false (evidence path for each) and run their examples before and after; on a schedule, audit the whole docs. No setup, no secrets.
+description: Comment on each pull request with the docs it makes false, with evidence, and run their examples. Audit the docs on a schedule.
 author: Raj Karia
 branding:
   icon: book-open
