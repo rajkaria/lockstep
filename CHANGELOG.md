@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-10-17
 
 Docs drift found without a pull request, before a pull request, and in more languages.
 
