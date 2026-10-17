@@ -43,7 +43,7 @@ describe('github-app.json', () => {
     for (const k of Object.keys(m)) expect(MANIFEST_KEYS.has(k), k).toBe(true);
     expect(m.name).toBe('Staleproof');
     expect(m.url).toBe('https://staleproof.dev');
-    expect(m.hook_attributes).toEqual({ url: 'https://staleproof.dev/api/github/webhook', active: true });
+    expect(m.hook_attributes).toEqual({ url: 'https://www.staleproof.dev/api/github/webhook', active: true });
     expect(m.default_permissions).toEqual({ checks: 'write', contents: 'write', pull_requests: 'write', issues: 'write', metadata: 'read' });
     // installation and installation_repositories reach every App by default and cannot be subscribed to.
     expect(m.default_events).toEqual(['pull_request', 'push', 'check_run', 'check_suite']);
@@ -150,7 +150,7 @@ describe('registration script: the manifest flow on localhost', () => {
     expect(action.startsWith('https://github.com/settings/apps/new?state=')).toBe(true);
     const manifest = JSON.parse(/name="manifest" value="([^"]+)"/.exec(page)![1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
     expect(manifest.redirect_url).toBe(`${local}callback`);
-    expect(manifest.hook_attributes.url).toBe('https://staleproof.dev/api/github/webhook');
+    expect(manifest.hook_attributes.url).toBe('https://www.staleproof.dev/api/github/webhook');
 
     expect((await fetch(`${local}callback?code=code-123&state=wrong`)).status).toBe(400);
     expect(calls).toHaveLength(0);
