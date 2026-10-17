@@ -21,6 +21,7 @@ interface Manifest {
   typings?: string;
   source?: string;
   exports?: unknown;
+  engines?: { vscode?: unknown };
 }
 
 function exportsEntry(exp: unknown): string[] {
@@ -48,13 +49,25 @@ export function readManifest(dir: string, text: string): NpmPackage | undefined 
   } catch {
     return undefined;
   }
-  if (!m.name || m.private) return undefined;
+  // A VS Code extension is loaded by the editor, never imported, and often shares the library's name.
+  if (!m.name || m.private || m.engines?.vscode) return undefined;
   const entries = [m.source, m.types, m.typings, m.module, ...exportsEntry(m.exports), m.main]
     .filter((x): x is string => typeof x === 'string')
     .flatMap(sourceCandidates);
   entries.push(...['src/index.ts', 'src/index.tsx', 'index.ts', 'src/index.js', 'index.js', 'lib/index.js', 'src/main.ts']);
   const prefix = dir ? `${dir}/` : '';
   return { dir, name: m.name, entries: [...new Set(entries.map((e) => `${prefix}${e}`))] };
+}
+
+/** One package per name: when manifests share a name (an `examples/` copy, a fixture), the shallowest is the package. */
+export function uniquePackages(packages: NpmPackage[]): NpmPackage[] {
+  const depth = (p: NpmPackage) => (p.dir ? p.dir.split('/').length : 0);
+  const best = new Map<string, NpmPackage>();
+  for (const p of packages) {
+    const seen = best.get(p.name);
+    if (!seen || depth(p) < depth(seen)) best.set(p.name, p);
+  }
+  return packages.filter((p) => best.get(p.name) === p);
 }
 
 /** The package a file belongs to: the nearest enclosing package directory. */

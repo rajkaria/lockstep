@@ -58,6 +58,22 @@ Fix, don't just flag; a GitHub App with no workflow file; diagnostics while you 
   `--fail-on undocumented-breaking|stale-docs|never`, exit codes 0, 1 and 2. The Action's `mode: release` runs it
   ([`examples/staleproof-release.yml`](examples/staleproof-release.yml)).
 
+Fixed by the end-to-end runs on GitHub:
+
+- `open-docs-pr` re-applies each edit to the file on the pull request's branch, so the docs pull request never
+  reverts the branch's own changes; an edit that no longer applies is left out and named, and nothing is opened
+  when none is left.
+- When the repository setting "Allow GitHub Actions to create and approve pull requests" is off, `mode: fix` and
+  `open-docs-pr` say so, name the alternative (a token in `github-token`) and link to open the pull request by
+  hand.
+- A fix pull request Staleproof closed itself no longer counts as declined: the same drift coming back opens a new
+  one.
+- The Action's cache key includes the action's source when `version: source`, so runs on a moving ref like `@main`
+  save a fresh graph instead of restoring an older one every time.
+- A VS Code extension's `package.json` (`engines.vscode`) is no longer taken for an npm package, and when two
+  manifests share a name the shallowest one is the package: an extension named like its library made every docs
+  example importing that library report missing names. This repository's own lint is now a test.
+
 ## 0.5.0 — 2026-10-17
 
 Commands, CLIs, environment variables, symbols and docstrings checked too; only what a change makes wrong in pull

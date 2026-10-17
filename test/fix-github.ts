@@ -43,6 +43,8 @@ export interface FakeState {
   prFiles: Map<number, { filename: string; status: string; patch?: string }[]>;
   /** `GET /pulls/{n}` answers. */
   prInfo: Map<number, { base: { sha: string; ref: string }; head: { sha: string; ref: string }; title?: string }>;
+  /** false: the repository does not let GitHub Actions create pull requests (GitHub's default), so `POST /pulls` is refused. */
+  actionsMayOpenPulls: boolean;
 }
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex');
@@ -60,6 +62,7 @@ export function fakeGitHub(repo = 'acme/app', login = 'github-actions[bot]') {
     reviews: [],
     prFiles: new Map(),
     prInfo: new Map(),
+    actionsMayOpenPulls: true,
   };
   const calls: { method: string; path: string; body?: unknown }[] = [];
   let nextId = 100;
@@ -123,6 +126,8 @@ export function fakeGitHub(repo = 'acme/app', login = 'github-actions[bot]') {
       return json(wanted === 'closed' ? [...list].reverse() : list);
     }
     if (rest === '/pulls' && method === 'POST') {
+      // GitHub's answer to a workflow token when "Allow GitHub Actions to create and approve pull requests" is off.
+      if (!state.actionsMayOpenPulls) return json({ message: 'GitHub Actions is not permitted to create or approve pull requests.', documentation_url: 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request', status: '403' }, 403);
       if (state.pulls.some((p) => p.state === 'open' && p.head.ref === body.head)) return json({ message: 'A pull request already exists' }, 422);
       const number = state.pulls.length + 1;
       const pr: FakePull = { number, title: body.title, body: body.body, state: 'open', merged_at: null, head: { ref: body.head, sha: state.refs.get(body.head) ?? '' }, base: { ref: body.base }, html_url: `https://github.com/${repo}/pull/${number}` };

@@ -67,7 +67,7 @@ One review per push. A suggestion already posted on the same lines is updated (o
 
 ## A weekly fix pull request
 
-`mode: fix` lints the default branch, applies every verified fix on the branch `staleproof/fix-docs`, and opens one pull request, **Staleproof: fix N stale docs references**, with a table of the fixes and where Staleproof looked for each. Every run rebuilds the branch from the default branch and updates the same pull request; when nothing is left it closes it. A pull request you close without merging is not opened again until the fixes change. Staleproof writes only branches under `staleproof/`.
+`mode: fix` lints the default branch, applies every verified fix on the branch `staleproof/fix-docs`, and opens one pull request, **Staleproof: fix N stale docs references**, with a table of the fixes and where Staleproof looked for each. Every run rebuilds the branch from the default branch and updates the same pull request; when nothing is left it closes it. A pull request you close without merging is not opened again until the fixes change (one Staleproof closed itself because nothing was left does not count: if the same drift comes back, it opens a new one). Staleproof writes only branches under `staleproof/`.
 
 ```yaml
 # .github/workflows/staleproof-fix.yml
@@ -87,6 +87,8 @@ jobs:
         with:
           mode: fix
 ```
+
+The workflow's token opens the pull request only when the repository lets it: turn on **Allow GitHub Actions to create and approve pull requests** (Settings → Actions → General → Workflow permissions; it is off for new repositories and organizations), or pass a token of your own as `github-token`. Without it the run pushes `staleproof/fix-docs` and fails with `GitHub Actions may not open pull requests in <owner/name>` and a link that opens the pull request by hand.
 
 Run it locally with `staleproof fix-pr <owner/name>` ([CLI](cli.md#fix-pr)).
 

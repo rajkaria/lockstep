@@ -148,28 +148,77 @@ describe('decisions, verdicts and memory (FalkorDB)', () => {
 
   it('opens the docs PR in the repository itself for CI tokens: no fork, no user, into the given branch', async () => {
     const patch = await buildDocsPatch(ctx, PR.url);
-    const calls: string[] = [];
-    const fetchImpl = (async (url: string, init?: RequestInit) => {
-      const path = url.replace('https://api.github.com', '');
-      const method = init?.method ?? 'GET';
-      calls.push(`${method} ${path}`);
-      const body =
-        path === '/repos/acme/mini-docs' ? { default_branch: 'main' }
-        : path.startsWith('/repos/acme/mini-docs/git/ref/heads/') ? { object: { sha: 'feature-sha' } }
-        : path.includes('/contents/') && method === 'GET' ? { sha: 'blob' }
-        : path.includes('/pulls?') ? []
-        : path.endsWith('/pulls') ? { html_url: 'https://github.com/acme/mini-docs/pull/9' }
-        : {};
-      return new Response(JSON.stringify(body), { status: 200 });
-    }) as typeof fetch;
-    const opened = await openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['ACME/mini-docs'], fetchImpl });
+    const file = patch.files[0]!;
+    /** A GitHub whose `feature` branch has `onBranch` at the patched path; it records the calls and the files written. */
+    const github = (onBranch: string | undefined) => {
+      const calls: string[] = [];
+      const written = new Map<string, string>();
+      const posted: { body: string }[] = [];
+      const fetchImpl = (async (url: string, init?: RequestInit) => {
+        const path = url.replace('https://api.github.com', '');
+        const method = init?.method ?? 'GET';
+        calls.push(`${method} ${path}`);
+        if (path.includes('/contents/') && method === 'GET' && onBranch === undefined) return new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 });
+        if (path.includes('/contents/') && method === 'PUT') {
+          const b = JSON.parse(String(init!.body)) as { content: string; sha: string };
+          written.set(decodeURIComponent(path.split('/contents/')[1]!), Buffer.from(b.content, 'base64').toString('utf8'));
+        }
+        if (path.endsWith('/pulls') && method === 'POST') posted.push(JSON.parse(String(init!.body)) as { body: string });
+        const body =
+          path === '/repos/acme/mini-docs' ? { default_branch: 'main' }
+          : path.startsWith('/repos/acme/mini-docs/git/ref/heads/') ? { object: { sha: 'feature-sha' } }
+          : path.includes('/contents/') && method === 'GET' ? { sha: 'blob', encoding: 'base64', content: Buffer.from(onBranch!, 'utf8').toString('base64') }
+          : path.includes('/pulls?') ? []
+          : path.endsWith('/pulls') ? { html_url: 'https://github.com/acme/mini-docs/pull/9' }
+          : {};
+        return new Response(JSON.stringify(body), { status: 200 });
+      }) as typeof fetch;
+      return { calls, written, posted, fetchImpl };
+    };
+    const same = github(file.before);
+    const opened = await openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['ACME/mini-docs'], fetchImpl: same.fetchImpl });
     expect(opened).toEqual([{ repo: 'acme/mini-docs', url: 'https://github.com/acme/mini-docs/pull/9', target: 'same-repo', branch: 'staleproof/docs-acme-mini-client-7' }]);
+    const calls = same.calls;
     expect(calls).not.toContain('GET /user');
     expect(calls.some((c) => c.includes('/forks'))).toBe(false);
     expect(calls).toContain('GET /repos/acme/mini-docs/git/ref/heads/feature');
+    // The file is read at the branch's commit, before the docs branch is made from it.
+    expect(calls).toContain('GET /repos/acme/mini-docs/contents/docs/getting-started.mdx?ref=feature-sha');
     const create = calls.indexOf('POST /repos/acme/mini-docs/pulls');
     expect(create).toBeGreaterThan(calls.indexOf('PUT /repos/acme/mini-docs/contents/docs/getting-started.mdx'));
-    expect(await openDocsPr(patch, { token: 't', target: 'same-repo', only: ['acme/other'], fetchImpl })).toEqual([]);
+    expect(same.written.get('docs/getting-started.mdx')).toBe(file.after);
+    expect(await openDocsPr(patch, { token: 't', target: 'same-repo', only: ['acme/other'], fetchImpl: same.fetchImpl })).toEqual([]);
+
+    // Found on rajkaria/staleproof-action-test#6: the edit was written against the default branch and the file was
+    // written whole onto the pull request's branch, reverting what the pull request itself had changed in that file.
+    // The pull request's branch changed the file away from the edit: the edit is applied on top, the change kept.
+    const elsewhere = `> Note added by the pull request.\n\n${file.before}`;
+    const merged = github(elsewhere);
+    const kept = await openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['acme/mini-docs'], fetchImpl: merged.fetchImpl });
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.skipped).toBeUndefined();
+    expect(merged.written.get('docs/getting-started.mdx')).toBe(`> Note added by the pull request.\n\n${file.after}`);
+    // It changed the lines the edit replaces: the file is left out, nothing is overwritten, no pull request is opened.
+    const removed = file.diff.split('\n').find((l) => l.startsWith('-') && !l.startsWith('---'))!.slice(1);
+    const conflicting = github(file.before.replace(removed, `${removed} (changed by the pull request)`));
+    const logs: string[] = [];
+    await expect(openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['acme/mini-docs'], fetchImpl: conflicting.fetchImpl, log: (m) => logs.push(m) })).rejects.toThrow(
+      /^the docs fix was not opened: the target branch has other text where each edit applies \(acme\/mini-docs: docs\/getting-started\.mdx \(feature has other text where the edit applies \(the edit was written against \w{7}\)\)\)/,
+    );
+    expect(conflicting.written.size).toBe(0);
+    expect(conflicting.calls.some((c) => c.startsWith('POST /repos/acme/mini-docs/git/refs') || c.startsWith('POST /repos/acme/mini-docs/pulls'))).toBe(false);
+    expect(logs).toEqual([expect.stringMatching(/^no pull request in acme\/mini-docs: docs\/getting-started\.mdx: feature has other text where the edit applies/)]);
+    // The file is not on the branch at all (the pull request moved it): left out the same way.
+    await expect(openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['acme/mini-docs'], fetchImpl: github(undefined).fetchImpl })).rejects.toThrow(/docs\/getting-started\.mdx \(not on feature\)/);
+
+    // A repository that does not let GitHub Actions create pull requests (GitHub's default): say what to change.
+    const refused = (async (url: string, init?: RequestInit) =>
+      url.endsWith('/pulls') && init?.method === 'POST'
+        ? new Response(JSON.stringify({ message: 'GitHub Actions is not permitted to create or approve pull requests.', status: '403' }), { status: 403 })
+        : same.fetchImpl(url, init)) as typeof fetch;
+    await expect(openDocsPr(patch, { token: 't', target: 'same-repo', base: 'feature', only: ['acme/mini-docs'], fetchImpl: refused })).rejects.toThrow(
+      /^GitHub Actions may not open pull requests in acme\/mini-docs, so the docs fix waits on the branch staleproof\/docs-acme-mini-client-7: turn on "Allow GitHub Actions to create and approve pull requests".*https:\/\/github\.com\/acme\/mini-docs\/compare\/feature\.\.\.staleproof\/docs-acme-mini-client-7\?expand=1$/,
+    );
   });
 
   it('summarises what changed since the last check', async () => {

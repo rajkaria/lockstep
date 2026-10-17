@@ -7,7 +7,7 @@ import { checkoutRepo, gitAvailable } from '../indexer/repo.js';
 import { lintTree, tarballTree, worktreeTree, type LintTree } from '../lint/sources.js';
 import type { LintOptions } from '../lint/engine.js';
 import type { Finding, LintResult } from '../lint/types.js';
-import { githubJson, type GitHubOptions } from './github.js';
+import { actionsMayNotOpenPulls, ALLOW_ACTIONS_PULLS, githubJson, type GitHubOptions } from './github.js';
 
 /**
  * Renovate for docs (spec R3.5): at the default branch, apply every verified fix, keep one
@@ -82,6 +82,9 @@ export function fixSetId(fixes: readonly Finding[]): string {
 }
 
 const markerFor = (fixes: readonly Finding[]) => `<!-- staleproof:fix-docs fixes=${fixSetId(fixes)} -->`;
+const FIX_SET_MARKER_RE = /<!-- staleproof:fix-docs fixes=[0-9a-f]+ -->/;
+/** Replaces the fix-set marker when Staleproof itself closes the pull request (nothing left to fix). */
+const CLOSED_BY_STALEPROOF = '<!-- staleproof:fix-docs closed-by-staleproof -->';
 
 /** The pull request body: a table of the fixes with the evidence for each. */
 export function fixPrBody(fixes: readonly Finding[], base: { branch: string; sha: string }): string {
@@ -93,7 +96,7 @@ export function fixPrBody(fixes: readonly Finding[], base: { branch: string; sha
   const files = new Set(fixes.flatMap((f) => f.fix!.edits.map((e) => e.path)));
   return [
     `${FIX_PR_MARKER}\n${markerFor(fixes)}`,
-    `Staleproof found ${plural(fixes.length, 'docs reference')} in ${plural(files.size, 'file')} that no longer match the code at \`${base.branch}\` (${base.sha.slice(0, 7)}), and a fix for each. Every fix was re-checked before it was proposed: applying it clears the finding and adds none.`,
+    `Staleproof found ${plural(fixes.length, 'docs reference')} in ${plural(files.size, 'file')} that no longer ${fixes.length === 1 ? 'matches' : 'match'} the code at \`${base.branch}\` (${base.sha.slice(0, 7)}), and ${fixes.length === 1 ? 'its fix. The fix was' : 'a fix for each. Every fix was'} re-checked before it was proposed: applying it clears the finding and adds none.`,
     '',
     '| Where | Rule | What is stale | Fix | Where Staleproof looked |',
     '|---|---|---|---|---|',
@@ -146,7 +149,9 @@ export async function runFixPr(opts: FixPrOptions, client: FixPrClient): Promise
   if (!changed.size) {
     if (existing && !opts.dryRun) {
       await send(`${api}/issues/${existing.number}/comments`, 'POST', { body: `${FIX_PR_MARKER}\nNothing left to fix at \`${defaultBranch}\` (${baseSha.slice(0, 7)}): closing.` });
-      await send(`${api}/pulls/${existing.number}`, 'PATCH', { state: 'closed' });
+      // Closed by Staleproof, not declined by a person: drop the fix-set marker, so the same drift coming back
+      // (a revert of the hand fix) opens a pull request again instead of being taken as declined.
+      await send(`${api}/pulls/${existing.number}`, 'PATCH', { state: 'closed', body: (existing.body ?? '').replace(FIX_SET_MARKER_RE, CLOSED_BY_STALEPROOF) });
       return { action: 'closed', fixes: [], files: [], branch, pr: { number: existing.number, url: existing.html_url }, base };
     }
     return { action: 'none', fixes: [], files: [], branch, base };
@@ -200,7 +205,14 @@ export async function runFixPr(opts: FixPrOptions, client: FixPrClient): Promise
     if (existing.title !== title || (existing.body ?? '') !== body) await send(`${api}/pulls/${existing.number}`, 'PATCH', { title, body });
     return { action: same && existing.title === title && (existing.body ?? '') === body ? 'unchanged' : 'updated', fixes: verified, files, branch, pr: { number: existing.number, url: existing.html_url }, ...(commit ? { commit } : {}), base };
   }
-  const pr = await send<{ number: number; html_url: string }>(`${api}/pulls`, 'POST', { title, head: branch, base: defaultBranch, body });
+  const pr = await send<{ number: number; html_url: string }>(`${api}/pulls`, 'POST', { title, head: branch, base: defaultBranch, body }).catch((err: Error) => {
+    if (!actionsMayNotOpenPulls(err)) throw err;
+    // The branch is pushed; only the pull request is refused. The next run after the setting changes opens it.
+    throw new Error(
+      `GitHub Actions may not open pull requests in ${opts.repo}, so the fixes wait on the branch ${branch}: ${ALLOW_ACTIONS_PULLS}. ` +
+        `To open this one by hand: https://github.com/${opts.repo}/compare/${defaultBranch}...${branch}?expand=1`,
+    );
+  });
   return { action: 'opened', fixes: verified, files, branch, pr: { number: pr.number, url: pr.html_url }, ...(commit ? { commit } : {}), base };
 }
 

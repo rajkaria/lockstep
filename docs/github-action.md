@@ -123,7 +123,7 @@ Every input is optional.
 | `falkordb-url` | `''` | A FalkorDB that keeps the graph between runs (decisions, verdicts, run history). Empty: the throwaway FalkorDB the job starts. |
 | `org` | `''` | The graph name on `falkordb-url`; ignored without it. Empty: the CLI's default, the owner of the repository lowercased (the input's description in `action.yml` says `falkordb`, which is what that rule gives for FalkorDB's repositories). |
 | `reindex` | `'false'` | With `falkordb-url`: `'true'` re-indexes this repository and `also-index` at their default branch heads before the check. |
-| `cache` | `'true'` | Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the Staleproof version, the repository, `also-index` and the base commit: a later run on the same base skips indexing, and an older dump is re-indexed with only the changed files parsed. Ignored with `falkordb-url`. |
+| `cache` | `'true'` | Keep the job's graph (a FalkorDB dump) and the parse cache between runs with actions/cache, keyed by the Staleproof version (with `version: source`, a hash of the action's source), the repository, `also-index` and the base commit: a later run on the same base skips indexing, and an older dump is re-indexed with only the changed files parsed. Ignored with `falkordb-url`. |
 | `github-token` | `${{ github.token }}` | Reads the repository (clones, the GitHub API, file contents) and posts the comment. Passed as `GITHUB_TOKEN` to Staleproof and as `GH_TOKEN` to the GitHub CLI. |
 | `version` | `'0.6.0'` | The `staleproof` npm version to run, or `source` to build the CLI from the action's checkout. When that version is not on npm, the CLI is built from the action's source. |
 | `digest-webhook` | `''` | Audit mode: a Slack, Discord or other webhook (use a secret) to post the [docs digest](audit.md#weekly-digest-to-slack-or-discord) to after each audit. The digest's state is kept in the audit issue. |
@@ -218,7 +218,7 @@ The step runs only when the check proposed edits (the comment then ends its verd
 staleproof patch "$PR_URL" --open-pr --in-repo --base "<the pull request's head branch>" --only "<this repository>"
 ```
 
-which creates or resets the branch `staleproof/docs-<owner>-<repo>-<number>` at the head of the pull request's branch, commits each edited file in this repository, and opens a pull request from it into the pull request's branch (or reuses the open one). Edits in other repositories (an `also-index` docs site) are left to `staleproof patch` by hand, since the job's token can write only to its own repository. When the step cannot open it, it warns `Could not open the docs fix pull request (the job needs contents: write and pull-requests: write).` and the job continues.
+which creates or resets the branch `staleproof/docs-<owner>-<repo>-<number>` at the head of the pull request's branch, commits each edited file in this repository, and opens a pull request from it into the pull request's branch (or reuses the open one). Each edit is applied to the file as the pull request's branch has it, so the pull request's own docs changes are kept; a file the pull request changed where an edit applies is left out and named in the docs pull request. Edits in other repositories (an `also-index` docs site) are left to `staleproof patch` by hand, since the job's token can write only to its own repository. When the step cannot open it, it warns `Could not open the docs fix pull request (the job needs contents: write and pull-requests: write, and the repository must let GitHub Actions create pull requests; see the log above).` and the job continues.
 
 GitHub does not start workflows for pull requests a workflow's own `GITHUB_TOKEN` opens, so the docs fix pull request gets no checks of its own unless you pass another token as `github-token`.
 
@@ -262,7 +262,7 @@ A low API coverage lowers the score but never opens the issue on its own: the is
 
 ## Fix the docs every week
 
-`mode: fix` is Renovate for docs: on a schedule it lints the default branch, applies every fix that passes re-checking on the branch `staleproof/fix-docs`, and keeps one pull request, `Staleproof: fix N stale docs references`, with a table of the fixes and the evidence for each. Each run rebuilds the branch from the default branch and updates the same pull request; when nothing is left it closes it. A pull request you close without merging is not reopened until the fixes change. It needs no FalkorDB and no model key.
+`mode: fix` is Renovate for docs: on a schedule it lints the default branch, applies every fix that passes re-checking on the branch `staleproof/fix-docs`, and keeps one pull request, `Staleproof: fix N stale docs references`, with a table of the fixes and the evidence for each. Each run rebuilds the branch from the default branch and updates the same pull request; when nothing is left it closes it. A pull request you close without merging is not reopened until the fixes change (one Staleproof closed itself because nothing was left does not count: if the same drift comes back, it opens a new one). It needs no FalkorDB and no model key.
 
 ```yaml
 # .github/workflows/staleproof-fix.yml
@@ -283,7 +283,7 @@ jobs:
           mode: fix
 ```
 
-The same file is [examples/staleproof-fix.yml](../examples/staleproof-fix.yml). Staleproof writes only the branch `staleproof/fix-docs`; it never pushes to another branch. Pull requests opened with the default `GITHUB_TOKEN` do not start other workflows; use a token of your own (`github-token`) if the fix pull request should run your CI.
+The same file is [examples/staleproof-fix.yml](../examples/staleproof-fix.yml). Staleproof writes only the branch `staleproof/fix-docs`; it never pushes to another branch. The workflow's token can open the pull request only when the repository allows it: turn on **Allow GitHub Actions to create and approve pull requests** (Settings → Actions → General → Workflow permissions; off by default for new repositories and organizations), or pass a token of your own as `github-token`. Without it the run pushes the branch and fails with `GitHub Actions may not open pull requests in <owner/name>, so the fixes wait on the branch staleproof/fix-docs` and the link that opens the pull request by hand. The same setting applies to `open-docs-pr`. Pull requests opened with the default `GITHUB_TOKEN` do not start other workflows; use a token of your own (`github-token`) if the fix pull request should run your CI.
 
 ## Release gate
 

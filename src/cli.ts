@@ -686,9 +686,10 @@ program
           target: opts.inRepo ? 'same-repo' : opts.upstream ? 'upstream' : 'fork',
           base: opts.base,
           only: opts.only?.map(parseRepoName),
+          log,
         });
         if (!opened.length) log('no pull request opened: no proposed edit is in a repository this token may write to');
-        for (const o of opened) console.log(`opened ${o.url} (${o.target})`);
+        for (const o of opened) console.log(`opened ${o.url} (${o.target})${o.skipped?.length ? `; left out: ${o.skipped.map((x) => x.path).join(', ')}` : ''}`);
       }
     });
   });

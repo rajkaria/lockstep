@@ -81,6 +81,19 @@ interface GhPull {
   head: { sha: string; ref: string };
 }
 
+/**
+ * GitHub's 403 when a workflow's GITHUB_TOKEN opens a pull request in a repository that does not let
+ * GitHub Actions create pull requests (the default for new repositories and organizations).
+ */
+export function actionsMayNotOpenPulls(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b403\b/.test(msg) && /not permitted to create or approve pull requests/i.test(msg);
+}
+
+/** What to do about `actionsMayNotOpenPulls`: the repository setting, or a token of one's own. */
+export const ALLOW_ACTIONS_PULLS =
+  'turn on "Allow GitHub Actions to create and approve pull requests" (Settings → Actions → General → Workflow permissions; an organization can turn it off for all its repositories), or pass a GitHub App or personal access token as `github-token`';
+
 export async function githubJson<T>(path: string, opts: GitHubOptions = {}, init: RequestInit = {}): Promise<T> {
   const f = opts.fetchImpl ?? fetch;
   const res = await f(`https://api.github.com${path}`, {

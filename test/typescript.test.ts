@@ -5,7 +5,7 @@ import { auditDocs } from '../src/audit.js';
 import type { OrgGraph } from '../src/graph/client.js';
 import { indexOrg } from '../src/indexer/index.js';
 import { classifyFile } from '../src/indexer/repo.js';
-import { packageOf, readManifest, relativeResolver, tsModuleNames } from '../src/indexer/tsmodules.js';
+import { packageOf, readManifest, relativeResolver, tsModuleNames, uniquePackages } from '../src/indexer/tsmodules.js';
 import { bareModule, extractTs, normalizeType, npmToken } from '../src/indexer/typescript.js';
 import { diffWith } from '../src/pr/changes.js';
 import { analyzeChanges, contentSource, WORKTREE } from '../src/pr/local.js';
@@ -77,6 +77,15 @@ export * from './star';
     expect(pkg.entries.slice(0, 2)).toEqual(['packages/core/dist/index.ts', 'packages/core/dist/index.tsx']);
     expect(pkg.entries).toContain('packages/core/src/index.ts');
     expect(readManifest('', JSON.stringify({ name: 'site', private: true }))).toBeUndefined();
+    // A VS Code extension is not a library anyone imports, even when it shares the package's name.
+    expect(readManifest('editors/vscode', JSON.stringify({ name: 'staleproof', main: './dist/extension.cjs', engines: { vscode: '^1.90.0' } }))).toBeUndefined();
+    // Two manifests with one name: the shallower one is the package (`examples/` copies, fixtures).
+    const twins = uniquePackages([
+      readManifest('examples/fork/core', JSON.stringify({ name: '@acme/core' }))!,
+      pkg,
+      readManifest('', JSON.stringify({ name: 'root' }))!,
+    ]);
+    expect(twins.map((p) => `${p.name}@${p.dir}`)).toEqual(['@acme/core@packages/core', 'root@']);
     const names = tsModuleNames(['packages/core/src/index.ts', 'packages/core/src/graph/client.ts', 'tools/x.ts'], [pkg]);
     expect([...names].map(([p, n]) => `${p} → ${n.module}`)).toEqual([
       'packages/core/src/index.ts → js-acme-core',

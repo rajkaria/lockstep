@@ -89,6 +89,19 @@ describe('runFixPr (Renovate for docs)', () => {
     expect(gh.state.issueComments.at(-1)!.body).toContain('Nothing left to fix');
     expect((await run()).action).toBe('none');
   });
+
+  it('opens a pull request again when drift it closed for comes back: closing it was not a person declining it', async () => {
+    // Found on rajkaria/staleproof-action-test#5: Staleproof closed it (fixed by hand), and the same drift coming back
+    // (a revert of the hand fix) was then taken as "closed without merging" and never proposed again.
+    expect(gh.state.pulls[0]!.body).toContain('<!-- staleproof:fix-docs closed-by-staleproof -->');
+    expect(gh.state.pulls[0]!.body).not.toMatch(/staleproof:fix-docs fixes=/);
+    git(dir, 'revert', '--no-edit', 'HEAD');
+    know(gh, dir);
+    const r = await run();
+    expect(r.action).toBe('opened');
+    expect(r.pr?.number).toBe(2);
+    expect(gh.state.pulls.map((p) => p.state)).toEqual(['closed', 'open']);
+  });
 });
 
 describe('runFixPr: a closed pull request and the branch guard', () => {
@@ -114,6 +127,37 @@ describe('runFixPr: a closed pull request and the branch guard', () => {
     know(gh, dir);
     expect((await run()).action).toBe('opened');
     expect(gh.state.pulls).toHaveLength(2);
+  });
+
+  it('says which setting to change when the repository does not let GitHub Actions open pull requests', async () => {
+    // Found on rajkaria/staleproof-action-test: GitHub's default refuses the workflow token's `POST /pulls` with 403,
+    // and the Action only said "the job needs contents: write and pull-requests: write", which it had.
+    const gh = fakeGitHub('acme/fix-app');
+    know(gh, dir);
+    gh.state.actionsMayOpenPulls = false;
+    const client = { token: 't', fetchImpl: gh.fetch };
+    const run = () => runFixPr({ repo: 'acme/fix-app', tree: worktreeTree(dir, 'acme/fix-app'), fixes: { cache: false } }, client);
+    const err = (await run().catch((e: Error) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/^GitHub Actions may not open pull requests in acme\/fix-app, so the fixes wait on the branch staleproof\/fix-docs: /);
+    expect(err.message).toContain('"Allow GitHub Actions to create and approve pull requests" (Settings → Actions → General → Workflow permissions');
+    expect(err.message).toContain('or pass a GitHub App or personal access token as `github-token`');
+    expect(err.message).toContain('https://github.com/acme/fix-app/compare/main...staleproof/fix-docs?expand=1');
+    // The branch is pushed; only the pull request is missing.
+    expect(gh.state.refs.has('staleproof/fix-docs')).toBe(true);
+    expect(gh.state.pulls).toHaveLength(0);
+    // Once the setting is on, the next run opens it from the branch already there.
+    gh.state.actionsMayOpenPulls = true;
+    expect((await run()).action).toBe('opened');
+    expect(gh.state.pulls).toHaveLength(1);
+    // Any other refusal is passed on as it is.
+    const other = fakeGitHub('acme/fix-app');
+    know(other, dir);
+    const fetch403 = (async (input: string | URL | Request, init: RequestInit = {}) =>
+      String(input).endsWith('/pulls') && init.method === 'POST' ? new Response(JSON.stringify({ message: 'Resource not accessible by integration' }), { status: 403 }) : other.fetch(input, init)) as typeof fetch;
+    await expect(runFixPr({ repo: 'acme/fix-app', tree: worktreeTree(dir, 'acme/fix-app'), fixes: { cache: false } }, { token: 't', fetchImpl: fetch403 })).rejects.toThrow(
+      /^GitHub POST \/repos\/acme\/fix-app\/pulls failed: 403 .*Resource not accessible by integration/,
+    );
   });
 
   it('commits a linked agent file as the file it points to', async () => {
@@ -156,7 +200,8 @@ describe('runFixPr: a closed pull request and the branch guard', () => {
       { branch: 'main', sha: 'abcdef1234' },
     );
     expect(body).toContain('| [`README.md:3`](https://github.com/acme/x/blob/abc/README.md#L3) | `link-broken` | The link target `docs/a\\|b.md` does not exist. |');
-    expect(body).toContain('no longer match the code at `main` (abcdef1)');
+    // One fix: singular wording (seen on the e2e fix pull request, "1 docs reference ... that no longer match").
+    expect(body).toContain('Staleproof found 1 docs reference in 1 file that no longer matches the code at `main` (abcdef1), and its fix. The fix was re-checked before it was proposed');
   });
 });
 

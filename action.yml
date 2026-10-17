@@ -145,7 +145,13 @@ runs:
         # `grep` exits 1 when also-index is empty; under pipefail that would fail the step.
         with_hash=$(echo "$WITH" | tr ', ' '\n\n' | { grep -v '^$' || true; } | sort -u | tr '\n' ' ' | sha256sum | cut -c1-10)
         version="$VERSION"
-        [ "$VERSION" = "source" ] && version="source-${ACTION_REF:-local}"
+        if [ "$VERSION" = "source" ]; then
+          # A ref like `main` moves: key a source build by the action's own files too, or a dump an older build wrote
+          # stays an exact hit for that base commit, is discarded on every run and never replaced.
+          src_hash=$(cd "${GITHUB_ACTION_PATH:-.}" && { find src package.json package-lock.json -type f -print0 2>/dev/null || true; } \
+            | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)
+          version="source-${ACTION_REF:-local}-${src_hash}"
+        fi
         prefix="staleproof-${version}-${REPO}-${with_hash}-"
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
         echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
@@ -393,7 +399,7 @@ runs:
         if ! grep -q 'Proposed edits:' "$REPORT"; then echo "No proposed docs edits."; exit 0; fi
         # Into the pull request's own branch, so the docs fix lands with the code change.
         $CLI patch "$PR_URL" --open-pr --in-repo --base "$HEAD_REF" --only "$REPO" \
-          || echo "::warning::Could not open the docs fix pull request (the job needs contents: write and pull-requests: write)."
+          || echo "::warning::Could not open the docs fix pull request (the job needs contents: write and pull-requests: write, and the repository must let GitHub Actions create pull requests; see the log above)."
 
     - name: Audit the docs
       id: audit
@@ -507,10 +513,15 @@ runs:
         CLI: ${{ steps.cli.outputs.cli }}
       run: |
         out="$RUNNER_TEMP/staleproof-fix.json"
-        if ! $CLI fix-pr "$REPO" --json > "$out"; then
-          echo "::error::staleproof fix-pr failed; the job needs contents: write and pull-requests: write (see examples/staleproof-fix.yml)."
+        err="$RUNNER_TEMP/staleproof-fix.log"
+        if ! $CLI fix-pr "$REPO" --json > "$out" 2> "$err"; then
+          cat "$err" >&2
+          # The CLI's own reason (e.g. the repository does not let GitHub Actions open pull requests) goes in the annotation.
+          reason=$(grep '^staleproof: ' "$err" | tail -1 | sed -E 's/^staleproof: //' || true)
+          echo "::error::staleproof fix-pr failed: ${reason:-see the log above}. The job needs contents: write and pull-requests: write (see examples/staleproof-fix.yml)."
           exit 1
         fi
+        cat "$err" >&2
         node -e '
           const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
           console.log(r.output);

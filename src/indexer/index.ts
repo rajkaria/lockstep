@@ -11,7 +11,7 @@ import type { MdDoc } from './markdown.js';
 import { extractPython, type PyModule } from './python.js';
 import { extractTs } from './typescript.js';
 import { extractGoFile, parseGoPackages, type GoExtractOptions } from './go.js';
-import { packageModules, readManifest, relativeResolver, tsModuleNames, type NpmPackage } from './tsmodules.js';
+import { packageModules, readManifest, relativeResolver, tsModuleNames, uniquePackages, type NpmPackage } from './tsmodules.js';
 import { classifyFile, moduleNames, pythonSourceRoots, type Checkout, type FileKind } from './repo.js';
 import { symbolId, SymbolTable } from './resolve.js';
 import { fileId, writeBatched } from './write.js';
@@ -81,7 +81,7 @@ export async function npmPackages(dir: string, paths: string[]): Promise<NpmPack
     const pkg = readManifest(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', await readFile(join(dir, path), 'utf8').catch(() => ''));
     if (pkg) out.push(pkg);
   }
-  return out;
+  return uniquePackages(out);
 }
 
 /** Remembers each file's parse by content (the local parse cache, `src/lint/cache.ts`). */

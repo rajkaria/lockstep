@@ -77,6 +77,7 @@ export function workflowYaml(d: Detected, docsRepo?: string): string {
     out.push(
       '',
       '  fix:',
+      '    # Opens the fix pull request only when Settings → Actions → General allows GitHub Actions to create pull requests.',
       "    if: github.event_name == 'schedule'",
       '    runs-on: ubuntu-latest',
       '    permissions:',

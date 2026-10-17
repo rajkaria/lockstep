@@ -1,7 +1,7 @@
 import { extractPython, type DefKind, type PyDef, type PyModule } from '../indexer/python.js';
 import { extractTs } from '../indexer/typescript.js';
 import { extractGoFile, parseGoPackages } from '../indexer/go.js';
-import { readManifest, relativeResolver, tsModuleNames, type NpmPackage, type TsModuleName } from '../indexer/tsmodules.js';
+import { readManifest, relativeResolver, tsModuleNames, uniquePackages, type NpmPackage, type TsModuleName } from '../indexer/tsmodules.js';
 import { classifyFile, git, moduleNames, pythonSourceRoots } from '../indexer/repo.js';
 import type { PullRequestInfo } from './github.js';
 
@@ -142,7 +142,7 @@ async function tsNamesAt(source: DiffSource, sha: string): Promise<Map<string, T
     const pkg = text ? readManifest(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', text) : undefined;
     if (pkg) packages.push(pkg);
   }
-  return tsModuleNames(all.filter((p) => classifyFile(p) === 'typescript'), packages);
+  return tsModuleNames(all.filter((p) => classifyFile(p) === 'typescript'), uniquePackages(packages));
 }
 
 async function diffTs(source: DiffSource, repo: string, before: string, after: string, changed: ChangedFile[]): Promise<ChangedSymbol[]> {

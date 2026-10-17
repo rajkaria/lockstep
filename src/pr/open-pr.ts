@@ -1,5 +1,6 @@
-import type { DocsPatch } from '../patch.js';
-import { githubJson, type GitHubOptions } from './github.js';
+import { applyPatch } from 'diff';
+import type { DocsPatch, PatchedFile } from '../patch.js';
+import { actionsMayNotOpenPulls, ALLOW_ACTIONS_PULLS, githubJson, type GitHubOptions } from './github.js';
 
 export interface OpenPrOptions extends GitHubOptions {
   token: string;
@@ -14,6 +15,8 @@ export interface OpenPrOptions extends GitHubOptions {
   only?: string[];
   /** Poll interval while GitHub creates a fork. */
   pollMs?: number;
+  /** Progress and files left out (`same-repo`). */
+  log?: (msg: string) => void;
 }
 
 export interface OpenedPr {
@@ -21,6 +24,8 @@ export interface OpenedPr {
   url: string;
   target: OpenPrOptions['target'];
   branch: string;
+  /** `same-repo`: files left out because the target branch changed them where the edit applies. */
+  skipped?: { path: string; reason: string }[];
 }
 
 /**
@@ -84,35 +89,99 @@ export async function openDocsPr(patch: DocsPatch, opts: OpenPrOptions): Promise
 
 type Gh = <T>(path: string, init?: RequestInit) => Promise<T>;
 
-/** A branch in each docs repository itself (no fork), its files updated, and a pull request into `base`. */
+/**
+ * A file's edited text on the target branch. The edit was written against the indexed commit
+ * (`f.before`); the target branch (a pull request's own branch, or a default branch that moved)
+ * may differ. Unchanged: the edited file as it is. Changed elsewhere: the edit applied like
+ * `git apply` (its context lines must match). Changed where the edit applies: undefined, so the
+ * branch's own changes are never overwritten with the indexed text.
+ */
+export function rebaseEdit(f: Pick<PatchedFile, 'before' | 'after' | 'diff'>, onBranch: string): string | undefined {
+  if (onBranch === f.before) return f.after;
+  const merged = applyPatch(onBranch, f.diff);
+  return merged === false ? undefined : merged;
+}
+
+interface GhContent {
+  sha: string;
+  content?: string;
+  encoding?: string;
+}
+
+/** A file's text at a commit (contents API; files over 1 MB through the blob), or undefined when it is not there. */
+async function readAt(gh: Gh, repo: string, path: string, ref: string): Promise<{ sha: string; text: string } | undefined> {
+  const file = await gh<GhContent>(`/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`).catch((err: Error) => {
+    if (/not found|404/i.test(err.message)) return undefined;
+    throw err;
+  });
+  if (!file?.sha) return undefined;
+  const b64 = file.encoding === 'base64' && file.content ? file.content : (await gh<GhContent>(`/repos/${repo}/git/blobs/${file.sha}`)).content;
+  if (b64 === undefined) return undefined;
+  return { sha: file.sha, text: Buffer.from(b64, 'base64').toString('utf8') };
+}
+
+/**
+ * A branch in each docs repository itself (no fork), its files updated, and a pull request into `base`.
+ * Each edit is re-applied to the file as it is on `base`; a file `base` changed where the edit applies is
+ * left out (and named in the pull request), and a repository with nothing left gets no pull request.
+ */
 async function openInRepo(patch: DocsPatch, opts: OpenPrOptions, gh: Gh): Promise<OpenedPr[]> {
   const opened: OpenedPr[] = [];
+  const refused: string[] = [];
   const repos = [...new Set(patch.files.map((f) => f.repo))].filter((r) => !opts.only || opts.only.some((o) => o.toLowerCase() === r.toLowerCase()));
   for (const repo of repos) {
     const files = patch.files.filter((f) => f.repo === repo);
     const info = await gh<{ default_branch: string }>(`/repos/${repo}`);
     const base = opts.base ?? info.default_branch;
     const baseSha = (await gh<{ object: { sha: string } }>(`/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`)).object.sha;
+    const writes: { path: string; sha: string; text: string }[] = [];
+    const skipped: { path: string; reason: string }[] = [];
+    for (const f of files) {
+      const at = await readAt(gh, repo, f.path, baseSha);
+      const text = at ? rebaseEdit(f, at.text) : undefined;
+      if (at && text !== undefined) writes.push({ path: f.path, sha: at.sha, text });
+      else skipped.push({ path: f.path, reason: at ? `${base} has other text where the edit applies (the edit was written against ${f.sha.slice(0, 7)})` : `not on ${base}` });
+    }
+    if (!writes.length) {
+      refused.push(`${repo}: ${skipped.map((x) => `${x.path} (${x.reason})`).join(', ')}`);
+      opts.log?.(`no pull request in ${repo}: ${skipped.map((x) => `${x.path}: ${x.reason}`).join('; ')}`);
+      continue;
+    }
+    for (const x of skipped) opts.log?.(`left out of the pull request in ${repo}: ${x.path}: ${x.reason}`);
     const branch = `staleproof/docs-${patch.pr.repo.replace('/', '-')}-${patch.pr.number}`;
     await gh(`/repos/${repo}/git/refs`, { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseSha }) }).catch(async (err: Error) => {
       if (!/already exists|422/.test(err.message)) throw err;
       await gh(`/repos/${repo}/git/refs/heads/${branch}`, { method: 'PATCH', body: JSON.stringify({ sha: baseSha, force: true }) });
     });
-    for (const f of files) {
-      const current = await gh<{ sha: string }>(`/repos/${repo}/contents/${encodePath(f.path)}?ref=${encodeURIComponent(branch)}`);
-      await gh(`/repos/${repo}/contents/${encodePath(f.path)}`, {
+    for (const w of writes) {
+      // The branch is at baseSha, so the file's blob there is the one just read.
+      await gh(`/repos/${repo}/contents/${encodePath(w.path)}`, {
         method: 'PUT',
         body: JSON.stringify({
-          message: `docs: update ${f.path} for ${patch.pr.repo}#${patch.pr.number}`,
-          content: Buffer.from(f.after, 'utf8').toString('base64'),
-          sha: current.sha,
+          message: `docs: update ${w.path} for ${patch.pr.repo}#${patch.pr.number}`,
+          content: Buffer.from(w.text, 'utf8').toString('base64'),
+          sha: w.sha,
           branch,
         }),
       });
     }
+    const body = skipped.length
+      ? `${patch.body}\n\n**Not included** (\`${base}\` has other text where these edits apply; check the pull request again for edits that fit it):\n\n${skipped.map((x) => `- \`${x.path}\`: ${x.reason}`).join('\n')}`
+      : patch.body;
     const existing = await gh<{ html_url: string }[]>(`/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`);
-    const pr = existing[0] ?? (await gh<{ html_url: string }>(`/repos/${repo}/pulls`, { method: 'POST', body: JSON.stringify({ title: patch.title, body: patch.body, head: branch, base }) }));
-    opened.push({ repo, url: pr.html_url, target: 'same-repo', branch });
+    const pr =
+      existing[0] ??
+      (await gh<{ html_url: string }>(`/repos/${repo}/pulls`, { method: 'POST', body: JSON.stringify({ title: patch.title, body, head: branch, base }) }).catch((err: Error) => {
+        if (!actionsMayNotOpenPulls(err)) throw err;
+        throw new Error(
+          `GitHub Actions may not open pull requests in ${repo}, so the docs fix waits on the branch ${branch}: ${ALLOW_ACTIONS_PULLS}. ` +
+            `To open this one by hand: https://github.com/${repo}/compare/${base}...${branch}?expand=1`,
+        );
+      }));
+    opened.push({ repo, url: pr.html_url, target: 'same-repo', branch, ...(skipped.length ? { skipped } : {}) });
+  }
+  if (!opened.length && refused.length) {
+    throw new Error(`the docs fix was not opened: the target branch has other text where each edit applies (${refused.join('; ')}). Check the pull request again so the edits are written against its branch.`);
   }
   return opened;
 }
