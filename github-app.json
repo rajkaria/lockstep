@@ -4,7 +4,7 @@
   "description": "Checks every pull request for the docs it makes wrong: commands, paths, links, env vars, CLI flags and examples in READMEs, docs and AI agent files. One check run, one comment, suggested fixes. No workflow file.",
   "public": true,
   "hook_attributes": {
-    "url": "https://www.staleproof.dev/api/github/webhook",
+    "url": "https://staleproof.dev/api/github/webhook",
     "active": true
   },
   "setup_url": "https://staleproof.dev/#/docs/github-app",

@@ -113,7 +113,7 @@ Both can run on one repository; they keep separate comments.
 
 For a self-hosted Staleproof server ([Deploy](DEPLOY.md)):
 
-1. `npx tsx scripts/github-app-register.ts` (add `--org <org>` for an organisation, `--name` if "Staleproof" is taken). It serves a page on localhost that sends [github-app.json](../github-app.json) to GitHub; click **Create GitHub App**, and GitHub returns to the script, which writes the App's id, private key (base64) and webhook secret, plus a new `CRON_SECRET`, to the git-ignored `.env.app` and prints the commands below. Nothing secret is printed. Change the webhook URL in `github-app.json` first if your server is not staleproof.dev, and give the host that answers without a redirect (`www.staleproof.dev` here): GitHub does not follow redirects when it delivers a webhook.
+1. `npx tsx scripts/github-app-register.ts` (add `--org <org>` for an organisation, `--name` if "Staleproof" is taken). It serves a page on localhost that sends [github-app.json](../github-app.json) to GitHub; click **Create GitHub App**, and GitHub returns to the script, which writes the App's id, private key (base64) and webhook secret, plus a new `CRON_SECRET`, to the git-ignored `.env.app` and prints the commands below. Nothing secret is printed. Change the webhook URL in `github-app.json` first if your server is not staleproof.dev, and give the host that answers without a redirect (`staleproof.dev` here; `www.` redirects to it): GitHub does not follow redirects when it delivers a webhook.
 2. Copy them to the server's environment, without printing them:
 
    ```bash

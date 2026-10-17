@@ -4,7 +4,7 @@ import type { Detected } from './detect.js';
 export const ACTION_REF = 'rajkaria/staleproof@v1';
 export const SITE = 'https://staleproof.dev';
 /** The workflow gets a weekly docs-fix job once the Action has `mode: fix`. */
-export const ACTION_HAS_FIX_MODE = false;
+export const ACTION_HAS_FIX_MODE = true;
 /** The VS Code extension id, once it is published (then `init` recommends it in `.vscode/extensions.json`). */
 export const VSCODE_EXTENSION: string | undefined = undefined;
 
@@ -77,8 +77,10 @@ export function workflowYaml(d: Detected, docsRepo?: string): string {
     out.push(
       '',
       '  fix:',
-      '    # Opens the fix pull request only when Settings → Actions → General allows GitHub Actions to create pull requests.',
+      '    # Opens the fix pull request only when Settings → Actions → General allows GitHub Actions to create pull requests;',
+      '    # until then the fixes wait on the branch staleproof/fix-docs and the run says how to open it, without failing.',
       "    if: github.event_name == 'schedule'",
+      '    continue-on-error: true',
       '    runs-on: ubuntu-latest',
       '    permissions:',
       '      contents: write',

@@ -58,6 +58,20 @@ jobs:
         # with:
         #   also-index: your-org/docs   # docs in another repository
 
+  fix:
+    # Opens the fix pull request only when Settings → Actions → General allows GitHub Actions to create pull requests;
+    # until then the fixes wait on the branch staleproof/fix-docs and the run says how to open it, without failing.
+    if: github.event_name == 'schedule'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: rajkaria/staleproof@v1
+        with:
+          mode: fix
+
 --- README.md
 +++ README.md
 @@ -1,5 +1,5 @@
